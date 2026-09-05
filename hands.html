@@ -85,8 +85,10 @@
     // Cache-bust every module on load. This page may itself be served from cache, but the
     // stamp is computed at runtime, so the code it pulls in is always current — which is
     // what matters when the machine that tests this is not the machine that edits it.
+    // Stamped when this page loads, not a running clock: if it does not change after a
+    // refresh, the page came from cache and any new code has not arrived.
     const stamp = Date.now();
-    document.getElementById('build').textContent = 'build ' + new Date().toTimeString().slice(0, 8);
+    document.getElementById('build').textContent = 'loaded ' + new Date().toTimeString().slice(0, 8);
     import(`./hands.js?v=${stamp}`);
   </script>
 </body>

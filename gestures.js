@@ -16,7 +16,13 @@ export const PINCH_THRESHOLD = 0.25;
 // How far the pinch point must sit from the wrist, in palm lengths. A real pinch happens
 // out at the end of the fingers; in a fist every tip curls back toward the palm, which is
 // what made a fist read as a pinch when the back of the hand faced the camera.
-export const MIN_PINCH_REACH = 1.15;
+//
+// Measured on a real hand 2026-09-05: a deliberate pinch averages ~1.20, so the original
+// 1.15 left only 0.05 of margin and would have rejected the frames that fell below the
+// average — pinch dropping out mid-gesture. Loosened to 1.00. This guard does not have to
+// catch every fist on its own: the Closed_Fist veto below is the primary defence, and this
+// only has to cover the case where the classifier misses, i.e. the back of the hand.
+export const MIN_PINCH_REACH = 1.0;
 
 // Landmark x and y are each normalized against their own axis, so on a 16:9 frame a
 // horizontal gap reads ~1.8x shorter than the same gap measured vertically. Undo that

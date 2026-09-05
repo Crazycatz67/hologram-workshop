@@ -61,8 +61,14 @@
 - **Landmark accuracy degrades under fast motion, worst at the thumb.** Inherent to MediaPipe rather than something this code causes; the thumb is its least stable joint. Phase 4's stabilizer addresses the resulting action misfires, though not the landmark drift itself.
 - **Resolved 2026-09-05:** pinch stays **thumb-to-index only**. Thumb-to-middle/ring/pinky deliberately do not register — those combinations are reserved as free slots for future gestures rather than folded into "pinch". Keeps the vocabulary unambiguous and means a later thumb+middle gesture can't collide with scale.
 
+**Second live test — 2026-09-05, after the fix:**
+- **The fist false positive is fixed and confirmed on a real hand.**
+- One follow-on bug found and fixed: the label drawn under each hand still printed a bare gap number for a rejected pinch, so a blocked fist read as `pinch 0.18`. Pinch state is rendered in two places (the readout panel and the canvas label) and only one had been updated — they now share a single formatter.
+- **`MIN_PINCH_REACH` calibrated from real hands: a deliberate pinch averages ~1.20.** The initial 1.15 left only 0.05 of margin, and since that figure is an average, the frames below it would have dropped the pinch mid-gesture. Loosened to **1.00**, verified by sweep: 0.70–0.87 rejects as curled, 1.00+ accepts. The guard can afford to be loose because `Closed_Fist` is the primary veto and this only backstops the back-of-hand case the classifier misses.
+- **GitHub Pages caching was masking deploys.** Pages sends `Cache-Control: max-age=600` with no way to override it, so pushes stayed invisible on the test machine for ten minutes. Each entry point now stamps a version onto its module URL and propagates it to sibling imports; a `loaded HH:MM:SS` marker in the HUD makes a stale page obvious.
+
 **Known risks / unknowns:**
-- `MIN_PINCH_REACH = 1.15` is calibrated against synthetic geometry only — the on-screen `reach` readout exists so it can be set from real hands.
+- `MIN_PINCH_REACH = 1.0` is calibrated against real pinches (~1.20) but only synthetic fists (0.70–0.87). What a **real** fist reads is still unmeasured — if real fists come in above 1.0 with the back of the hand turned, the classifier veto is carrying the whole load.
 - Pinch is exposed as a raw per-frame threshold with **no hysteresis**, so it will chatter when held near the boundary. That is deliberate — Phase 4 inserts the ASL project's `stabilizer.js` between this and any action, and duplicating it here would pre-empt that.
 - Detection/tracking confidence (80–95%) is validated under good lighting only — accuracy is known to drop at 1.5m+, in low light, and under occlusion. Treat this as a documented limitation, not a Phase 1 blocker.
 
