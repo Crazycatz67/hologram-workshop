@@ -9,23 +9,24 @@ manipulates a *downloaded* model. This one manipulates a scan of an object you a
 
 ## Live
 
-No install, no server — both pages run entirely in the browser:
+No install, no server — every page runs entirely in the browser:
 
-- **[Model viewer](https://crazycatz67.github.io/hologram-workshop/)** — the scanned chair, drag to orbit
-- **[Hand tracking](https://crazycatz67.github.io/hologram-workshop/hands.html)** — click "start camera", then hold your hands up
+- **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience: holographic chair, closed fist to move it, two-hand pinch to scale and rotate
+- **[Model viewer](https://crazycatz67.github.io/hologram-workshop/)** — the hologram alone, drag to orbit, no camera needed
+- **[Hand tracking](https://crazycatz67.github.io/hologram-workshop/hands.html)** — tracking on its own, with the raw pinch/gesture numbers on screen
 
-The hand tracking needs camera permission. On macOS you may have to allow it twice: once in
-the browser, and once in System Settings → Privacy & Security → Camera.
+Gesture pages need camera permission. On macOS you may have to allow it twice: once in the
+browser, and once in System Settings → Privacy & Security → Camera.
 
 ## Status
 
 | Phase | State |
 | --- | --- |
-| 0 — Capture the object | Done. `assets/chair/chair.glb`, 76k triangles, one draw call |
-| 1 — Hand tracking foundation | Built; awaiting a live webcam check |
+| 0 — Capture the object | Done. `assets/chair/chair.glb`, cropped to just the chair |
+| 1 — Hand tracking foundation | Done, confirmed on a real webcam |
 | 2 — Static model in the browser | Done. Three.js + OrbitControls, no build step |
-| 3 — Hologram shader | Not started |
-| 4 — Gesture-driven manipulation | Not started |
+| 3 — Hologram shader | Done. Fresnel glow + scanlines, tunable live |
+| 4 — Gesture-driven manipulation | Core done — grab/move, two-hand scale/rotate. Push/pull and explode not built yet |
 | 5 — Polish and stretch | Not started |
 
 Full breakdown in [ROADMAP.md](ROADMAP.md); working conventions in [CLAUDE.md](CLAUDE.md).
@@ -45,15 +46,22 @@ Then open <http://localhost:8080>.
 
 | File | Role |
 | --- | --- |
-| `index.html`, `main.js` | Model viewer page and its bootstrap |
+| `hologram.html`, `hologram.js` | The combined page: hologram + gesture control |
+| `index.html`, `main.js` | Model viewer only (no camera) |
+| `hands.html`, `hands.js` | Hand tracking only, with raw gesture numbers on screen |
 | `scene.js` | Renderer, camera, lights, controls, render loop |
 | `loadModel.js` | GLB loader with OBJ+MTL fallback, and camera framing |
-| `hands.html`, `hands.js` | Hand tracking page and its loop |
+| `trimGeometry.js` | Crops scan geometry to a cylinder — removes whatever else got scanned around the object |
+| `HolographicMaterial.js` | The hologram shader (vendored MIT source, not an npm package) |
 | `camera.js` | Webcam setup and teardown |
 | `handTracker.js` | MediaPipe `GestureRecognizer`, two hands |
 | `gestures.js` | Pinch, two-hand span and angle |
 | `overlay.js` | Canvas skeleton and labels |
+| `stabilizer.js` | Hysteresis so a gesture needs a few consistent frames to start or stop |
+| `manipulator.js` | Maps stabilised gestures onto the model (grab/move, scale, rotate) |
 | `serve.py` | Static server that sends `no-store` |
+| `analyze_scan.py` | Suggests crop parameters for a new raw scan (see ROADMAP.md) |
 
-No bundler and no dependencies to install — Three.js and MediaPipe both load from a CDN
-via an import map.
+No bundler and no dependencies to install for the site itself — Three.js and MediaPipe
+both load from a CDN via an import map. `analyze_scan.py` is a local dev tool and needs
+`numpy`.
