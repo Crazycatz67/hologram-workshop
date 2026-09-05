@@ -17,6 +17,11 @@ const MAX_SCALE = 2.5;
 const MAX_MOVE_PER_FRAME = 0.15;
 const MAX_SPAN_RATIO_PER_FRAME = 1.5;
 const MAX_TWIST_PER_FRAME = Math.PI / 3;
+const MAX_PITCH_PER_FRAME = Math.PI / 3;
+
+// Radians of pitch per normalized frame-height the second hand moves — an untuned guess,
+// same as every other sensitivity constant here started out; needs a real hand to tune.
+const PITCH_SENSITIVITY = Math.PI;
 
 // Keeps the object's pivot within this fraction of the visible frustum at its own depth,
 // so a fast or erratic drag can never carry it fully off-screen — losing it that way had
@@ -78,10 +83,12 @@ export function createManipulator(object, camera) {
 
   let lastWrist = null;
   let lastTwist = null;
+  let lastPitchWrist = null;
   let lastSpan = null;
   let mode = MODE.IDLE;
 
   let angularVelocity = 0;
+  let pitchVelocity = 0;
   let linearVelocityX = 0;
   let linearVelocityY = 0;
 
@@ -91,6 +98,7 @@ export function createManipulator(object, camera) {
   function clearGrab() {
     lastWrist = null;
     lastTwist = null;
+    lastPitchWrist = null;
   }
 
   function clearTransform() {
@@ -106,6 +114,7 @@ export function createManipulator(object, camera) {
     clearGrab();
     clearTransform();
     angularVelocity = 0;
+    pitchVelocity = 0;
     linearVelocityX = 0;
     linearVelocityY = 0;
     mode = MODE.IDLE;
@@ -186,10 +195,17 @@ export function createManipulator(object, camera) {
   // rotate after live testing called it "janky and cluttered." Sets velocity rather than
   // applying position/rotation directly; applyMomentum() below does the actual moving, so
   // motion can keep coasting for a moment after the grab itself ends.
+  //
+  // If a second hand is also up, its raw vertical position independently drives pitch
+  // (tipping the object up/down) — requested directly ("I wanna rotate it vertically, not
+  // horizontally"). One hand holds and spins side-to-side, the other tips it, matching how
+  // you'd actually handle a real object with both hands. The second hand doesn't need any
+  // particular shape; it just needs to not be the hand already doing the grabbing.
   function setGrabVelocity(hands, aspect) {
     const hand = hands.find((h) => isFistLike(h.gesture, h.landmarks, aspect)) ?? hands[0];
     const wrist = wristOf(hand);
     const twist = handTwist(hand.landmarks, aspect);
+    const pitchHand = hands.find((h) => h !== hand);
 
     if (lastWrist) {
       // Landmark x runs left-to-right in the raw frame while the view is mirrored, so the
@@ -217,6 +233,17 @@ export function createManipulator(object, camera) {
       if (Math.abs(delta) < MAX_TWIST_PER_FRAME) angularVelocity = delta;
     }
 
+    if (pitchHand) {
+      const pitchWrist = wristOf(pitchHand);
+      if (lastPitchWrist) {
+        const dy = pitchWrist.y - lastPitchWrist.y;
+        if (Math.abs(dy) * PITCH_SENSITIVITY < MAX_PITCH_PER_FRAME) pitchVelocity = -dy * PITCH_SENSITIVITY;
+      }
+      lastPitchWrist = { y: pitchWrist.y };
+    } else {
+      lastPitchWrist = null;
+    }
+
     lastWrist = { x: wrist.x, y: wrist.y };
     lastTwist = twist;
   }
@@ -229,6 +256,15 @@ export function createManipulator(object, camera) {
       object.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), angularVelocity);
     }
     angularVelocity *= VELOCITY_DAMPING;
+
+    if (Math.abs(pitchVelocity) > MIN_ANGULAR_VELOCITY) {
+      // World X, not the object's own local X: yaw already changes what the object's
+      // local axes point in, and pitch should still mean "tip toward/away from the
+      // camera" regardless of however much it's currently spun — same reasoning as yaw
+      // using world Y rather than local Y.
+      object.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), pitchVelocity);
+    }
+    pitchVelocity *= VELOCITY_DAMPING;
 
     if (linearVelocityX * linearVelocityX + linearVelocityY * linearVelocityY > MIN_LINEAR_VELOCITY * MIN_LINEAR_VELOCITY) {
       object.position.x += linearVelocityX;

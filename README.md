@@ -11,7 +11,7 @@ manipulates a *downloaded* model. This one manipulates a scan of an object you a
 
 No install, no server — every page runs entirely in the browser:
 
-- **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience: closed fist to grab and move it or twist your wrist to spin it, two-hand pinch to scale it, clap open hands to reset it (press `D` to reveal the camera/tracking view, hidden by default — real 3D "ghost hands" in the scene are the normal feedback instead)
+- **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience: closed fist to grab and move it or twist your wrist to spin it left/right; raise your other hand and move it up/down to tilt it; two-hand pinch to scale it; clap open hands to reset it (press `D` to reveal the camera/tracking view, hidden by default — real 3D "ghost hands" in the scene are the normal feedback instead)
 - **[Model viewer](https://crazycatz67.github.io/hologram-workshop/)** — the hologram alone, drag to orbit, no camera needed
 - **[Hand tracking](https://crazycatz67.github.io/hologram-workshop/hands.html)** — tracking on its own, with the raw pinch/gesture numbers on screen
 
