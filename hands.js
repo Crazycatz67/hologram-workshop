@@ -1,6 +1,6 @@
 import { startCamera, stopCamera, describeCameraError } from './camera.js';
 import { createHandTracker, HAND_CONNECTIONS } from './handTracker.js';
-import { pinch, handSpan, handAngle } from './gestures.js';
+import { pinch, handSpan, handAngle, fingerReach } from './gestures.js';
 import { drawHands, sizeOverlayTo } from './overlay.js';
 
 const video = document.getElementById('cam');
@@ -71,7 +71,12 @@ function loop() {
     if (video.currentTime !== lastVideoTime) {
       lastVideoTime = video.currentTime;
       hands = tracker.read(video, performance.now());
-      for (const hand of hands) hand.pinch = pinch(hand.landmarks, aspect);
+      for (const hand of hands) {
+        // The recognizer's own classification is passed in so a Closed_Fist can veto a
+        // pinch, rather than both firing off the same balled-up hand.
+        hand.pinch = pinch(hand.landmarks, aspect, { gesture: hand.gesture });
+        hand.reach = fingerReach(hand.landmarks, aspect);
+      }
       updateReadout(hands, aspect);
     }
 
@@ -95,10 +100,19 @@ function updateReadout(hands, aspect) {
     return;
   }
 
-  const lines = hands.map(
-    (h) =>
-      `${h.handedness.padEnd(5)} ${h.gesture} (${h.score.toFixed(2)})  pinch ${h.pinch.ratio.toFixed(2)}${h.pinch.pinching ? ' ←' : ''}`
-  );
+  const lines = hands.flatMap((h) => {
+    const state = h.pinch.pinching
+      ? 'PINCH'
+      : h.pinch.rejectedBy
+        ? `blocked:${h.pinch.rejectedBy}`
+        : 'open';
+    const r = h.reach;
+    return [
+      `${h.handedness.padEnd(5)} ${h.gesture} (${h.score.toFixed(2)})`,
+      `      gap ${h.pinch.ratio.toFixed(2)}  reach ${h.pinch.reach.toFixed(2)}  ${state}`,
+      r ? `      tips t${r.thumb} i${r.index} m${r.middle} r${r.ring} p${r.pinky}` : ''
+    ].filter(Boolean);
+  });
 
   // Two-hand measurements are what Phase 4 turns into scale and rotate.
   if (hands.length === 2) {

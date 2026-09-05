@@ -53,8 +53,16 @@
 - Rahmawati, Andrean & Kustanto (2026), *Jurnal Ilmiah SINUS* 24(2) — FPS and confidence benchmarks, optimal distance.
 - ASL project's `handTracker.js` (structure only — the classifier underneath is being replaced) and `overlay.js` (canvas drawing pattern, reused as-is).
 
+**First live webcam test — 2026-09-05, on the Mac laptop via GitHub Pages:**
+- **FPS: ~60 with one hand, dropping to ~40 or lower with two.** Above the 25–30 target either way. The two-hand cost is expected — it is a second inference pass per frame.
+- **Handedness is correct**, and the two hands track independently with separate gestures. The suspected mirror inversion was wrong — that question is closed.
+- **A real pinch reads ~0.15**, so the original `PINCH_THRESHOLD = 0.4` was far too loose. Tightened to **0.25**.
+- **Bug found: a closed fist registered as a pinch**, especially with the back of the hand to the camera, and sometimes fired `Closed_Fist` and pinch simultaneously. Cause: pinch is measured in 2D projection, and in a fist the thumb and index tips collapse close together on screen. Measured on synthetic fist geometry, the gap ratio comes out at **0.178 — below even the tightened 0.25 threshold**, so tuning the threshold alone could not have fixed it. Fixed two ways: `Closed_Fist` from the recognizer now vetoes pinch outright, and a geometric guard (`MIN_PINCH_REACH`) rejects any pinch whose midpoint sits too close to the wrist, since a real pinch happens out at the fingertips while a fist curls everything back toward the palm. Synthetic separation is 1.67 (pinch) vs 0.70 (fist) against a 1.15 cutoff — **still needs confirming against a real hand**, which is why the live readout now prints `gap`, `reach` and per-fingertip distances.
+- **Landmark accuracy degrades under fast motion, worst at the thumb.** Inherent to MediaPipe rather than something this code causes; the thumb is its least stable joint. Phase 4's stabilizer addresses the resulting action misfires, though not the landmark drift itself.
+- **Open question:** only thumb-to-index counts as a pinch right now. Thumb-to-middle/ring/pinky do not light up. Whether those should be separate gestures or all count as "pinch" is a Phase 4 vocabulary decision, not yet made.
+
 **Known risks / unknowns:**
-- **Needs a real-hands test, in priority order:** (1) end-to-end FPS with the camera actually running; (2) `Closed_Fist` reliability as a grab trigger; (3) the pinch threshold — `PINCH_THRESHOLD = 0.4` in `gestures.js` is an untested guess and is the single most likely thing to need tuning; (4) **handedness may be inverted** — MediaPipe assigns Left/Right assuming a mirrored input, but the raw (unmirrored) frame is what gets fed to it while the display is mirrored, so the labels may read backwards. One-line fix in `toHands()` if so, but it needs a real hand to tell.
+- `MIN_PINCH_REACH = 1.15` is calibrated against synthetic geometry only — the on-screen `reach` readout exists so it can be set from real hands.
 - Pinch is exposed as a raw per-frame threshold with **no hysteresis**, so it will chatter when held near the boundary. That is deliberate — Phase 4 inserts the ASL project's `stabilizer.js` between this and any action, and duplicating it here would pre-empt that.
 - Detection/tracking confidence (80–95%) is validated under good lighting only — accuracy is known to drop at 1.5m+, in low light, and under occlusion. Treat this as a documented limitation, not a Phase 1 blocker.
 
