@@ -59,10 +59,19 @@ function drawSkeleton(ctx, points, connections, hand) {
   });
 }
 
+// Mirrors the state shown in the readout panel. Both surfaces render the same pinch
+// object, so they have to agree — printing a bare gap number next to a rejected pinch
+// reads as if the pinch registered.
+function pinchLabel(p) {
+  if (!p) return null;
+  if (p.pinching) return 'PINCH';
+  if (p.rejectedBy) return `no pinch (${p.rejectedBy})`;
+  return `gap ${p.ratio.toFixed(2)}`;
+}
+
 function drawLabel(ctx, points, hand, width) {
   const wrist = points[0];
-  const parts = [hand.handedness, hand.gesture !== 'None' ? hand.gesture : null];
-  if (hand.pinch) parts.push(hand.pinch.pinching ? 'PINCH' : `pinch ${hand.pinch.ratio.toFixed(2)}`);
+  const parts = [hand.handedness, hand.gesture !== 'None' ? hand.gesture : null, pinchLabel(hand.pinch)];
   const text = parts.filter(Boolean).join('  ·  ');
 
   const size = Math.max(14, width / 48);

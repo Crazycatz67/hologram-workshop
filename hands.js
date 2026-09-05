@@ -1,7 +1,13 @@
-import { startCamera, stopCamera, describeCameraError } from './camera.js';
-import { createHandTracker, HAND_CONNECTIONS } from './handTracker.js';
-import { pinch, handSpan, handAngle, fingerReach } from './gestures.js';
-import { drawHands, sizeOverlayTo } from './overlay.js';
+// GitHub Pages serves everything with max-age=600 and offers no way to change that, so a
+// push can sit invisible on another machine for ten minutes. The entry point stamps a
+// version onto this module's URL; propagating that stamp to every sibling import is what
+// makes a refresh actually pick up new code.
+const V = new URL(import.meta.url).search;
+
+const { startCamera, stopCamera, describeCameraError } = await import('./camera.js' + V);
+const { createHandTracker, HAND_CONNECTIONS } = await import('./handTracker.js' + V);
+const { pinch, handSpan, handAngle, fingerReach } = await import('./gestures.js' + V);
+const { drawHands, sizeOverlayTo } = await import('./overlay.js' + V);
 
 const video = document.getElementById('cam');
 const canvas = document.getElementById('overlay');

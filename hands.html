@@ -38,6 +38,7 @@
     #status { color: #7fe3a1; }
     #status.error { color: #ff5c5c; }
     #fps { color: #9db4d0; }
+    #build { color: #6b7d94; }
 
     #start {
       font: inherit;
@@ -76,9 +77,17 @@
     <button id="start">start camera</button>
     <span id="status">idle</span>
     <span id="fps">— fps</span>
+    <span id="build">—</span>
   </div>
   <pre id="readout"></pre>
 
-  <script type="module" src="hands.js"></script>
+  <script type="module">
+    // Cache-bust every module on load. This page may itself be served from cache, but the
+    // stamp is computed at runtime, so the code it pulls in is always current — which is
+    // what matters when the machine that tests this is not the machine that edits it.
+    const stamp = Date.now();
+    document.getElementById('build').textContent = 'build ' + new Date().toTimeString().slice(0, 8);
+    import(`./hands.js?v=${stamp}`);
+  </script>
 </body>
 </html>

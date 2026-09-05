@@ -1,5 +1,9 @@
-import { createScene, startRenderLoop } from './scene.js';
-import { loadModel, frameObject } from './loadModel.js';
+// See hands.js: the entry point stamps a version onto this module's URL, and passing it
+// along is what stops GitHub Pages' ten-minute cache from serving stale code.
+const V = new URL(import.meta.url).search;
+
+const { createScene, startRenderLoop } = await import('./scene.js' + V);
+const { loadModel, frameObject } = await import('./loadModel.js' + V);
 
 const statusEl = document.getElementById('status');
 const fpsEl = document.getElementById('fps');
