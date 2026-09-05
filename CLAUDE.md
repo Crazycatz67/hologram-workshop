@@ -9,17 +9,22 @@
 - **2026-09-04 (2):** Object to scan chosen (toy plush). Leap Motion Controller reconfirmed shelved (cost, not capability — no new info reopens it). Draco vs. Meshopt framing changed: don't presuppose Meshopt as default, benchmark both against the real scan and combine what each reveals. Pepper's Ghost physical rig moved from undecided to provisionally in scope, contingent on Phase 4 working first plus a deliberate cost check. Explode-gesture-on-a-single-mesh-object and voice-layer-scope questions remain open — see `ROADMAP.md`.
 - **2026-09-04:** Initial version, generated from `hologram-project-research.md` (sessions 1–5) and the kickoff brief. Companion doc `ROADMAP.md` created same day.
 
-## Repo
+## Repo & Live Site
 
-`github.com/Crazycatz67/hologram-workshop` (public, created 2026-09-05). Development happens on the Windows desktop, but **the webcam testing has to happen on the Mac laptop — the desktop has no camera.** Push from one, pull on the other; that split is the reason this is on GitHub at all.
+`github.com/Crazycatz67/hologram-workshop` (public, created 2026-09-05), served over GitHub Pages from `main` at the repo root:
 
-Running it locally (`python` on Windows, `python3` on macOS):
+- Model viewer — `https://crazycatz67.github.io/hologram-workshop/`
+- Hand tracking — `https://crazycatz67.github.io/hologram-workshop/hands.html`
+
+**Why Pages matters here, not just convenience:** the Windows desktop has no webcam, so all hand-tracking testing happens on the Mac laptop. Pages serves over HTTPS, which is a secure context, so `getUserMedia` works from the URL directly — no clone, no local server, no toolchain on the test machine. Push from the desktop, refresh on the Mac. Verified 2026-09-05: `isSecureContext` true and the tracker initialises in 327ms from that origin.
+
+Running it locally instead (`python` on Windows, `python3` on macOS):
 
 ```
 python serve.py          # then open http://localhost:8080
 ```
 
-A static server is required — `GLTFLoader` uses `fetch()`, which browsers block on `file://` URLs, and `getUserMedia` needs a secure context (localhost counts).
+A static server is required locally — `GLTFLoader` uses `fetch()`, which browsers block on `file://` URLs, and `getUserMedia` needs a secure context (localhost counts as one).
 
 ## What This Is
 
