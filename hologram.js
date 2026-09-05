@@ -14,6 +14,7 @@ const { createHandTracker, HAND_CONNECTIONS } = await import('./handTracker.js' 
 const { pinch } = await import('./gestures.js' + V);
 const { drawHands, sizeOverlayTo } = await import('./overlay.js' + V);
 const { createManipulator, MODE } = await import('./manipulator.js' + V);
+const { default: HolographicMaterial } = await import('./HolographicMaterial.js' + V);
 
 const video = document.getElementById('cam');
 const overlay = document.getElementById('overlay');
@@ -35,7 +36,19 @@ let tracking = false;
 let hands = [];
 let lastVideoTime = -1;
 
-window.hologram = { scene, camera, renderer, controls, model: null };
+const hologramMaterial = new HolographicMaterial({
+  hologramColor: '#4fd1ff',
+  hologramBrightness: 1.0,
+  fresnelAmount: 0.45,
+  fresnelOpacity: 1.0,
+  scanlineSize: 8.0,
+  signalSpeed: 0.6,
+  hologramOpacity: 1.0,
+  enableBlinking: true,
+  blinkFresnelOnly: true
+});
+
+window.hologram = { scene, camera, renderer, controls, model: null, material: hologramMaterial };
 
 function setStatus(text, isError = false) {
   statusEl.textContent = text;
@@ -49,6 +62,9 @@ loadModel({
 })
   .then(({ object, path }) => {
     trimByCylinder(object, CHAIR_TRIM);
+    object.traverse((child) => {
+      if (child.isMesh) child.material = hologramMaterial;
+    });
     scene.add(object);
     window.hologram.model = object;
     frameObject(object, camera, controls);
@@ -108,6 +124,8 @@ startRenderLoop({
     fpsEl.textContent = `${fps} fps`;
   },
   onTick: () => {
+    hologramMaterial.update();
+
     if (!tracking || !sizeOverlayTo(overlay, video)) return;
 
     const aspect = overlay.width / overlay.height;
