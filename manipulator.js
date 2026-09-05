@@ -49,15 +49,22 @@ const MIN_LINEAR_VELOCITY = 0.00005;
 // A clap — hands rapidly closing together — resets the hologram. Re-arms only once the
 // hands separate again, so holding them together doesn't fire it repeatedly.
 //
-// Reported live 2026-09-05: didn't fire at all in testing. Unlike PINCH_THRESHOLD, these
-// three numbers were never calibrated against a real clap — a real clap is also exactly
-// the kind of fast motion that MediaPipe tracks worst (see Phase 1's known risks), so a
-// real attempt may genuinely drop hand detection for a frame or two right at the moment
-// of impact. Loosened as a reasonable guess pending real numbers; `readoutEl` now prints
-// live span so the next test can report actual values instead of another guess.
+// Reported live 2026-09-05: didn't fire at all in testing, so the closing-speed threshold
+// was loosened. Testing afterward found the opposite failure: a slow, ordinary hand
+// relaxation (not a deliberate clap) could ALSO fire it. Root cause common to both: speed
+// was measured as span-change-per-CALL, which isn't actually speed — it's confounded with
+// frame rate. Drop a couple of tracking frames (a real, documented risk here) and the same
+// physical motion produces a bigger apparent per-frame jump purely from fewer samples,
+// not from moving faster. Measuring span-change-per-real-SECOND (see checkClap, which now
+// takes a timestamp) fixes both directions at once: a genuine clap has real velocity high
+// enough to clear the bar regardless of frame rate, and a slow relaxation doesn't, also
+// regardless of frame rate.
 const CLAP_CLOSE_SPAN = 0.45;
 const CLAP_ARM_SPAN = 0.6;
-const CLAP_MIN_CLOSING_SPEED = 0.08;
+// Span-units per second, not per frame. A full arm-to-close swing (~0.6 span) covered in
+// under ~300ms clears this; the same swing taken over a second or more doesn't. Still an
+// untuned guess pending a real clap's actual numbers, same as everything else here.
+const CLAP_MIN_CLOSING_SPEED = 1.5;
 
 // Explode: two open hands (neither fisted nor pinching, keeping it out of grab/scale's
 // hand-shape space) pulling apart drives it, continuously, like scale rather than a
@@ -67,8 +74,13 @@ const EXPLODE_SENSITIVITY = 0.6;
 const MAX_EXPLODE_SPAN_DELTA_PER_FRAME = 2;
 // Single-mesh objects (no separate parts to pull apart) get a non-uniform vertical stretch
 // instead — deliberately distinct from pinch-scale's uniform resize, so the two gestures
-// don't produce the same-looking result on an object like the chair.
-const MAX_STRETCH = 1.2;
+// don't produce the same-looking result on an object like the chair. Clamped to the same
+// MAX_SCALE ceiling pinch-scale uses (see applyExplode) rather than its own fixed value —
+// an earlier version used a separate, lower absolute ceiling, and if scale had already
+// pushed scale.y past it, the moment explode engaged it snapped scale.y sharply DOWN to
+// that lower ceiling on the very first frame, a jarring, unintended shrink. Sharing one
+// ceiling between both gestures means neither one's cap can undercut what the other
+// already applied.
 // Literal explode (multi-part meshes): each part moves outward from the object's overall
 // centroid along its own direction, up to this fraction of the object's own size. Only
 // unit-tested against synthetic multi-mesh data — no real multi-part scan exists yet.
@@ -151,6 +163,7 @@ export function createManipulator(object, camera) {
 
   let clapArmed = true;
   let lastClapSpan = null;
+  let lastClapTime = null;
 
   function clearGrab() {
     lastWrist = null;
@@ -197,19 +210,28 @@ export function createManipulator(object, camera) {
   // otherwise indistinguishable from a clap by span alone. Found by testing: scaling all
   // the way down to nearly-touching in one quick step triggered a false reset before this
   // guard existed.
-  function checkClap(hands, aspect) {
+  function checkClap(hands, aspect, timestampMs) {
     if (hands.some((h) => h.pinch?.pinching)) {
       lastClapSpan = null;
+      lastClapTime = null;
       return false;
     }
     const span = handSpan(hands[0], hands[1], aspect);
     if (span > CLAP_ARM_SPAN) clapArmed = true;
 
-    const closingSpeed = lastClapSpan !== null ? lastClapSpan - span : 0;
+    // Velocity (span per real second), not a per-call delta — see the constant's comment
+    // for why a per-frame delta is the wrong thing to measure here.
+    let closingSpeed = 0;
+    if (lastClapSpan !== null && lastClapTime !== null) {
+      const dtSeconds = (timestampMs - lastClapTime) / 1000;
+      if (dtSeconds > 0) closingSpeed = (lastClapSpan - span) / dtSeconds;
+    }
+
     const clapped = clapArmed && span < CLAP_CLOSE_SPAN && closingSpeed > CLAP_MIN_CLOSING_SPEED;
     if (clapped) clapArmed = false;
 
     lastClapSpan = span;
+    lastClapTime = timestampMs;
     return clapped;
   }
 
@@ -228,8 +250,11 @@ export function createManipulator(object, camera) {
 
     reset: performReset,
 
-    update(hands, aspect) {
-      if (hands.length === 2 && checkClap(hands, aspect)) {
+    // timestampMs: defaults to performance.now() so existing callers (and every test in
+    // this file's history) that don't pass one keep working — only checkClap's real-time
+    // velocity measurement actually needs it.
+    update(hands, aspect, timestampMs = performance.now()) {
+      if (hands.length === 2 && checkClap(hands, aspect, timestampMs)) {
         performReset();
         return mode;
       }
@@ -411,8 +436,14 @@ export function createManipulator(object, camera) {
     if (lastSpan && span > 0) {
       const ratio = span / lastSpan;
       if (ratio > 1 / MAX_SPAN_RATIO_PER_FRAME && ratio < MAX_SPAN_RATIO_PER_FRAME) {
-        const next = THREE.MathUtils.clamp(object.scale.x * ratio, MIN_SCALE, MAX_SCALE);
-        object.scale.setScalar(next);
+        // Multiplies each axis independently rather than setScalar-ing all three to one
+        // value. Found by testing: stretching the object with explode first, then
+        // scaling, silently flattened the stretch back to a uniform shape — setScalar
+        // discarded whatever proportions already existed. Multiplying preserves them,
+        // the same way scaling an already-non-uniform object works in any 3D tool.
+        object.scale.x = THREE.MathUtils.clamp(object.scale.x * ratio, MIN_SCALE, MAX_SCALE);
+        object.scale.y = THREE.MathUtils.clamp(object.scale.y * ratio, MIN_SCALE, MAX_SCALE);
+        object.scale.z = THREE.MathUtils.clamp(object.scale.z * ratio, MIN_SCALE, MAX_SCALE);
       }
     }
 
@@ -442,11 +473,7 @@ export function createManipulator(object, camera) {
           }
         } else {
           const stretchRatio = 1 + delta * EXPLODE_SENSITIVITY;
-          object.scale.y = THREE.MathUtils.clamp(
-            object.scale.y * stretchRatio,
-            home.scale.y,
-            home.scale.y * (1 + MAX_STRETCH)
-          );
+          object.scale.y = THREE.MathUtils.clamp(object.scale.y * stretchRatio, home.scale.y, MAX_SCALE);
         }
       }
     }

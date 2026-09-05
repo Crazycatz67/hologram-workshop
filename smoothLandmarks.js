@@ -5,44 +5,63 @@
 // on the thumb — see ROADMAP.md Phase 1) was previously going straight into both the visual
 // skeleton and the gesture math unfiltered; this smooths it once for everything downstream.
 //
-// Keyed by handedness (Left/Right) rather than array index, since that stays consistent
-// frame-to-frame for a continuously-tracked hand in a way array position doesn't.
+// Matched frame-to-frame by nearest wrist position, not by MediaPipe's handedness label.
+// A first version keyed by handedness and had a real bug: when MediaPipe misclassified two
+// hands as the same handedness (which happens — low confidence, hands crossing, a hand seen
+// from the back), both hands smoothed toward the SAME stored state and their positions
+// bled into each other. Array index would have the same class of problem if MediaPipe ever
+// reorders which hand comes first. Physical position can't teleport between frames, so it's
+// the one signal that's actually reliable to match on.
 
 const ALPHA = 0.5; // 1.0 = no smoothing (raw passthrough); lower = smoother but more lag
 
-const previous = new Map();
+// Beyond this normalized-frame distance, the nearest previous hand is probably a different
+// hand entirely (or this one just entered), not the same hand having moved — start fresh
+// rather than smooth toward an unrelated position. An untuned guess, like every other
+// threshold in this file started as; a hand moving faster than this in one frame just gets
+// that one frame unsmoothed (safe fallback) rather than corrupted, so guessing wrong here
+// is low-risk, but real-hand tuning would still make it more accurate.
+const MAX_MATCH_DISTANCE = 0.35;
+
+let previousHands = []; // [{ landmarks }], most recent frame's post-smoothing state
 
 export function smoothHandLandmarks(hands) {
-  const seenKeys = new Set();
+  const claimed = new Set();
 
   for (const hand of hands) {
-    const key = hand.handedness;
-    seenKeys.add(key);
-    const prev = previous.get(key);
+    const wrist = hand.landmarks[0];
+    let bestIndex = -1;
+    let bestDist = Infinity;
 
-    if (!prev) {
-      previous.set(key, hand.landmarks.map((p) => ({ x: p.x, y: p.y, z: p.z })));
-      continue;
+    for (let i = 0; i < previousHands.length; i++) {
+      if (claimed.has(i)) continue;
+      const prevWrist = previousHands[i].landmarks[0];
+      const d = Math.hypot(wrist.x - prevWrist.x, wrist.y - prevWrist.y);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIndex = i;
+      }
     }
 
-    hand.landmarks = hand.landmarks.map((p, i) => {
-      const smoothed = {
+    if (bestIndex === -1 || bestDist > MAX_MATCH_DISTANCE) {
+      // No usable match: a genuinely new hand, or the closest candidate is implausibly far
+      // to be the same one. Pass this frame through unsmoothed rather than drag it toward
+      // an unrelated hand's position.
+      hand.landmarks = hand.landmarks.map((p) => ({ x: p.x, y: p.y, z: p.z }));
+    } else {
+      claimed.add(bestIndex);
+      const prev = previousHands[bestIndex].landmarks;
+      hand.landmarks = hand.landmarks.map((p, i) => ({
         x: prev[i].x + (p.x - prev[i].x) * ALPHA,
         y: prev[i].y + (p.y - prev[i].y) * ALPHA,
         z: prev[i].z + (p.z - prev[i].z) * ALPHA
-      };
-      prev[i] = smoothed;
-      return smoothed;
-    });
+      }));
+    }
   }
 
-  // Drop state for a hand that's no longer present, so it doesn't smooth toward a stale
-  // position if that hand (or the same handedness slot) reappears later.
-  for (const key of previous.keys()) {
-    if (!seenKeys.has(key)) previous.delete(key);
-  }
+  previousHands = hands.map((h) => ({ landmarks: h.landmarks }));
 }
 
 export function resetLandmarkSmoothing() {
-  previous.clear();
+  previousHands = [];
 }
