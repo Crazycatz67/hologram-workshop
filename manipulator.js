@@ -5,7 +5,11 @@ import { LANDMARK, handSpan, handAngle } from './gestures.js';
 export const MODE = { IDLE: 'idle', GRAB: 'grab', TRANSFORM: 'transform' };
 
 const MIN_SCALE = 0.2;
-const MAX_SCALE = 5;
+// Lowered from 5 after live testing: frameObject() already sizes the model to comfortably
+// fill the view at scale 1, so 5x let it grow far past the edges of the screen -- reported
+// as making it hard to see what you were doing or get gestures to register. 2.5 still
+// gives real "make it huge" range without the object swallowing the whole viewport.
+const MAX_SCALE = 2.5;
 
 // Guards against a single bad frame teleporting or exploding the model: a hand that jumps
 // half the frame, or a span that doubles between frames, is tracking noise rather than

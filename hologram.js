@@ -114,7 +114,9 @@ function stopTracking() {
 startBtn.addEventListener('click', () => (tracking ? stopTracking() : startTracking()));
 resetBtn.addEventListener('click', () => manipulator?.reset());
 window.addEventListener('keydown', (e) => {
-  if (e.key.toLowerCase() === 'r') manipulator?.reset();
+  const key = e.key.toLowerCase();
+  if (key === 'r') manipulator?.reset();
+  if (key === 'd') document.body.classList.toggle('debug-camera');
 });
 
 startRenderLoop({
