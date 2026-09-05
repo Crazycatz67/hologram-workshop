@@ -23,6 +23,22 @@ const MAX_TWIST_PER_FRAME = Math.PI / 3;
 // no recovery except Reset, reported directly as frustrating during live testing.
 const VIEW_MARGIN = 0.7;
 
+// Grab no longer applies a raw per-frame delta directly to the object — it only sets a
+// target velocity. Every update() call decays and applies whatever velocity currently
+// exists, whether or not a hand is still gripping. Reported live: releasing a twist felt
+// like "a direct pause" — the rotation stopped dead the instant tracking stopped feeding
+// a delta. This lets it coast for a few frames instead, closer to how spinning something
+// with real momentum behaves.
+const VELOCITY_DAMPING = 0.85;
+const MIN_ANGULAR_VELOCITY = 0.0005;
+const MIN_LINEAR_VELOCITY = 0.00005;
+
+// A clap — hands rapidly closing together — resets the hologram. Re-arms only once the
+// hands separate again, so holding them together doesn't fire it repeatedly.
+const CLAP_CLOSE_SPAN = 0.3;
+const CLAP_ARM_SPAN = 0.8;
+const CLAP_MIN_CLOSING_SPEED = 0.15;
+
 function wristOf(hand) {
   return hand.landmarks[0];
 }
@@ -58,6 +74,13 @@ export function createManipulator(object, camera) {
   let lastSpan = null;
   let mode = MODE.IDLE;
 
+  let angularVelocity = 0;
+  let linearVelocityX = 0;
+  let linearVelocityY = 0;
+
+  let clapArmed = true;
+  let lastClapSpan = null;
+
   function clearGrab() {
     lastWrist = null;
     lastTwist = null;
@@ -67,23 +90,54 @@ export function createManipulator(object, camera) {
     lastSpan = null;
   }
 
+  function performReset() {
+    object.position.copy(home.position);
+    object.quaternion.copy(home.quaternion);
+    object.scale.copy(home.scale);
+    grab.reset();
+    transform.reset();
+    clearGrab();
+    clearTransform();
+    angularVelocity = 0;
+    linearVelocityX = 0;
+    linearVelocityY = 0;
+    mode = MODE.IDLE;
+  }
+
+  // A clap requires open hands, not pinching ones — both because that's what a real clap
+  // physically is, and because scaling down aggressively (pinching hands closing fast) is
+  // otherwise indistinguishable from a clap by span alone. Found by testing: scaling all
+  // the way down to nearly-touching in one quick step triggered a false reset before this
+  // guard existed.
+  function checkClap(hands, aspect) {
+    if (hands.some((h) => h.pinch?.pinching)) {
+      lastClapSpan = null;
+      return false;
+    }
+    const span = handSpan(hands[0], hands[1], aspect);
+    if (span > CLAP_ARM_SPAN) clapArmed = true;
+
+    const closingSpeed = lastClapSpan !== null ? lastClapSpan - span : 0;
+    const clapped = clapArmed && span < CLAP_CLOSE_SPAN && closingSpeed > CLAP_MIN_CLOSING_SPEED;
+    if (clapped) clapArmed = false;
+
+    lastClapSpan = span;
+    return clapped;
+  }
+
   return {
     get mode() {
       return mode;
     },
 
-    reset() {
-      object.position.copy(home.position);
-      object.quaternion.copy(home.quaternion);
-      object.scale.copy(home.scale);
-      grab.reset();
-      transform.reset();
-      clearGrab();
-      clearTransform();
-      mode = MODE.IDLE;
-    },
+    reset: performReset,
 
     update(hands, aspect) {
+      if (hands.length === 2 && checkClap(hands, aspect)) {
+        performReset();
+        return mode;
+      }
+
       const twoHanded = hands.length === 2 && hands.every((h) => h.pinch?.pinching);
       // gesture === 'Closed_Fist' is MediaPipe's own classifier; isFistShape() is a
       // geometric backstop for the hand orientations it misses (see gestures.js) — found
@@ -106,7 +160,7 @@ export function createManipulator(object, camera) {
       } else if (grabbing) {
         mode = MODE.GRAB;
         clearTransform();
-        if (hands.length >= 1) applyGrab(hands, aspect);
+        if (hands.length >= 1) setGrabVelocity(hands, aspect);
         else clearGrab(); // hand is gone, not just paused — drop the reference so no jump on return
       } else {
         mode = MODE.IDLE;
@@ -114,16 +168,17 @@ export function createManipulator(object, camera) {
         clearTransform();
       }
 
+      applyMomentum();
       return mode;
     }
   };
 
   // A single closed fist both moves the object (from wrist position) and spins it (from
-  // twisting the wrist like turning a doorknob) at the same time — this replaced a
-  // two-hand pinch-and-twist rotate after live testing called it "janky and cluttered."
-  // Real handling of an object naturally does a bit of both together, so both are applied
-  // independently every frame rather than picking one.
-  function applyGrab(hands, aspect) {
+  // twisting the wrist like turning a doorknob) — this replaced a two-hand pinch-and-twist
+  // rotate after live testing called it "janky and cluttered." Sets velocity rather than
+  // applying position/rotation directly; applyMomentum() below does the actual moving, so
+  // motion can keep coasting for a moment after the grab itself ends.
+  function setGrabVelocity(hands, aspect) {
     const hand = hands.find((h) => h.gesture === 'Closed_Fist' || isFistShape(h.landmarks, aspect)) ?? hands[0];
     const wrist = wristOf(hand);
     const twist = handTwist(hand.landmarks, aspect);
@@ -136,9 +191,8 @@ export function createManipulator(object, camera) {
 
       if (Math.abs(dx) < MAX_MOVE_PER_FRAME && Math.abs(dy) < MAX_MOVE_PER_FRAME) {
         const perUnit = worldPerScreenUnit(camera, object);
-        object.position.x += dx * perUnit.x;
-        object.position.y -= dy * perUnit.y;
-        clampToView(object, camera);
+        linearVelocityX = dx * perUnit.x;
+        linearVelocityY = -dy * perUnit.y;
       }
     }
 
@@ -152,13 +206,29 @@ export function createManipulator(object, camera) {
       // that to spin the object around ITS vertical axis instead — like a lazy Susan —
       // is what's actually useful for looking at the sides of something like a chair.
       // Deliberate stylization, not a literal transfer of the physical motion.
-      if (Math.abs(delta) < MAX_TWIST_PER_FRAME) {
-        object.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), delta);
-      }
+      if (Math.abs(delta) < MAX_TWIST_PER_FRAME) angularVelocity = delta;
     }
 
     lastWrist = { x: wrist.x, y: wrist.y };
     lastTwist = twist;
+  }
+
+  // Applies whatever velocity currently exists and decays it — runs every update() call
+  // regardless of mode, which is what lets a released grab keep coasting briefly instead
+  // of stopping dead the instant the gesture ends.
+  function applyMomentum() {
+    if (Math.abs(angularVelocity) > MIN_ANGULAR_VELOCITY) {
+      object.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), angularVelocity);
+    }
+    angularVelocity *= VELOCITY_DAMPING;
+
+    if (linearVelocityX * linearVelocityX + linearVelocityY * linearVelocityY > MIN_LINEAR_VELOCITY * MIN_LINEAR_VELOCITY) {
+      object.position.x += linearVelocityX;
+      object.position.y += linearVelocityY;
+      clampToView(object, camera);
+    }
+    linearVelocityX *= VELOCITY_DAMPING;
+    linearVelocityY *= VELOCITY_DAMPING;
   }
 
   function applyTransform(hands, aspect) {

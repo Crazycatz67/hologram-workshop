@@ -11,10 +11,11 @@ const { trimByCylinder } = await import('./trimGeometry.js' + V);
 const CHAIR_TRIM = { center: { x: -0.02, z: -0.14 }, radius: 0.65 };
 const { startCamera, stopCamera, describeCameraError } = await import('./camera.js' + V);
 const { createHandTracker, HAND_CONNECTIONS } = await import('./handTracker.js' + V);
-const { pinch } = await import('./gestures.js' + V);
+const { pinch, isFistShape } = await import('./gestures.js' + V);
 const { drawHands, sizeOverlayTo } = await import('./overlay.js' + V);
 const { createManipulator, MODE } = await import('./manipulator.js' + V);
 const { default: HolographicMaterial } = await import('./HolographicMaterial.js' + V);
+const { createGhostHands } = await import('./ghostHands.js' + V);
 
 const video = document.getElementById('cam');
 const overlay = document.getElementById('overlay');
@@ -49,6 +50,9 @@ const hologramMaterial = new HolographicMaterial({
   enableBlinking: true,
   blinkFresnelOnly: true
 });
+
+const ghostHands = createGhostHands(scene, HAND_CONNECTIONS);
+const isFist = (h) => h.gesture === 'Closed_Fist' || h.fistShape;
 
 window.hologram = { scene, camera, renderer, controls, model: null, material: hologramMaterial };
 
@@ -105,6 +109,7 @@ function stopTracking() {
   video.srcObject = null;
   hands = [];
   overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+  ghostHands.update([], { camera, object: window.hologram.model ?? scene, aspect: 1 });
   readoutEl.textContent = '';
   modeEl.textContent = 'idle';
   startBtn.textContent = 'start camera';
@@ -139,6 +144,7 @@ startRenderLoop({
       hands = tracker.read(video, performance.now());
       for (const hand of hands) {
         hand.pinch = pinch(hand.landmarks, aspect, { gesture: hand.gesture });
+        hand.fistShape = isFistShape(hand.landmarks, aspect);
       }
 
       const mode = manipulator?.update(hands, aspect) ?? MODE.IDLE;
@@ -147,6 +153,11 @@ startRenderLoop({
       updateReadout();
     }
 
+    // Real 3D hands (always on) are the primary visual feedback; the flat 2D skeleton
+    // stays available behind the D-debug toggle for checking raw tracking accuracy.
+    if (window.hologram.model) {
+      ghostHands.update(hands, { camera, object: window.hologram.model, aspect, isFist });
+    }
     drawHands(overlayCtx, hands, HAND_CONNECTIONS);
   }
 });

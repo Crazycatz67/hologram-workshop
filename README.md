@@ -11,7 +11,7 @@ manipulates a *downloaded* model. This one manipulates a scan of an object you a
 
 No install, no server — every page runs entirely in the browser:
 
-- **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience: closed fist to grab and move it or twist your wrist to spin it, two-hand pinch to scale it (press `D` to reveal the camera/tracking view, hidden by default)
+- **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience: closed fist to grab and move it or twist your wrist to spin it, two-hand pinch to scale it, clap open hands to reset it (press `D` to reveal the camera/tracking view, hidden by default — real 3D "ghost hands" in the scene are the normal feedback instead)
 - **[Model viewer](https://crazycatz67.github.io/hologram-workshop/)** — the hologram alone, drag to orbit, no camera needed
 - **[Hand tracking](https://crazycatz67.github.io/hologram-workshop/hands.html)** — tracking on its own, with the raw pinch/gesture numbers on screen
 
@@ -58,7 +58,8 @@ Then open <http://localhost:8080>.
 | `gestures.js` | Pinch, two-hand span and angle |
 | `overlay.js` | Canvas skeleton and labels |
 | `stabilizer.js` | Hysteresis so a gesture needs a few consistent frames to start or stop |
-| `manipulator.js` | Maps stabilised gestures onto the model (grab/move, scale, rotate) |
+| `manipulator.js` | Maps stabilised gestures onto the model (grab/move/rotate with momentum, scale, clap-reset) |
+| `ghostHands.js` | Renders tracked hands as real 3D geometry in the scene, not a flat overlay |
 | `serve.py` | Static server that sends `no-store` |
 | `analyze_scan.py` | Suggests crop parameters for a new raw scan (see ROADMAP.md) |
 | `repair_scan.py` | Scriptable mesh repair (PyMeshLab, no GUI) — see ROADMAP.md for what worked and what didn't |
