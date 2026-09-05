@@ -59,7 +59,17 @@ export function startRenderLoop({ renderer, scene, camera, controls, onTick, onF
       if (onFrame) onFrame(fps);
     }
 
-    if (onTick) onTick(now);
+    // setAnimationLoop stops scheduling further frames if its callback throws — an
+    // uncaught error anywhere in onTick would silently freeze the entire scene (no more
+    // rendering, no more orbit controls, nothing), which is far worse than one skipped
+    // gesture update. Catching here protects every onTick consumer, not just this one.
+    if (onTick) {
+      try {
+        onTick(now);
+      } catch (err) {
+        console.error('onTick threw; skipping this frame:', err);
+      }
+    }
     resizeIfNeeded(renderer, camera);
     controls.update();
     renderer.render(scene, camera);

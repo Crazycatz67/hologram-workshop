@@ -77,11 +77,19 @@ export function createManipulator(object, camera) {
       if (transforming) {
         mode = MODE.TRANSFORM;
         clearGrab();
-        applyTransform(hands, aspect);
+        // Hysteresis can hold this mode true for a few frames after a hand drops out of
+        // frame — that's the point of it, so a momentary tracking dropout doesn't cancel
+        // the gesture. But it means `hands` can still have fewer than 2 entries here, and
+        // applyTransform indexes hands[1] unconditionally. Skipping the write (rather than
+        // guarding inside applyTransform) just holds the last scale/rotation until the
+        // second hand reappears or the hysteresis itself expires.
+        if (hands.length === 2) applyTransform(hands, aspect);
       } else if (grabbing) {
         mode = MODE.GRAB;
         clearTransform();
-        applyGrab(hands);
+        // Same reasoning: grabbing can stay true briefly with zero hands actually tracked.
+        if (hands.length >= 1) applyGrab(hands);
+        else clearGrab(); // hand is gone, not just paused — drop the reference so no jump on return
       } else {
         mode = MODE.IDLE;
         clearGrab();
