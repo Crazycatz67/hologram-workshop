@@ -43,7 +43,9 @@ export function resizeIfNeeded(renderer, camera) {
   camera.updateProjectionMatrix();
 }
 
-export function startRenderLoop({ renderer, scene, camera, controls, onFrame }) {
+// onTick runs every frame (Phase 4 drives hand tracking from it, so gestures and rendering
+// stay on one clock); onFrame is only the twice-a-second FPS sample.
+export function startRenderLoop({ renderer, scene, camera, controls, onTick, onFrame }) {
   let frames = 0;
   let lastSample = performance.now();
 
@@ -57,6 +59,7 @@ export function startRenderLoop({ renderer, scene, camera, controls, onFrame }) 
       if (onFrame) onFrame(fps);
     }
 
+    if (onTick) onTick(now);
     resizeIfNeeded(renderer, camera);
     controls.update();
     renderer.render(scene, camera);

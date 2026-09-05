@@ -1,0 +1,136 @@
+const V = new URL(import.meta.url).search;
+
+const { createScene, startRenderLoop } = await import('./scene.js' + V);
+const { loadModel, frameObject } = await import('./loadModel.js' + V);
+const { startCamera, stopCamera, describeCameraError } = await import('./camera.js' + V);
+const { createHandTracker, HAND_CONNECTIONS } = await import('./handTracker.js' + V);
+const { pinch } = await import('./gestures.js' + V);
+const { drawHands, sizeOverlayTo } = await import('./overlay.js' + V);
+const { createManipulator, MODE } = await import('./manipulator.js' + V);
+
+const video = document.getElementById('cam');
+const overlay = document.getElementById('overlay');
+const overlayCtx = overlay.getContext('2d');
+
+const statusEl = document.getElementById('status');
+const fpsEl = document.getElementById('fps');
+const modeEl = document.getElementById('mode');
+const readoutEl = document.getElementById('readout');
+const startBtn = document.getElementById('start');
+const resetBtn = document.getElementById('reset');
+
+const { scene, camera, renderer, controls } = createScene(document.getElementById('stage'));
+
+let manipulator = null;
+let tracker = null;
+let stream = null;
+let tracking = false;
+let hands = [];
+let lastVideoTime = -1;
+
+window.hologram = { scene, camera, renderer, controls, model: null };
+
+function setStatus(text, isError = false) {
+  statusEl.textContent = text;
+  statusEl.classList.toggle('error', isError);
+}
+
+loadModel({
+  glbPath: 'assets/chair/chair.glb',
+  objPath: 'assets/chair/chair.obj',
+  mtlPath: 'assets/chair/chair.mtl'
+})
+  .then(({ object, path }) => {
+    scene.add(object);
+    window.hologram.model = object;
+    frameObject(object, camera, controls);
+    manipulator = createManipulator(object, camera);
+    setStatus(`${path} loaded · start the camera to control it`);
+    startBtn.disabled = false;
+  })
+  .catch((err) => {
+    setStatus(err.message, true);
+  });
+
+async function startTracking() {
+  startBtn.disabled = true;
+  try {
+    setStatus('loading gesture model…');
+    tracker = await createHandTracker({ numHands: 2 });
+
+    setStatus('requesting camera…');
+    stream = await startCamera(video);
+
+    tracking = true;
+    startBtn.textContent = 'stop camera';
+    startBtn.disabled = false;
+    setStatus('tracking · fist to move · two-hand pinch to scale and rotate');
+  } catch (err) {
+    setStatus(describeCameraError(err), true);
+    startBtn.disabled = false;
+    console.error(err);
+  }
+}
+
+function stopTracking() {
+  tracking = false;
+  stopCamera(stream);
+  stream = null;
+  video.srcObject = null;
+  hands = [];
+  overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+  readoutEl.textContent = '';
+  modeEl.textContent = 'idle';
+  startBtn.textContent = 'start camera';
+  setStatus('camera stopped · drag to orbit');
+}
+
+startBtn.addEventListener('click', () => (tracking ? stopTracking() : startTracking()));
+resetBtn.addEventListener('click', () => manipulator?.reset());
+window.addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() === 'r') manipulator?.reset();
+});
+
+startRenderLoop({
+  renderer,
+  scene,
+  camera,
+  controls,
+  onFrame: (fps) => {
+    fpsEl.textContent = `${fps} fps`;
+  },
+  onTick: () => {
+    if (!tracking || !sizeOverlayTo(overlay, video)) return;
+
+    const aspect = overlay.width / overlay.height;
+
+    if (video.currentTime !== lastVideoTime) {
+      lastVideoTime = video.currentTime;
+      hands = tracker.read(video, performance.now());
+      for (const hand of hands) {
+        hand.pinch = pinch(hand.landmarks, aspect, { gesture: hand.gesture });
+      }
+
+      const mode = manipulator?.update(hands, aspect) ?? MODE.IDLE;
+      modeEl.textContent = mode;
+      modeEl.className = mode;
+      updateReadout();
+    }
+
+    drawHands(overlayCtx, hands, HAND_CONNECTIONS);
+  }
+});
+
+function updateReadout() {
+  if (hands.length === 0) {
+    readoutEl.textContent = 'no hands';
+    return;
+  }
+  readoutEl.textContent = hands
+    .map((h) => {
+      const p = h.pinch;
+      const state = p.pinching ? 'PINCH' : p.rejectedBy ? `no (${p.rejectedBy})` : 'open';
+      return `${h.handedness.padEnd(5)} ${h.gesture.padEnd(12)} ${state}`;
+    })
+    .join('\n');
+}

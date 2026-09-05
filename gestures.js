@@ -17,12 +17,15 @@ export const PINCH_THRESHOLD = 0.25;
 // out at the end of the fingers; in a fist every tip curls back toward the palm, which is
 // what made a fist read as a pinch when the back of the hand faced the camera.
 //
-// Measured on a real hand 2026-09-05: a deliberate pinch averages ~1.20, so the original
-// 1.15 left only 0.05 of margin and would have rejected the frames that fell below the
-// average — pinch dropping out mid-gesture. Loosened to 1.00. This guard does not have to
-// catch every fist on its own: the Closed_Fist veto below is the primary defence, and this
-// only has to cover the case where the classifier misses, i.e. the back of the hand.
-export const MIN_PINCH_REACH = 1.0;
+// Measured on a real hand 2026-09-05: a deliberate pinch averages ~1.20, a closed fist with
+// the back of the hand turned reads ~0.9. Those two are closer together than is comfortable,
+// so the cutoff sits midway at 1.05 — about 0.15 of margin on each side rather than favouring
+// one failure mode over the other.
+//
+// This guard does not have to catch every fist alone: the Closed_Fist veto below is the
+// primary defence, and this only backstops the back-of-hand case the classifier misses.
+// If fists start registering again, raise it; if pinches start dropping out, lower it.
+export const MIN_PINCH_REACH = 1.05;
 
 // Landmark x and y are each normalized against their own axis, so on a 16:9 frame a
 // horizontal gap reads ~1.8x shorter than the same gap measured vertically. Undo that
