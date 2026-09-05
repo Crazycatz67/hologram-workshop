@@ -1,0 +1,8 @@
+# Superseded capture: a whole-room scan taken in Scaniverse's Area mode while the
+# subject was still the plush. Nothing references it and it is 21MB. Kept on disk as a
+# record, but not worth carrying in history — delete this line to start tracking it.
+assets/plush/
+
+__pycache__/
+.DS_Store
+Thumbs.db
