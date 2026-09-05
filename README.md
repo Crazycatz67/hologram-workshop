@@ -60,6 +60,7 @@ Then open <http://localhost:8080>.
 | `stabilizer.js` | Hysteresis so a gesture needs a few consistent frames to start or stop |
 | `manipulator.js` | Maps stabilised gestures onto the model (grab/move/rotate with momentum, scale, clap-reset) |
 | `ghostHands.js` | Renders tracked hands as real 3D geometry in the scene, not a flat overlay |
+| `smoothLandmarks.js` | Exponential smoothing on raw landmark positions, keyed by handedness |
 | `serve.py` | Static server that sends `no-store` |
 | `analyze_scan.py` | Suggests crop parameters for a new raw scan (see ROADMAP.md) |
 | `repair_scan.py` | Scriptable mesh repair (PyMeshLab, no GUI) — see ROADMAP.md for what worked and what didn't |

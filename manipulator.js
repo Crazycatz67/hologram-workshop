@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createStabilizer } from './stabilizer.js';
-import { handSpan, handTwist, isFistShape } from './gestures.js';
+import { handSpan, handTwist, isFistLike } from './gestures.js';
 
 export const MODE = { IDLE: 'idle', GRAB: 'grab', TRANSFORM: 'transform' };
 
@@ -35,9 +35,16 @@ const MIN_LINEAR_VELOCITY = 0.00005;
 
 // A clap — hands rapidly closing together — resets the hologram. Re-arms only once the
 // hands separate again, so holding them together doesn't fire it repeatedly.
-const CLAP_CLOSE_SPAN = 0.3;
-const CLAP_ARM_SPAN = 0.8;
-const CLAP_MIN_CLOSING_SPEED = 0.15;
+//
+// Reported live 2026-09-05: didn't fire at all in testing. Unlike PINCH_THRESHOLD, these
+// three numbers were never calibrated against a real clap — a real clap is also exactly
+// the kind of fast motion that MediaPipe tracks worst (see Phase 1's known risks), so a
+// real attempt may genuinely drop hand detection for a frame or two right at the moment
+// of impact. Loosened as a reasonable guess pending real numbers; `readoutEl` now prints
+// live span so the next test can report actual values instead of another guess.
+const CLAP_CLOSE_SPAN = 0.45;
+const CLAP_ARM_SPAN = 0.6;
+const CLAP_MIN_CLOSING_SPEED = 0.08;
 
 function wristOf(hand) {
   return hand.landmarks[0];
@@ -139,10 +146,11 @@ export function createManipulator(object, camera) {
       }
 
       const twoHanded = hands.length === 2 && hands.every((h) => h.pinch?.pinching);
-      // gesture === 'Closed_Fist' is MediaPipe's own classifier; isFistShape() is a
-      // geometric backstop for the hand orientations it misses (see gestures.js) — found
-      // live-testing that a fist held knuckles-toward-camera did not register otherwise.
-      const fisted = hands.some((h) => h.gesture === 'Closed_Fist' || isFistShape(h.landmarks, aspect));
+      // isFistLike trusts MediaPipe's own classifier when it has a confident opinion
+      // either way, and only falls back to geometric curl detection when it doesn't (see
+      // gestures.js) — a thumbs-up and a loosely-closed hand were both registering as a
+      // grab before that gating existed.
+      const fisted = hands.some((h) => isFistLike(h.gesture, h.landmarks, aspect));
 
       // Two-handed transform outranks grab: with both hands up, a fist reading on one of
       // them is far more likely to be a misclassification than an intent to drag.
@@ -179,7 +187,7 @@ export function createManipulator(object, camera) {
   // applying position/rotation directly; applyMomentum() below does the actual moving, so
   // motion can keep coasting for a moment after the grab itself ends.
   function setGrabVelocity(hands, aspect) {
-    const hand = hands.find((h) => h.gesture === 'Closed_Fist' || isFistShape(h.landmarks, aspect)) ?? hands[0];
+    const hand = hands.find((h) => isFistLike(h.gesture, h.landmarks, aspect)) ?? hands[0];
     const wrist = wristOf(hand);
     const twist = handTwist(hand.landmarks, aspect);
 

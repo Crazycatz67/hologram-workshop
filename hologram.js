@@ -11,11 +11,12 @@ const { trimByCylinder } = await import('./trimGeometry.js' + V);
 const CHAIR_TRIM = { center: { x: -0.02, z: -0.14 }, radius: 0.65 };
 const { startCamera, stopCamera, describeCameraError } = await import('./camera.js' + V);
 const { createHandTracker, HAND_CONNECTIONS } = await import('./handTracker.js' + V);
-const { pinch, isFistShape } = await import('./gestures.js' + V);
+const { pinch, isFistLike, handSpan } = await import('./gestures.js' + V);
 const { drawHands, sizeOverlayTo } = await import('./overlay.js' + V);
 const { createManipulator, MODE } = await import('./manipulator.js' + V);
 const { default: HolographicMaterial } = await import('./HolographicMaterial.js' + V);
 const { createGhostHands } = await import('./ghostHands.js' + V);
+const { smoothHandLandmarks, resetLandmarkSmoothing } = await import('./smoothLandmarks.js' + V);
 
 const video = document.getElementById('cam');
 const overlay = document.getElementById('overlay');
@@ -52,7 +53,13 @@ const hologramMaterial = new HolographicMaterial({
 });
 
 const ghostHands = createGhostHands(scene, HAND_CONNECTIONS);
-const isFist = (h) => h.gesture === 'Closed_Fist' || h.fistShape;
+const isFist = (h) => h.fistLike;
+
+// Interaction-tied visual feedback on the hologram itself, in place of haptics this can't
+// have — requested directly during testing ("depending on what we're interacting with,
+// add more color"). This is the coarse whole-object version; per-region glow (e.g. just
+// the legs while rotating) is a bigger, separate undertaking, not done here.
+const MODE_BRIGHTNESS = { idle: 1.0, grab: 1.6, transform: 1.6 };
 
 window.hologram = { scene, camera, renderer, controls, model: null, material: hologramMaterial };
 
@@ -108,6 +115,8 @@ function stopTracking() {
   stream = null;
   video.srcObject = null;
   hands = [];
+  resetLandmarkSmoothing();
+  hologramMaterial.uniforms.hologramBrightness.value = MODE_BRIGHTNESS.idle;
   overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
   ghostHands.update([], { camera, object: window.hologram.model ?? scene, aspect: 1 });
   readoutEl.textContent = '';
@@ -142,15 +151,17 @@ startRenderLoop({
     if (video.currentTime !== lastVideoTime) {
       lastVideoTime = video.currentTime;
       hands = tracker.read(video, performance.now());
+      smoothHandLandmarks(hands);
       for (const hand of hands) {
         hand.pinch = pinch(hand.landmarks, aspect, { gesture: hand.gesture });
-        hand.fistShape = isFistShape(hand.landmarks, aspect);
+        hand.fistLike = isFistLike(hand.gesture, hand.landmarks, aspect);
       }
 
       const mode = manipulator?.update(hands, aspect) ?? MODE.IDLE;
       modeEl.textContent = mode;
       modeEl.className = mode;
-      updateReadout();
+      hologramMaterial.uniforms.hologramBrightness.value = MODE_BRIGHTNESS[mode] ?? 1.0;
+      updateReadout(aspect);
     }
 
     // Real 3D hands (always on) are the primary visual feedback; the flat 2D skeleton
@@ -162,16 +173,18 @@ startRenderLoop({
   }
 });
 
-function updateReadout() {
+function updateReadout(aspect) {
   if (hands.length === 0) {
     readoutEl.textContent = 'no hands';
     return;
   }
-  readoutEl.textContent = hands
-    .map((h) => {
-      const p = h.pinch;
-      const state = p.pinching ? 'PINCH' : p.rejectedBy ? `no (${p.rejectedBy})` : 'open';
-      return `${h.handedness.padEnd(5)} ${h.gesture.padEnd(12)} ${state}`;
-    })
-    .join('\n');
+  const lines = hands.map((h) => {
+    const p = h.pinch;
+    const state = p.pinching ? 'PINCH' : p.rejectedBy ? `no (${p.rejectedBy})` : 'open';
+    return `${h.handedness.padEnd(5)} ${h.gesture.padEnd(12)} ${state}`;
+  });
+  // Printed so clap thresholds can be calibrated against a real hand next time, the same
+  // way pinch was — CLAP_CLOSE_SPAN/CLAP_ARM_SPAN in manipulator.js are still guesses.
+  if (hands.length === 2) lines.push(`span ${handSpan(hands[0], hands[1], aspect).toFixed(2)}`);
+  readoutEl.textContent = lines.join('\n');
 }

@@ -14,8 +14,13 @@ import * as THREE from 'three';
 const JOINT_COLOR = 0x4fd1ff;
 const PINCH_COLOR = 0x7fe3a1;
 const FIST_COLOR = 0xffd166;
-const JOINT_RADIUS = 0.012;
-const BONE_RADIUS = 0.005;
+// Thickened from the original 0.012/0.005 after live feedback: correctly more 3D-legible
+// than the flat overlay, but still read as "skeletal" (bead-and-stick) rather than the
+// filled-in passthrough hand referenced (Quest-style hand tracking). This is a step toward
+// that, not the full thing — an actually filled hand silhouette needs a real rigged mesh,
+// a bigger asset undertaking, not a size tweak.
+const JOINT_RADIUS = 0.02;
+const BONE_RADIUS = 0.011;
 
 const FINGERTIPS = new Set([4, 8, 12, 16, 20]);
 const PINCH_TIPS = new Set([4, 8]);

@@ -57,7 +57,7 @@ export function pinch(landmarks, aspect = 1, { threshold = PINCH_THRESHOLD, gest
   if (palm <= 0) return { ratio: Infinity, pinching: false, rejectedBy: 'no-palm' };
 
   const ratio = distance(thumb, index, aspect) / palm;
-  const rejectedBy = gesture === 'Closed_Fist' || isFistShape(landmarks, aspect) ? 'fist' : null;
+  const rejectedBy = isFistLike(gesture, landmarks, aspect) ? 'fist' : null;
 
   return { ratio, pinching: ratio < threshold && rejectedBy === null, rejectedBy };
 }
@@ -85,11 +85,29 @@ export function fingerReach(landmarks, aspect = 1) {
 // camera) went unrecognized, presumably because the classifier's training skews toward
 // palm-facing-camera poses. Curl, measured this way, does not care which way the hand
 // is turned.
+//
+// On its own this over-triggers: a thumbs-up and a loosely-closed hand both curl 3+
+// non-thumb fingertips too, so both were registering as a fist and grabbing the object
+// when live-tested. isFistLike() below is what should actually be called — this stays
+// exported for that and for fingerReach-style diagnostics.
 export function isFistShape(landmarks, aspect = 1) {
   const reach = fingerReach(landmarks, aspect);
   if (!reach) return false;
   const curled = [reach.index, reach.middle, reach.ring, reach.pinky].filter((r) => r < CURL_THRESHOLD).length;
   return curled >= 3;
+}
+
+// The actual "should this count as a grabbing fist" check. MediaPipe's classifier wins
+// when it has a confident opinion either way: Closed_Fist counts, and any other specific
+// label (Thumb_Up, Open_Palm, ...) means it does NOT, full stop — isFistShape is only
+// consulted when the classifier couldn't confidently label the pose at all ('None'),
+// which is exactly the punch-orientation gap it exists to backstop. Trusting a confident
+// alternative label over the geometric guess is what stops a thumbs-up or a loosely
+// closed hand from being read as a grab.
+export function isFistLike(gesture, landmarks, aspect = 1) {
+  if (gesture === 'Closed_Fist') return true;
+  if (gesture === 'None' || gesture == null) return isFistShape(landmarks, aspect);
+  return false;
 }
 
 // Distance between the two hands, in the same palm-relative units as pinch(), so it is
