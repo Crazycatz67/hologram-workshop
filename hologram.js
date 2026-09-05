@@ -82,6 +82,11 @@ loadModel({
     window.hologram.model = object;
     frameObject(object, camera, controls);
     manipulator = createManipulator(object, camera);
+    // Decided once from the loaded model's own mesh count — see manipulator.js. No manual
+    // override control exists yet since only a single-mesh scan exists to test against.
+    document.getElementById('explodeMode').textContent = manipulator.explodeIsLiteral
+      ? 'explode: literal'
+      : 'explode: stretch';
     setStatus(`${path} loaded · start the camera to control it`);
     startBtn.disabled = false;
   })

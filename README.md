@@ -11,7 +11,7 @@ manipulates a *downloaded* model. This one manipulates a scan of an object you a
 
 No install, no server — every page runs entirely in the browser:
 
-- **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience: closed fist to grab and move it or twist your wrist to spin it left/right; raise your other hand and move it up/down to tilt it; two-hand pinch to scale it; clap open hands to reset it (press `D` to reveal the camera/tracking view, hidden by default — real 3D "ghost hands" in the scene are the normal feedback instead)
+- **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience: closed fist to grab — move it, twist your wrist to spin it, move your hand closer/farther to push/pull it; raise your other hand and move it up/down to tilt it; two-hand pinch to scale it; two open hands pulling apart to stretch it; clap open hands to reset it (press `D` to reveal the camera/tracking view, hidden by default — real 3D "ghost hands" in the scene are the normal feedback instead)
 - **[Model viewer](https://crazycatz67.github.io/hologram-workshop/)** — the hologram alone, drag to orbit, no camera needed
 - **[Hand tracking](https://crazycatz67.github.io/hologram-workshop/hands.html)** — tracking on its own, with the raw pinch/gesture numbers on screen
 
@@ -26,7 +26,7 @@ browser, and once in System Settings → Privacy & Security → Camera.
 | 1 — Hand tracking foundation | Done, confirmed on a real webcam |
 | 2 — Static model in the browser | Done. Three.js + OrbitControls, no build step |
 | 3 — Hologram shader | Done. Fresnel glow + scanlines, tunable live |
-| 4 — Gesture-driven manipulation | Core done — grab/move, two-hand scale/rotate. Push/pull and explode not built yet |
+| 4 — Gesture-driven manipulation | All v1 gestures built. Grab (move/yaw/push-pull), pitch, scale, and clap confirmed on real hands; pitch/push-pull/explode still need their first live-hands test |
 | 5 — Polish and stretch | Not started |
 
 Full breakdown in [ROADMAP.md](ROADMAP.md); working conventions in [CLAUDE.md](CLAUDE.md).

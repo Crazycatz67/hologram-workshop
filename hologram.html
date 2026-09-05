@@ -48,10 +48,12 @@
     #status.error { color: #ff5c5c; }
     #fps { color: #9db4d0; }
     #loaded { color: #6b7d94; }
+    #explodeMode { color: #ff8a65; }
 
     #mode { color: #6b7d94; text-transform: uppercase; letter-spacing: 0.08em; }
     #mode.grab { color: #ffd166; border-color: rgba(255, 209, 102, 0.4); }
     #mode.transform { color: #4fd1ff; border-color: rgba(79, 209, 255, 0.4); }
+    #mode.explode { color: #ff8a65; border-color: rgba(255, 138, 101, 0.4); }
 
     button {
       font: inherit;
@@ -111,12 +113,13 @@
     <button id="reset">reset</button>
     <span id="status">loading model…</span>
     <span id="mode">idle</span>
+    <span id="explodeMode">—</span>
     <span id="fps">— fps</span>
     <span id="loaded">—</span>
   </div>
 
   <pre id="readout"></pre>
-  <div id="hint">closed fist — grab: move it, twist your wrist to spin it left/right · raise your other hand, move it up/down — tilt it · two-hand pinch — scale · clap open hands — reset · R — reset · D — show camera/tracking · drag — orbit camera</div>
+  <div id="hint">closed fist — grab: move it, twist your wrist to spin it left/right, hand bigger/smaller — push/pull · raise your other hand, move it up/down — tilt it · two-hand pinch — scale · two open hands apart — explode/stretch · clap open hands — reset · R — reset · D — show camera/tracking · drag — orbit camera</div>
 
   <script type="module">
     const stamp = Date.now();

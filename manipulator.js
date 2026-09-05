@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { createStabilizer } from './stabilizer.js';
-import { handSpan, handTwist, isFistLike } from './gestures.js';
+import { handSpan, handTwist, isFistLike, palmLength } from './gestures.js';
 
-export const MODE = { IDLE: 'idle', GRAB: 'grab', TRANSFORM: 'transform' };
+export const MODE = { IDLE: 'idle', GRAB: 'grab', TRANSFORM: 'transform', EXPLODE: 'explode' };
 
 const MIN_SCALE = 0.2;
 // Lowered from 5 after live testing: frameObject() already sizes the model to comfortably
@@ -18,10 +18,18 @@ const MAX_MOVE_PER_FRAME = 0.15;
 const MAX_SPAN_RATIO_PER_FRAME = 1.5;
 const MAX_TWIST_PER_FRAME = Math.PI / 3;
 const MAX_PITCH_PER_FRAME = Math.PI / 3;
+const MAX_DEPTH_RATIO_PER_FRAME = 1.5;
 
 // Radians of pitch per normalized frame-height the second hand moves — an untuned guess,
 // same as every other sensitivity constant here started out; needs a real hand to tune.
 const PITCH_SENSITIVITY = Math.PI;
+
+// Push/pull moves the object nearer or farther along the camera-to-object line, clamped
+// to this range of the distance it started at — close enough (0.3x) that pulling it
+// toward you feels real, far enough (3x) it can still retreat a long way, but it can
+// never clip into the camera or shrink to a vanishing point.
+const MIN_DEPTH_RATIO = 0.3;
+const MAX_DEPTH_RATIO = 3;
 
 // Keeps the object's pivot within this fraction of the visible frustum at its own depth,
 // so a fast or erratic drag can never carry it fully off-screen — losing it that way had
@@ -51,6 +59,21 @@ const CLAP_CLOSE_SPAN = 0.45;
 const CLAP_ARM_SPAN = 0.6;
 const CLAP_MIN_CLOSING_SPEED = 0.08;
 
+// Explode: two open hands (neither fisted nor pinching, keeping it out of grab/scale's
+// hand-shape space) pulling apart drives it, continuously, like scale rather than a
+// one-shot trigger like clap. Untuned guess for the span-to-amount conversion, same as
+// every other sensitivity constant here.
+const EXPLODE_SENSITIVITY = 0.6;
+const MAX_EXPLODE_SPAN_DELTA_PER_FRAME = 2;
+// Single-mesh objects (no separate parts to pull apart) get a non-uniform vertical stretch
+// instead — deliberately distinct from pinch-scale's uniform resize, so the two gestures
+// don't produce the same-looking result on an object like the chair.
+const MAX_STRETCH = 1.2;
+// Literal explode (multi-part meshes): each part moves outward from the object's overall
+// centroid along its own direction, up to this fraction of the object's own size. Only
+// unit-tested against synthetic multi-mesh data — no real multi-part scan exists yet.
+const MAX_EXPLODE_OFFSET = 0.6;
+
 function wristOf(hand) {
   return hand.landmarks[0];
 }
@@ -71,24 +94,58 @@ function clampToView(object, camera) {
   object.position.y = THREE.MathUtils.clamp(object.position.y, -maxY, maxY);
 }
 
+// Finds every mesh under `object` and records where each sits relative to the group's own
+// centroid, so literal explode has a "this part's outward direction" for each one to push
+// along. Assumes each mesh's own `.position` is meaningful relative to a shared parent —
+// true for a simple multi-mesh group (what the synthetic test below uses), but real
+// multi-part exports vary in how they nest transforms; revisit once a real one exists.
+function findExplodeParts(object) {
+  const parts = [];
+  object.traverse((child) => {
+    if (child.isMesh) parts.push(child);
+  });
+
+  if (parts.length < 2) return { literal: false, parts: [] };
+
+  const centroid = new THREE.Vector3();
+  for (const part of parts) centroid.add(part.position);
+  centroid.divideScalar(parts.length);
+
+  for (const part of parts) {
+    const offset = part.position.clone().sub(centroid);
+    part.userData.explodeHome = part.position.clone();
+    part.userData.explodeDir = offset.lengthSq() > 1e-8 ? offset.normalize() : new THREE.Vector3(0, 1, 0);
+  }
+
+  return { literal: true, parts };
+}
+
 export function createManipulator(object, camera) {
   const grab = createStabilizer({ enter: 3, exit: 6 });
   const transform = createStabilizer({ enter: 3, exit: 6 });
+  const explode = createStabilizer({ enter: 3, exit: 6 });
 
   const home = {
     position: object.position.clone(),
     quaternion: object.quaternion.clone(),
-    scale: object.scale.clone()
+    scale: object.scale.clone(),
+    distance: camera.position.distanceTo(object.position)
   };
+
+  const { literal: literalMode, parts: explodeParts } = findExplodeParts(object);
 
   let lastWrist = null;
   let lastTwist = null;
   let lastPitchWrist = null;
+  let lastPalm = null;
   let lastSpan = null;
+  let lastExplodeSpan = null;
+  let explodeAmount = 0;
   let mode = MODE.IDLE;
 
   let angularVelocity = 0;
   let pitchVelocity = 0;
+  let depthVelocity = 0;
   let linearVelocityX = 0;
   let linearVelocityY = 0;
 
@@ -99,10 +156,18 @@ export function createManipulator(object, camera) {
     lastWrist = null;
     lastTwist = null;
     lastPitchWrist = null;
+    lastPalm = null;
   }
 
   function clearTransform() {
     lastSpan = null;
+  }
+
+  // Only clears the tracking reference, not explodeAmount or the applied transform itself
+  // — releasing the gesture holds whatever shape it left, the same as letting go of grab
+  // leaves the object wherever it was moved to, rather than snapping back.
+  function clearExplode() {
+    lastExplodeSpan = null;
   }
 
   function performReset() {
@@ -111,10 +176,17 @@ export function createManipulator(object, camera) {
     object.scale.copy(home.scale);
     grab.reset();
     transform.reset();
+    explode.reset();
     clearGrab();
     clearTransform();
+    clearExplode();
+    explodeAmount = 0;
+    if (literalMode) {
+      for (const part of explodeParts) part.position.copy(part.userData.explodeHome);
+    }
     angularVelocity = 0;
     pitchVelocity = 0;
+    depthVelocity = 0;
     linearVelocityX = 0;
     linearVelocityY = 0;
     mode = MODE.IDLE;
@@ -146,6 +218,14 @@ export function createManipulator(object, camera) {
       return mode;
     },
 
+    // For a HUD indicator: which explode behavior this object will actually use, decided
+    // once from its mesh count at creation. True only means a second scan happened to be
+    // multi-part — no manual override exists yet, since only one scan (single-mesh) exists
+    // to test against.
+    get explodeIsLiteral() {
+      return literalMode;
+    },
+
     reset: performReset,
 
     update(hands, aspect) {
@@ -160,29 +240,44 @@ export function createManipulator(object, camera) {
       // gestures.js) — a thumbs-up and a loosely-closed hand were both registering as a
       // grab before that gating existed.
       const fisted = hands.some((h) => isFistLike(h.gesture, h.landmarks, aspect));
+      // Explode's trigger occupies a hand-shape space disjoint from both pinch (transform)
+      // and fist (grab) on purpose — two open hands, neither pinching nor fisted — so it
+      // can never fire from the same pose as either of those.
+      const openHanded =
+        hands.length === 2 && hands.every((h) => !isFistLike(h.gesture, h.landmarks, aspect) && !h.pinch?.pinching);
 
-      // Two-handed transform outranks grab: with both hands up, a fist reading on one of
-      // them is far more likely to be a misclassification than an intent to drag.
+      // Two-handed transform outranks grab and explode: with both hands up, a fist or
+      // open-hand reading on either one is far more likely to be a misclassification mid-
+      // pinch than a real change of gesture.
       const transforming = transform.update(twoHanded);
-      const grabbing = grab.update(fisted && !transforming);
+      const exploding = explode.update(openHanded && !transforming);
+      const grabbing = grab.update(fisted && !transforming && !exploding);
 
       if (transforming) {
         mode = MODE.TRANSFORM;
         clearGrab();
+        clearExplode();
         // Hysteresis can hold this mode true for a few frames after a hand drops out —
         // that's the point of it, so a momentary tracking dropout doesn't cancel the
         // gesture. But it means `hands` can still have fewer than 2 entries here.
         // Skipping the write just holds the last scale until hysteresis resolves.
         if (hands.length === 2) applyTransform(hands, aspect);
+      } else if (exploding) {
+        mode = MODE.EXPLODE;
+        clearGrab();
+        clearTransform();
+        if (hands.length === 2) applyExplode(hands, aspect);
       } else if (grabbing) {
         mode = MODE.GRAB;
         clearTransform();
+        clearExplode();
         if (hands.length >= 1) setGrabVelocity(hands, aspect);
         else clearGrab(); // hand is gone, not just paused — drop the reference so no jump on return
       } else {
         mode = MODE.IDLE;
         clearGrab();
         clearTransform();
+        clearExplode();
       }
 
       applyMomentum();
@@ -201,10 +296,16 @@ export function createManipulator(object, camera) {
   // horizontally"). One hand holds and spins side-to-side, the other tips it, matching how
   // you'd actually handle a real object with both hands. The second hand doesn't need any
   // particular shape; it just needs to not be the hand already doing the grabbing.
+  //
+  // The grabbing hand's own apparent size also drives push/pull: moving your fist closer
+  // to the camera makes it read bigger in frame, farther makes it read smaller, and that
+  // change is a genuine depth signal — see palmLength() in gestures.js for why it's used
+  // over MediaPipe's own (noisier) z-coordinate.
   function setGrabVelocity(hands, aspect) {
     const hand = hands.find((h) => isFistLike(h.gesture, h.landmarks, aspect)) ?? hands[0];
     const wrist = wristOf(hand);
     const twist = handTwist(hand.landmarks, aspect);
+    const palm = palmLength(hand.landmarks, aspect);
     const pitchHand = hands.find((h) => h !== hand);
 
     if (lastWrist) {
@@ -244,6 +345,16 @@ export function createManipulator(object, camera) {
       lastPitchWrist = null;
     }
 
+    if (lastPalm && palm > 0) {
+      const ratio = palm / lastPalm;
+      if (ratio > 1 / MAX_DEPTH_RATIO_PER_FRAME && ratio < MAX_DEPTH_RATIO_PER_FRAME) {
+        // Hand got bigger (closer to camera) -> pull the object closer too; smaller -> push
+        // it away. Stored as a ratio, same shape as scale's, not a screen-space delta.
+        depthVelocity = ratio - 1;
+      }
+    }
+    lastPalm = palm;
+
     lastWrist = { x: wrist.x, y: wrist.y };
     lastTwist = twist;
   }
@@ -266,6 +377,25 @@ export function createManipulator(object, camera) {
     }
     pitchVelocity *= VELOCITY_DAMPING;
 
+    if (Math.abs(depthVelocity) > MIN_LINEAR_VELOCITY) {
+      // Moves along the actual camera-to-object line (via the camera's current basis),
+      // not a fixed world axis, so this still behaves correctly after the view has been
+      // orbited with the mouse.
+      const currentDistance = camera.position.distanceTo(object.position);
+      const direction = object.position.clone().sub(camera.position).normalize();
+      // Divides rather than multiplies: depthVelocity is positive when the hand got
+      // BIGGER (closer to camera), and that should SHRINK the object's distance (pull it
+      // closer), not grow it. Multiplying here was backwards and sent the object away
+      // from the camera when the hand approached it -- caught by testing before shipping.
+      const targetDistance = THREE.MathUtils.clamp(
+        currentDistance / (1 + depthVelocity),
+        home.distance * MIN_DEPTH_RATIO,
+        home.distance * MAX_DEPTH_RATIO
+      );
+      object.position.copy(camera.position).addScaledVector(direction, targetDistance);
+    }
+    depthVelocity *= VELOCITY_DAMPING;
+
     if (linearVelocityX * linearVelocityX + linearVelocityY * linearVelocityY > MIN_LINEAR_VELOCITY * MIN_LINEAR_VELOCITY) {
       object.position.x += linearVelocityX;
       object.position.y += linearVelocityY;
@@ -287,5 +417,40 @@ export function createManipulator(object, camera) {
     }
 
     lastSpan = span;
+  }
+
+  // Two open hands pulling apart: on a multi-part object, each mesh slides outward from
+  // the group's centroid along its own direction (literal explode); on a single-mesh
+  // object like the chair, there's nothing separate to pull apart, so it stretches the
+  // whole hologram vertically instead — deliberately non-uniform, so it doesn't look like
+  // the same uniform resize two-hand pinch already does.
+  //
+  // Both branches update incrementally from the span delta, the same pattern applyTransform
+  // uses for scale, rather than computing from a captured baseline — that avoids a
+  // real bug class: a baseline captured fresh each time explode mode is re-entered would
+  // compound with whatever amount was already applied from a previous session.
+  function applyExplode(hands, aspect) {
+    const span = handSpan(hands[0], hands[1], aspect);
+
+    if (lastExplodeSpan !== null) {
+      const delta = span - lastExplodeSpan;
+      if (Math.abs(delta) < MAX_EXPLODE_SPAN_DELTA_PER_FRAME) {
+        if (literalMode) {
+          explodeAmount = THREE.MathUtils.clamp(explodeAmount + delta * EXPLODE_SENSITIVITY, 0, 1);
+          for (const part of explodeParts) {
+            part.position.copy(part.userData.explodeHome).addScaledVector(part.userData.explodeDir, explodeAmount * MAX_EXPLODE_OFFSET);
+          }
+        } else {
+          const stretchRatio = 1 + delta * EXPLODE_SENSITIVITY;
+          object.scale.y = THREE.MathUtils.clamp(
+            object.scale.y * stretchRatio,
+            home.scale.y,
+            home.scale.y * (1 + MAX_STRETCH)
+          );
+        }
+      }
+    }
+
+    lastExplodeSpan = span;
   }
 }

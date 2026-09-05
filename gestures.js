@@ -30,7 +30,13 @@ function distance(a, b, aspect) {
   return Math.hypot(dx, dy);
 }
 
-function palmLength(landmarks, aspect) {
+// Exported for a second purpose beyond normalizing the ratios above: since it's a raw,
+// un-normalized 2D length, it also shrinks and grows with the hand's actual distance from
+// the camera — closer reads bigger, farther reads smaller, ordinary perspective. That
+// makes its own frame-to-frame change a usable depth proxy for push/pull, and one that
+// doesn't depend on MediaPipe's own z-coordinate, which the roadmap already flags as
+// noisier than x/y.
+export function palmLength(landmarks, aspect) {
   return distance(landmarks[LANDMARK.WRIST], landmarks[LANDMARK.MIDDLE_MCP], aspect);
 }
 
