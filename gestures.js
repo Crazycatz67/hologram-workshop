@@ -6,6 +6,7 @@ export const LANDMARK = {
   MIDDLE_MCP: 9,
   MIDDLE_TIP: 12,
   RING_TIP: 16,
+  PINKY_MCP: 17,
   PINKY_TIP: 20
 };
 
@@ -13,19 +14,12 @@ export const LANDMARK = {
 // far too loose and left a wide band where a closed fist also qualified.
 export const PINCH_THRESHOLD = 0.25;
 
-// How far the pinch point must sit from the wrist, in palm lengths. A real pinch happens
-// out at the end of the fingers; in a fist every tip curls back toward the palm, which is
-// what made a fist read as a pinch when the back of the hand faced the camera.
-//
-// Measured on a real hand 2026-09-05: a deliberate pinch averages ~1.20, a closed fist with
-// the back of the hand turned reads ~0.9. Those two are closer together than is comfortable,
-// so the cutoff sits midway at 1.05 — about 0.15 of margin on each side rather than favouring
-// one failure mode over the other.
-//
-// This guard does not have to catch every fist alone: the Closed_Fist veto below is the
-// primary defence, and this only backstops the back-of-hand case the classifier misses.
-// If fists start registering again, raise it; if pinches start dropping out, lower it.
-export const MIN_PINCH_REACH = 1.05;
+// A fist is "curled" when most non-thumb fingertips sit close to the wrist. Measured
+// against a real hand: an open/pinching hand's fingers reach out past ~1.0-1.2 palm
+// lengths; a genuinely curled fist's sit under ~0.9. The thumb is excluded — it behaves
+// too differently (it doesn't curl the same way the other four do) to be part of a
+// single shared threshold.
+const CURL_THRESHOLD = 0.9;
 
 // Landmark x and y are each normalized against their own axis, so on a 16:9 frame a
 // horizontal gap reads ~1.8x shorter than the same gap measured vertically. Undo that
@@ -47,28 +41,29 @@ function palmLength(landmarks, aspect) {
 //
 // `gesture` is the recognizer's own classification. When it says Closed_Fist, that wins:
 // the two readings are otherwise computed independently and both fire at once on a fist.
+//
+// A previous version also rejected a pinch whose thumb-index midpoint sat too close to the
+// wrist ("reach"), to catch a curled fist reading as a pinch. Removed 2026-09-05: reach is
+// a 2D-projected distance, and a real pinch performed facing the camera dead-on foreshortens
+// in exactly the same way a curled fist does — the metric could not actually tell them apart
+// across viewing angles, it just happened to on the one angle it was tuned against. Fixed on
+// a real hand: facing the camera, a genuine pinch measured as "curled" and silently failed.
+// `isFistShape()` below is the replacement — it targets the actual fist shape instead.
 export function pinch(landmarks, aspect = 1, { threshold = PINCH_THRESHOLD, gesture = null } = {}) {
-  const wrist = landmarks[LANDMARK.WRIST];
   const thumb = landmarks[LANDMARK.THUMB_TIP];
   const index = landmarks[LANDMARK.INDEX_TIP];
   const palm = palmLength(landmarks, aspect);
 
-  if (palm <= 0) return { ratio: Infinity, reach: 0, pinching: false, rejectedBy: 'no-palm' };
+  if (palm <= 0) return { ratio: Infinity, pinching: false, rejectedBy: 'no-palm' };
 
   const ratio = distance(thumb, index, aspect) / palm;
+  const rejectedBy = gesture === 'Closed_Fist' || isFistShape(landmarks, aspect) ? 'fist' : null;
 
-  const midpoint = { x: (thumb.x + index.x) / 2, y: (thumb.y + index.y) / 2 };
-  const reach = distance(midpoint, wrist, aspect) / palm;
-
-  let rejectedBy = null;
-  if (gesture === 'Closed_Fist') rejectedBy = 'fist';
-  else if (reach < MIN_PINCH_REACH) rejectedBy = 'curled';
-
-  return { ratio, reach, pinching: ratio < threshold && rejectedBy === null, rejectedBy };
+  return { ratio, pinching: ratio < threshold && rejectedBy === null, rejectedBy };
 }
 
 // How far each fingertip sits from the wrist, in palm lengths. Useful for telling an
-// extended hand from a balled one, and for calibrating MIN_PINCH_REACH against real hands.
+// extended hand from a balled one, and for calibrating thresholds against real hands.
 export function fingerReach(landmarks, aspect = 1) {
   const wrist = landmarks[LANDMARK.WRIST];
   const palm = palmLength(landmarks, aspect);
@@ -83,6 +78,20 @@ export function fingerReach(landmarks, aspect = 1) {
   };
 }
 
+// Geometric fist detection, independent of hand orientation: true when at least 3 of the
+// 4 non-thumb fingertips sit close to the wrist. Built as a supplement to MediaPipe's own
+// Closed_Fist classification after finding on a real hand that Closed_Fist does not fire
+// reliably in every hand orientation — a fist held knuckles-toward-camera ("punching" the
+// camera) went unrecognized, presumably because the classifier's training skews toward
+// palm-facing-camera poses. Curl, measured this way, does not care which way the hand
+// is turned.
+export function isFistShape(landmarks, aspect = 1) {
+  const reach = fingerReach(landmarks, aspect);
+  if (!reach) return false;
+  const curled = [reach.index, reach.middle, reach.ring, reach.pinky].filter((r) => r < CURL_THRESHOLD).length;
+  return curled >= 3;
+}
+
 // Distance between the two hands, in the same palm-relative units as pinch(), so it is
 // comparable across users. Phase 4 uses the change in this for two-hand scale.
 export function handSpan(handA, handB, aspect = 1) {
@@ -91,10 +100,23 @@ export function handSpan(handA, handB, aspect = 1) {
   return distance(handA.landmarks[LANDMARK.WRIST], handB.landmarks[LANDMARK.WRIST], aspect) / palm;
 }
 
-// Signed angle of the line between the two hands. Phase 4 uses the frame-to-frame delta
-// for two-hand rotation.
+// Signed angle of the line between the two hands. No longer used for the primary rotate
+// gesture (see handTwist) but kept — a future two-hand gesture may still want it.
 export function handAngle(handA, handB, aspect = 1) {
   const a = handA.landmarks[LANDMARK.WRIST];
   const b = handB.landmarks[LANDMARK.WRIST];
+  return Math.atan2(b.y - a.y, (b.x - a.x) * aspect);
+}
+
+// Signed angle, in the camera's own image plane, of the line across a single hand's
+// knuckles (index MCP to pinky MCP). Twisting your wrist like turning a doorknob rotates
+// this line visibly in the 2D image even though the motion is really a 3D rotation of the
+// forearm — using knuckles rather than fingertips is what keeps this trackable while the
+// hand is held in a fist, since fingertips curl out of view but knuckles stay put. Feeds
+// the single-hand grab-and-twist rotate gesture: the manipulator tracks the frame-to-frame
+// change in this angle while a hand is gripping, not its absolute value.
+export function handTwist(landmarks, aspect = 1) {
+  const a = landmarks[LANDMARK.INDEX_MCP];
+  const b = landmarks[LANDMARK.PINKY_MCP];
   return Math.atan2(b.y - a.y, (b.x - a.x) * aspect);
 }

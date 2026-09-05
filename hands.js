@@ -6,7 +6,7 @@ const V = new URL(import.meta.url).search;
 
 const { startCamera, stopCamera, describeCameraError } = await import('./camera.js' + V);
 const { createHandTracker, HAND_CONNECTIONS } = await import('./handTracker.js' + V);
-const { pinch, handSpan, handAngle, fingerReach } = await import('./gestures.js' + V);
+const { pinch, handSpan, handAngle, fingerReach, isFistShape } = await import('./gestures.js' + V);
 const { drawHands, sizeOverlayTo } = await import('./overlay.js' + V);
 
 const video = document.getElementById('cam');
@@ -82,6 +82,7 @@ function loop() {
         // pinch, rather than both firing off the same balled-up hand.
         hand.pinch = pinch(hand.landmarks, aspect, { gesture: hand.gesture });
         hand.reach = fingerReach(hand.landmarks, aspect);
+        hand.fistShape = isFistShape(hand.landmarks, aspect);
       }
       updateReadout(hands, aspect);
     }
@@ -114,8 +115,8 @@ function updateReadout(hands, aspect) {
         : 'open';
     const r = h.reach;
     return [
-      `${h.handedness.padEnd(5)} ${h.gesture} (${h.score.toFixed(2)})`,
-      `      gap ${h.pinch.ratio.toFixed(2)}  reach ${h.pinch.reach.toFixed(2)}  ${state}`,
+      `${h.handedness.padEnd(5)} ${h.gesture} (${h.score.toFixed(2)})  fistShape:${h.fistShape}`,
+      `      gap ${h.pinch.ratio.toFixed(2)}  ${state}`,
       r ? `      tips t${r.thumb} i${r.index} m${r.middle} r${r.ring} p${r.pinky}` : ''
     ].filter(Boolean);
   });
