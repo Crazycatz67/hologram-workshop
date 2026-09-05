@@ -94,7 +94,7 @@
 - ~~`jarvis`'s "3D models can be resource-intensive" warning~~ — **not a concern at this mesh size.** 76K triangles, 1 draw call, 1 texture. Revisit only if Phase 4's per-frame gesture work adds cost, since the model itself clearly isn't the bottleneck.
 - ~~Possible need for mesh decimation before compression~~ — **not needed.** The scan is already light; decimation would be solving a problem that doesn't exist (efficiency gut-check applies).
 - **Serving note:** the page needs a static server, not `file://` — `GLTFLoader` uses `fetch()`, which browsers block on local files. `.claude/launch.json` runs `python -m http.server 8080` for this.
-- **Carried into Phase 3:** the floor patch (2m across) and wall sliver surrounding the chair are cosmetically fine on a textured model but will read badly as a hologram. Needs trimming — see Phase 3.
+- ~~Floor patch / wall sliver~~ — **resolved 2026-09-05, see Phase 3.**
 
 ---
 
@@ -110,7 +110,7 @@
 - Three.js Journey's "Hologram Shader" lesson / Matt Park's Medium walkthrough — for understanding the underlying Fresnel technique, even if not hand-writing GLSL.
 
 **Known risks / unknowns:**
-- **Trim the floor/wall first (new, 2026-09-05).** The scan includes a ~2m floor patch and a wall sliver around the chair. Harmless with the real texture on, but as a hologram they'd glow like a floating slab of ground. Cheapest fix is Scaniverse's own built-in crop tool before re-exporting (no new dependency, no code); alternatives are cropping in Blender, or filtering triangles by bounding box at load time in `loadModel.js`. **Needs a decision before Phase 3 tuning starts.**
+- ~~Trim the floor/wall~~ — **done in code, 2026-09-05, not by re-scanning.** Rather than have the scan redone with Scaniverse's crop tool, `trimGeometry.js` removes triangles by distance from a center point, applied in both `main.js` and `hologram.js` after load. The cutoff wasn't guessed: histogramming the real vertex data (`assets/chair/chair.glb`) found a genuinely empty gap in the distance-from-center distribution between radius 0.58 and 0.77 — the wall sliver sits entirely outside it, the chair entirely inside, confirmed insensitive to the exact radius chosen within that gap (55–61% of triangles kept across 0.60–0.75). Result: bounding box shrinks from 2.00×0.90×1.91m to 1.30×0.87×1.30m, wall fully gone, floor reduced to a small disc directly under the chair's own footprint (reads more like a rug than a room). First attempt at mesh-connectivity clustering (union-find over shared edges) was abandoned — the scan turned out to be fragmented into many small disconnected islands (largest only 2.5% of vertices) rather than one clean surface per object, so a distance-based cut proved more robust than a topological one for this data.
 - Explicitly flagged as untested in the research doc: the shader has only been verified against clean primitive geometry, not real scanned meshes with LiDAR noise/non-manifold edges (carried over from Phase 0's risk).
 - Bloom post-processing is noted as pairing well with this material but is not required for "done" — treat it as a Phase 5 polish item, not a Phase 3 blocker.
 

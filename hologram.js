@@ -2,6 +2,13 @@ const V = new URL(import.meta.url).search;
 
 const { createScene, startRenderLoop } = await import('./scene.js' + V);
 const { loadModel, frameObject } = await import('./loadModel.js' + V);
+const { trimByCylinder } = await import('./trimGeometry.js' + V);
+
+// Measured against this specific scan (see ROADMAP.md Phase 2/3): a histogram of vertex
+// distance from this center shows a genuine empty gap between radius 0.58 and 0.77 — the
+// wall sliver sits entirely outside it, the chair entirely inside. Re-derive these numbers
+// from scratch if this ever runs against a different scan.
+const CHAIR_TRIM = { center: { x: -0.02, z: -0.14 }, radius: 0.65 };
 const { startCamera, stopCamera, describeCameraError } = await import('./camera.js' + V);
 const { createHandTracker, HAND_CONNECTIONS } = await import('./handTracker.js' + V);
 const { pinch } = await import('./gestures.js' + V);
@@ -41,6 +48,7 @@ loadModel({
   mtlPath: 'assets/chair/chair.mtl'
 })
   .then(({ object, path }) => {
+    trimByCylinder(object, CHAIR_TRIM);
     scene.add(object);
     window.hologram.model = object;
     frameObject(object, camera, controls);

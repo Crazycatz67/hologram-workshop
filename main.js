@@ -4,6 +4,10 @@ const V = new URL(import.meta.url).search;
 
 const { createScene, startRenderLoop } = await import('./scene.js' + V);
 const { loadModel, frameObject } = await import('./loadModel.js' + V);
+const { trimByCylinder } = await import('./trimGeometry.js' + V);
+
+// See hologram.js for how these numbers were derived from the real scan data.
+const CHAIR_TRIM = { center: { x: -0.02, z: -0.14 }, radius: 0.65 };
 
 const statusEl = document.getElementById('status');
 const fpsEl = document.getElementById('fps');
@@ -29,6 +33,7 @@ loadModel({
   mtlPath: 'assets/chair/chair.mtl'
 })
   .then(({ object, path }) => {
+    trimByCylinder(object, CHAIR_TRIM);
     scene.add(object);
     window.hologram.model = object;
     const { size } = frameObject(object, camera, controls);
