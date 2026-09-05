@@ -9,6 +9,18 @@
 - **2026-09-04 (2):** Object to scan chosen (toy plush). Leap Motion Controller reconfirmed shelved (cost, not capability — no new info reopens it). Draco vs. Meshopt framing changed: don't presuppose Meshopt as default, benchmark both against the real scan and combine what each reveals. Pepper's Ghost physical rig moved from undecided to provisionally in scope, contingent on Phase 4 working first plus a deliberate cost check. Explode-gesture-on-a-single-mesh-object and voice-layer-scope questions remain open — see `ROADMAP.md`.
 - **2026-09-04:** Initial version, generated from `hologram-project-research.md` (sessions 1–5) and the kickoff brief. Companion doc `ROADMAP.md` created same day.
 
+## Repo
+
+`github.com/Crazycatz67/hologram-workshop` (public, created 2026-09-05). Development happens on the Windows desktop, but **the webcam testing has to happen on the Mac laptop — the desktop has no camera.** Push from one, pull on the other; that split is the reason this is on GitHub at all.
+
+Running it locally (`python` on Windows, `python3` on macOS):
+
+```
+python serve.py          # then open http://localhost:8080
+```
+
+A static server is required — `GLTFLoader` uses `fetch()`, which browsers block on `file://` URLs, and `getUserMedia` needs a secure context (localhost counts).
+
 ## What This Is
 
 A browser-based "hologram" demo: a real object is LiDAR-scanned on an iPhone, rendered in Three.js with a holographic shader, and manipulated live by hand gestures tracked through the webcam (pinch to scale, closed fist to grab/move, two-hand motion to rotate). Screen-based, Tony-Stark-workshop-monitor aesthetic — not AR passthrough, not a Vision Pro app. It directly extends the existing ASL fingerspelling project's hand-tracking pipeline rather than starting one from scratch.
