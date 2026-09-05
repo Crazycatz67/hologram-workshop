@@ -11,7 +11,7 @@ manipulates a *downloaded* model. This one manipulates a scan of an object you a
 
 No install, no server — every page runs entirely in the browser:
 
-- **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience: holographic chair, closed fist to move it, two-hand pinch to scale and rotate
+- **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience: holographic chair over your live camera feed, closed fist to move it, two-hand pinch to scale and rotate
 - **[Model viewer](https://crazycatz67.github.io/hologram-workshop/)** — the hologram alone, drag to orbit, no camera needed
 - **[Hand tracking](https://crazycatz67.github.io/hologram-workshop/hands.html)** — tracking on its own, with the raw pinch/gesture numbers on screen
 
@@ -61,7 +61,8 @@ Then open <http://localhost:8080>.
 | `manipulator.js` | Maps stabilised gestures onto the model (grab/move, scale, rotate) |
 | `serve.py` | Static server that sends `no-store` |
 | `analyze_scan.py` | Suggests crop parameters for a new raw scan (see ROADMAP.md) |
+| `repair_scan.py` | Scriptable mesh repair (PyMeshLab, no GUI) — see ROADMAP.md for what worked and what didn't |
 
 No bundler and no dependencies to install for the site itself — Three.js and MediaPipe
-both load from a CDN via an import map. `analyze_scan.py` is a local dev tool and needs
-`numpy`.
+both load from a CDN via an import map. `analyze_scan.py` needs `numpy`; `repair_scan.py`
+needs `pymeshlab`. Both are local dev tools, not part of what ships to the browser.

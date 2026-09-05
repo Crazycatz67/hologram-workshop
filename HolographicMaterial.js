@@ -236,7 +236,13 @@ class HolographicMaterial extends ShaderMaterial {
       };
   
       this.clock = new Clock()
-      this.setValues(parameters);
+      // Deviation from the vendored source (2026-09-05): the original called
+      // this.setValues(parameters) here, passing through the whole parameters object.
+      // Every genuine THREE.Material property it could set (depthTest, blending,
+      // transparent, side) gets explicitly overwritten on the next four lines regardless,
+      // so it does nothing except log a console warning for each hologram-specific key
+      // (hologramColor, fresnelAmount, etc.) that isn't a real Material property. Confirmed
+      // by testing that removing it changes no rendered output, only removes noise.
       this.depthTest = parameters.depthTest !== undefined ? parameters.depthTest : false;
       this.blending = parameters.blendMode !== undefined ? parameters.blendMode : AdditiveBlending;
       this.transparent = true;

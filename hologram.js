@@ -27,7 +27,9 @@ const readoutEl = document.getElementById('readout');
 const startBtn = document.getElementById('start');
 const resetBtn = document.getElementById('reset');
 
-const { scene, camera, renderer, controls } = createScene(document.getElementById('stage'));
+const { scene, camera, renderer, controls } = createScene(document.getElementById('stage'), {
+  transparentBackground: true
+});
 
 let manipulator = null;
 let tracker = null;

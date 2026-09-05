@@ -5,36 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Hologram Project — Phase 4: Gesture Control</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #0b0d10; overflow: hidden; }
-    #stage { position: fixed; inset: 0; }
-    #stage canvas { display: block; width: 100%; height: 100%; }
+    html, body { margin: 0; height: 100%; background: #05070a; overflow: hidden; }
 
-    /* Camera feed sits small in the corner: the hologram is the subject, the feed is
-       just enough to see that tracking is working. */
-    #feed {
-      position: fixed;
-      right: 12px;
-      bottom: 12px;
-      width: 280px;
-      aspect-ratio: 4 / 3;
-      border: 1px solid rgba(120, 220, 255, 0.25);
-      border-radius: 6px;
-      overflow: hidden;
-      background: #05080b;
-    }
+    /* Layering, back to front: the real room (video) -> the hand skeleton drawn over it
+       -> the hologram itself, rendered with a transparent clear so the room shows through
+       behind it. This is what makes it read as "a hologram appearing in your room" rather
+       than "a 3D viewer next to a webcam preview." */
     #cam, #overlay {
-      position: absolute;
+      position: fixed;
       inset: 0;
       width: 100%;
       height: 100%;
       object-fit: cover;
     }
-    #cam { transform: scaleX(-1); }
+    #cam { z-index: 0; transform: scaleX(-1); background: #000; }
+    #overlay { z-index: 1; }
+
+    #stage { position: fixed; inset: 0; z-index: 2; }
+    #stage canvas { display: block; width: 100%; height: 100%; }
 
     #hud {
       position: fixed;
       top: 12px;
       left: 12px;
+      z-index: 3;
       display: flex;
       gap: 8px;
       align-items: center;
@@ -72,6 +66,7 @@
       position: fixed;
       left: 12px;
       bottom: 12px;
+      z-index: 3;
       margin: 0;
       font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       color: #9db4d0;
@@ -87,6 +82,7 @@
       position: fixed;
       left: 50%;
       bottom: 14px;
+      z-index: 3;
       transform: translateX(-50%);
       font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       color: rgba(255, 255, 255, 0.4);
@@ -104,12 +100,9 @@
   </script>
 </head>
 <body>
+  <video id="cam" playsinline muted></video>
+  <canvas id="overlay"></canvas>
   <div id="stage"></div>
-
-  <div id="feed">
-    <video id="cam" playsinline muted></video>
-    <canvas id="overlay"></canvas>
-  </div>
 
   <div id="hud">
     <button id="start" disabled>start camera</button>

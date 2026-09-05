@@ -1,15 +1,19 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-export function createScene(container = document.body) {
+// transparentBackground: skips the opaque scene color and clears the canvas to alpha 0,
+// so whatever sits behind it in the page (hologram.js puts the live camera feed there)
+// shows through. main.js wants the plain opaque viewer instead, so this defaults off.
+export function createScene(container = document.body, { transparentBackground = false } = {}) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0b0d10);
+  if (!transparentBackground) scene.background = new THREE.Color(0x0b0d10);
 
   const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 100);
   camera.position.set(0, 0.4, 2);
 
   // Canvas size comes from CSS; the render loop syncs the drawing buffer to it.
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: transparentBackground });
+  if (transparentBackground) renderer.setClearColor(0x000000, 0);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.appendChild(renderer.domElement);
 
