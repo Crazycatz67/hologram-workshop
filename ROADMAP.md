@@ -206,8 +206,8 @@ Port the ASL project's `stabilizer.js` hysteresis so gestures don't misfire on s
 
 ## Next Concrete Action
 
-**Open `hands.html` on a machine with a webcam and check the four unknowns listed under Phase 1** — live FPS, `Closed_Fist` reliability, the pinch threshold, and whether the handedness labels are inverted. That is the only thing blocking Phase 1 from being marked done, and it needs real hands rather than more code.
+**Test the newly-built pitch+yaw rotation and clap-to-reset on real hardware** — both shipped this session but neither has a confirmed real-hands result yet. Specifically:
+- Does raising the second hand and moving it up/down actually tilt the object the way it's supposed to, independent of the grabbing hand's yaw+move?
+- Does a clap fire at all now? If not, report what the on-screen `span` number reads right as your hands come together — that's the number needed to calibrate `CLAP_CLOSE_SPAN`/`CLAP_ARM_SPAN` for real, instead of guessing again.
 
-Then either:
-- **Phase 3 (hologram shader)** — first decide how to trim the floor patch / wall sliver off the scan (Scaniverse's own crop tool is the cheapest option).
-- **Phase 4 (gesture manipulation)** — needs Phase 1 confirmed first, since it builds directly on the gesture readings.
+Once the core gesture set (grab/move/yaw/pitch/scale/clap) is confirmed solid, the next real decision point is picking between: building push/pull + explode (the rest of Phase 4's v1 gesture set), or resolving one of the open Phase 5 questions (second multi-part scan, Poisson-mesh adoption, voice scope).
