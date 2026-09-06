@@ -22,7 +22,7 @@ browser, and once in System Settings → Privacy & Security → Camera.
 
 | Phase | State |
 | --- | --- |
-| 0 — Capture the object | Done. `assets/chair/chair.glb`, cropped to just the chair |
+| 0 — Capture the object | Done. Raw scan `assets/chair/chair.glb`, cleaned to `chair_clean.obj` by `clean_scan.py` |
 | 1 — Hand tracking foundation | Done, confirmed on a real webcam |
 | 2 — Static model in the browser | Done. Three.js + OrbitControls, no build step |
 | 3 — Hologram shader | Done. Fresnel glow + scanlines, tunable live |
@@ -51,7 +51,7 @@ Then open <http://localhost:8080>.
 | `hands.html`, `hands.js` | Hand tracking only, with raw gesture numbers on screen |
 | `scene.js` | Renderer, camera, lights, controls, render loop |
 | `loadModel.js` | GLB loader with OBJ+MTL fallback, and camera framing |
-| `trimGeometry.js` | Crops scan geometry to a cylinder — removes whatever else got scanned around the object |
+| `trimGeometry.js` | Cylinder crop, kept for reference — no longer used by either page now that cleanup happens offline |
 | `HolographicMaterial.js` | The hologram shader (vendored MIT source, not an npm package) |
 | `camera.js` | Webcam setup and teardown |
 | `handTracker.js` | MediaPipe `GestureRecognizer`, two hands |
@@ -63,7 +63,8 @@ Then open <http://localhost:8080>.
 | `smoothLandmarks.js` | Exponential smoothing on raw landmark positions, keyed by handedness |
 | `serve.py` | Static server that sends `no-store` |
 | `analyze_scan.py` | Suggests crop parameters for a new raw scan (see ROADMAP.md) |
-| `repair_scan.py` | Scriptable mesh repair (PyMeshLab, no GUI) — see ROADMAP.md for what worked and what didn't |
+| `clean_scan.py` | **Raw scan → clean object.** Detects and removes the ground plane (without deleting the object's base), rebuilds missing structure by mirroring, fills gaps, welds watertight, decimates for the web |
+| `repair_scan.py` | Lower-level mesh repair (PyMeshLab, no GUI) — see ROADMAP.md for what worked and what didn't |
 
 No bundler and no dependencies to install for the site itself — Three.js and MediaPipe
 both load from a CDN via an import map. `analyze_scan.py` needs `numpy`; `repair_scan.py`

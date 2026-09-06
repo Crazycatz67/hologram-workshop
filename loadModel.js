@@ -11,6 +11,13 @@ function loadGLB(path) {
 
 function loadOBJ(objPath, mtlPath) {
   return new Promise((resolve, reject) => {
+    // No MTL is a normal case, not a degraded one: clean_scan.py writes plain geometry
+    // with no material, because every page here replaces the material with the hologram
+    // shader anyway. Asking MTLLoader for a file that was never written would just 404.
+    if (!mtlPath) {
+      new OBJLoader().load(objPath, resolve, undefined, reject);
+      return;
+    }
     new MTLLoader().load(
       mtlPath,
       (materials) => {
@@ -23,23 +30,26 @@ function loadOBJ(objPath, mtlPath) {
   });
 }
 
-// Scaniverse can export either format, so try GLB first and fall back to OBJ+MTL.
-// Both failures are reported together — otherwise the OBJ error masks the GLB one and
-// the message points at the wrong file.
+// Scaniverse can export either format, and clean_scan.py writes OBJ, so try whichever
+// paths were actually given — GLB first when there is one. Failures are reported
+// together, otherwise the OBJ error masks the GLB one and the message points at the
+// wrong file.
 export async function loadModel({ glbPath, objPath, mtlPath }) {
   let glbError;
-  try {
-    return { object: await loadGLB(glbPath), path: glbPath };
-  } catch (err) {
-    glbError = err;
+  if (glbPath) {
+    try {
+      return { object: await loadGLB(glbPath), path: glbPath };
+    } catch (err) {
+      glbError = err;
+    }
   }
 
   try {
     return { object: await loadOBJ(objPath, mtlPath), path: objPath };
   } catch (objError) {
-    console.error(`${glbPath} failed:`, glbError);
+    if (glbPath) console.error(`${glbPath} failed:`, glbError);
     console.error(`${objPath} failed:`, objError);
-    throw new Error(`no model found — tried ${glbPath} and ${objPath}`);
+    throw new Error(`no model found — tried ${[glbPath, objPath].filter(Boolean).join(' and ')}`);
   }
 }
 

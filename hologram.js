@@ -2,13 +2,13 @@ const V = new URL(import.meta.url).search;
 
 const { createScene, startRenderLoop } = await import('./scene.js' + V);
 const { loadModel, frameObject } = await import('./loadModel.js' + V);
-const { trimByCylinder } = await import('./trimGeometry.js' + V);
 
-// Measured against this specific scan (see ROADMAP.md Phase 2/3): a histogram of vertex
-// distance from this center shows a genuine empty gap between radius 0.58 and 0.77 — the
-// wall sliver sits entirely outside it, the chair entirely inside. Re-derive these numbers
-// from scratch if this ever runs against a different scan.
-const CHAIR_TRIM = { center: { x: -0.02, z: -0.14 }, radius: 0.65 };
+// The model now loads pre-cleaned. Isolating the object used to happen here at runtime,
+// via trimByCylinder on the raw scan — but a radius crop can only remove what is beside
+// the object, never the floor underneath it, so the chair shipped standing in a visible
+// crater of scanned floor. Cleaning is now an offline step (clean_scan.py), which can do
+// the things a live radius crop cannot: detect the actual ground plane, keep the runners
+// resting on it, rebuild the leg the scanner missed, and weld the result watertight.
 const { startCamera, stopCamera, describeCameraError } = await import('./camera.js' + V);
 const { createHandTracker, HAND_CONNECTIONS } = await import('./handTracker.js' + V);
 const { pinch, isFistLike, handSpan } = await import('./gestures.js' + V);
@@ -68,13 +68,8 @@ function setStatus(text, isError = false) {
   statusEl.classList.toggle('error', isError);
 }
 
-loadModel({
-  glbPath: 'assets/chair/chair.glb',
-  objPath: 'assets/chair/chair.obj',
-  mtlPath: 'assets/chair/chair.mtl'
-})
+loadModel({ objPath: 'assets/chair/chair_clean.obj' })
   .then(({ object, path }) => {
-    trimByCylinder(object, CHAIR_TRIM);
     object.traverse((child) => {
       if (child.isMesh) child.material = hologramMaterial;
     });
