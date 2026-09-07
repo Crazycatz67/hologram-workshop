@@ -246,13 +246,24 @@ async function main() {
     for (let i = 1; i <= 25; i++) { m.update([hand(0.45 - 0.008 * i, 0.5, 0, 'pinch'), hand(0.55 + 0.008 * i, 0.5, 0, 'pinch')], 1.78, t); t += 16.7; }
     checkTrue('two-hand pinch apart grows the object', object.scale.x > s0 + 0.3, `scale.x=${object.scale.x.toFixed(2)}`);
 
+    // Explode's stretch axis follows the actual direction the hands separate along --
+    // reported live as "keeps exploding vertically and not horizontally" when it was
+    // hard-coded to scale.y regardless of motion. Both directions get their own case.
+    m.reset();
+    m.configure({ channels: ['explode'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    t = 1000;
+    const x0 = object.scale.x;
+    for (let i = 0; i < 8; i++) { m.update([hand(0.45, 0.5, 0, 'open'), hand(0.55, 0.5, 0, 'open')], 1.78, t); t += 16.7; }
+    for (let i = 1; i <= 25; i++) { m.update([hand(0.45 - 0.008 * i, 0.5, 0, 'open'), hand(0.55 + 0.008 * i, 0.5, 0, 'open')], 1.78, t); t += 16.7; }
+    checkTrue('hands apart HORIZONTALLY stretches width (scale.x)', object.scale.x > x0 + 0.3, `scale.x=${object.scale.x.toFixed(2)}`);
+
     m.reset();
     m.configure({ channels: ['explode'], sensitivity: 1, momentum: false, triggerFrames: 3 });
     t = 1000;
     const y0 = object.scale.y;
-    for (let i = 0; i < 8; i++) { m.update([hand(0.45, 0.5, 0, 'open'), hand(0.55, 0.5, 0, 'open')], 1.78, t); t += 16.7; }
-    for (let i = 1; i <= 25; i++) { m.update([hand(0.45 - 0.008 * i, 0.5, 0, 'open'), hand(0.55 + 0.008 * i, 0.5, 0, 'open')], 1.78, t); t += 16.7; }
-    checkTrue('two open hands apart stretches a single-mesh object', object.scale.y > y0 + 0.3, `scale.y=${object.scale.y.toFixed(2)}`);
+    for (let i = 0; i < 8; i++) { m.update([hand(0.5, 0.35, 0, 'open'), hand(0.5, 0.65, 0, 'open')], 1.78, t); t += 16.7; }
+    for (let i = 1; i <= 25; i++) { m.update([hand(0.5, 0.35 - 0.008 * i, 0, 'open'), hand(0.5, 0.65 + 0.008 * i, 0, 'open')], 1.78, t); t += 16.7; }
+    checkTrue('hands apart VERTICALLY stretches height (scale.y)', object.scale.y > y0 + 0.3, `scale.y=${object.scale.y.toFixed(2)}`);
 
     m.reset();
     m.configure({ channels: ['tilt'], sensitivity: 1, momentum: false, triggerFrames: 3 });
@@ -279,9 +290,14 @@ async function main() {
     check('a fast clap resets scale to 1', object.scale.x, 1, 0.02);
     check('a fast clap resets position to origin', object.position.length(), 0, 0);
 
-    // and a slow bring-together must NOT be mistaken for a clap
+    // and a slow bring-together must NOT be mistaken for a clap. Channels restricted to
+    // just clap: the same open hands also satisfy explode's trigger, and explode
+    // legitimately shrinking the object as hands close together is a different behavior
+    // that would otherwise contaminate this assertion (both end at scale 1.0, for
+    // unrelated reasons -- verified directly by comparing ['clap','explode'] against
+    // ['clap'] alone).
     m.reset();
-    m.configure({ channels: ALL_CHANNELS, sensitivity: 1, momentum: false, triggerFrames: 3 });
+    m.configure({ channels: ['clap'], sensitivity: 1, momentum: false, triggerFrames: 3 });
     object.scale.multiplyScalar(1.4);
     t = 1000;
     for (let i = 0; i < 5; i++) { m.update([hand(0.20, 0.5, 0, 'open'), hand(0.80, 0.5, 0, 'open')], 1.78, t); t += 16.7; }
@@ -292,6 +308,61 @@ async function main() {
     }
     check('a slow bring-together does not trigger a reset', object.scale.x, 1.4, 0.02);
     m.reset();
+  });
+
+  group('Tilt — roll (second hand left/right), added after live feedback', () => {
+    const m = createManipulator(object, camera);
+    m.reset();
+    m.configure({ channels: ['tilt'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    let t = 1000;
+    for (let i = 0; i < 10; i++) { m.update([hand(0.35, 0.5, 0, 'fist'), hand(0.65, 0.5, 0, 'open')], 1.78, t); t += 16.7; }
+    const q0 = object.quaternion.clone();
+    // second hand sweeps LEFT (x decreasing), not up/down this time
+    for (let i = 1; i <= 40; i++) { m.update([hand(0.35, 0.5, 0, 'fist'), hand(0.65 - 0.006 * i, 0.5, 0, 'open')], 1.78, t); t += 16.7; }
+    checkTrue('moving the second hand left/right also tilts the object', object.quaternion.angleTo(q0) > 0.2,
+      `${(object.quaternion.angleTo(q0) * 180 / Math.PI).toFixed(1)}°`);
+    m.reset();
+  });
+
+  group('Frame-rate independence — the cause behind "gets stuck" and "janky"', () => {
+    // Real webcam tracking does not call update() at a fixed interval; it drops frames
+    // under load. Every rate limit in manipulator.js was rewritten to be a genuine
+    // per-second bound checked against real elapsed time specifically because a per-call
+    // bound rejects perfectly normal motion whenever the gap between calls happens to be
+    // longer than usual. This proves it: the SAME physical motion, delivered at two very
+    // different (but each internally steady) frame rates, should produce close to the
+    // SAME result -- not one that silently stalls at the slower rate. This exact class of
+    // bug shipped once already this session (an explode rate cap ten times too strict,
+    // caught only because a synthetic test happened to run at a demanding pace) --
+    // this check exists so a future threshold mistake shows up here instead of live.
+    function sweepAt(hz) {
+      const m = createManipulator(object, camera);
+      m.reset();
+      m.configure({ channels: ['move'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+      const stepMs = 1000 / hz;
+      let t = 1000;
+      for (let i = 0; i < 10; i++) { m.update([hand(0.30, 0.5, 0, 'fist')], 1.78, t); t += stepMs; }
+      const start = object.position.clone();
+      const totalMs = 1000; // sweep the same real 1 second of motion regardless of rate
+      const steps = Math.round(totalMs / stepMs);
+      for (let i = 1; i <= steps; i++) {
+        m.update([hand(0.30 + 0.3 * (i / steps), 0.5, 0, 'fist')], 1.78, t);
+        t += stepMs;
+      }
+      // Measure BEFORE resetting -- reset() snaps position back to home immediately, and
+      // doing it first here made an early version of this very test read 0.0cm at every
+      // frame rate regardless of what actually happened, a bug in the test's own statement
+      // order rather than in the manipulator.
+      const moved = object.position.distanceTo(start);
+      m.reset();
+      return moved;
+    }
+
+    const at60 = sweepAt(60);
+    const at24 = sweepAt(24); // a genuinely choppy real camera, not a dropped-frame edge case
+    checkTrue('the same 1-second sweep moves the object a similar amount at 60fps and 24fps',
+      Math.abs(at60 - at24) / at60 < 0.35,
+      `60fps=${(at60 * 100).toFixed(1)}cm, 24fps=${(at24 * 100).toFixed(1)}cm`);
   });
 
   group('handSpan units — the bug that made clap impossible', () => {

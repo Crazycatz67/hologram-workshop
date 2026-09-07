@@ -28,7 +28,7 @@ browser, and once in System Settings → Privacy & Security → Camera.
 | 1 — Hand tracking foundation | Done, confirmed on a real webcam |
 | 2 — Static model in the browser | Done. Three.js + OrbitControls, no build step |
 | 3 — Hologram shader | Done. Fresnel glow + scanlines, tunable live |
-| 4 — Gesture-driven manipulation | All v1 gestures built, plus practice mode and live tuning. Feel and thresholds still need a real-hands tuning pass |
+| 4 — Gesture-driven manipulation | All v1 gestures built and confirmed on a real webcam once; every rate limit and hysteresis check rewritten to be frame-rate independent after that first session |
 | 5 — Polish and stretch | Measurement tools built (dimensions, tape measure, fit check) |
 
 Full breakdown in [ROADMAP.md](ROADMAP.md); working conventions in [CLAUDE.md](CLAUDE.md).

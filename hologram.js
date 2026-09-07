@@ -183,14 +183,20 @@ startRenderLoop({
 
     if (video.currentTime !== lastVideoTime) {
       lastVideoTime = video.currentTime;
-      hands = tracker.read(video, performance.now());
+      // One timestamp, reused for both calls. Small on its own, but the whole point of
+      // making the manipulator time-based (see manipulator.js) is that "when did this frame
+      // actually happen" is a real quantity now, not just a default parameter -- reading
+      // performance.now() twice a few statements apart was a needless place for that
+      // quantity to disagree with itself, however slightly.
+      const now = performance.now();
+      hands = tracker.read(video, now);
       smoothHandLandmarks(hands);
       for (const hand of hands) {
         hand.pinch = pinch(hand.landmarks, aspect, { gesture: hand.gesture });
         hand.fistLike = isFistLike(hand.gesture, hand.landmarks, aspect);
       }
 
-      const mode = manipulator?.update(hands, aspect) ?? MODE.IDLE;
+      const mode = manipulator?.update(hands, aspect, now) ?? MODE.IDLE;
       modeEl.textContent = mode;
       modeEl.className = mode;
       hologramMaterial.uniforms.hologramBrightness.value = MODE_BRIGHTNESS[mode] ?? 1.0;

@@ -16,14 +16,25 @@ const PINCH_COLOR = 0x7fe3a1;
 const FIST_COLOR = 0xffd166;
 // Thickened from the original 0.012/0.005 after live feedback: correctly more 3D-legible
 // than the flat overlay, but still read as "skeletal" (bead-and-stick) rather than the
-// filled-in passthrough hand referenced (Quest-style hand tracking). This is a step toward
-// that, not the full thing — an actually filled hand silhouette needs a real rigged mesh,
-// a bigger asset undertaking, not a size tweak.
+// filled-in passthrough hand referenced (Quest-style hand tracking). Confirmed again on a
+// real webcam ("still a skeletal view... prefer if we can fill in the skeleton"). A fully
+// rigged, skinned hand mesh is still a bigger asset undertaking than this pass, but the
+// PALM specifically doesn't need one: it's a single roughly-flat, roughly-convex region
+// (wrist + the four finger-base knuckles), so a filled polygon across those points reads
+// as a solid hand base immediately, closing most of the gap toward "filled in" cheaply.
+// Fingers stay as bone-and-joint capsules — genuinely jointed, unlike the palm, so a filled
+// plate there would either look like a mitten (one blob) or need per-segment skinning
+// (the bigger undertaking this note has always deferred).
 const JOINT_RADIUS = 0.02;
 const BONE_RADIUS = 0.011;
+const PALM_OPACITY = 0.5;
 
 const FINGERTIPS = new Set([4, 8, 12, 16, 20]);
 const PINCH_TIPS = new Set([4, 8]);
+// Wrist, then the four finger MCPs in hand order (thumb's CMC stands in for its MCP, since
+// landmark 1 sits closer to the actual base of the palm on that side) -- fan-triangulated
+// from the wrist, this traces the palm's actual base rather than an arbitrary quad.
+const PALM_LOOP = [0, 1, 5, 9, 13, 17];
 
 function landmarkToWorld(landmark, camera, depth, mirror) {
   const mirroredX = mirror ? 1 - landmark.x : landmark.x;
@@ -76,7 +87,24 @@ function createHandPool(scene, connections) {
     return mesh;
   });
 
-  return { group, joints, bones };
+  // A fan of triangles from the wrist across the four knuckle points, rebuilt every frame
+  // from the tracked landmark positions (a real hand's palm isn't flat or rigid, so this
+  // can't be a fixed shape scaled/oriented like the bones are -- it has to be re-triangulated
+  // per frame from wherever those five points actually are). DoubleSide because the palm can
+  // face either toward or away from the camera depending on hand orientation.
+  const palmGeo = new THREE.BufferGeometry();
+  palmGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(PALM_LOOP.length * 3), 3));
+  const palmIndices = [];
+  for (let i = 1; i < PALM_LOOP.length - 1; i++) palmIndices.push(0, i, i + 1);
+  palmGeo.setIndex(palmIndices);
+  const palm = new THREE.Mesh(
+    palmGeo,
+    new THREE.MeshBasicMaterial({ color: JOINT_COLOR, transparent: true, opacity: PALM_OPACITY, side: THREE.DoubleSide })
+  );
+  palm.visible = false;
+  group.add(palm);
+
+  return { group, joints, bones, palm };
 }
 
 export function createGhostHands(scene, connections) {
@@ -85,6 +113,7 @@ export function createGhostHands(scene, connections) {
   function hideAll(pool) {
     pool.joints.forEach((j) => (j.visible = false));
     pool.bones.forEach((b) => (b.visible = false));
+    pool.palm.visible = false;
   }
 
   return {
@@ -125,6 +154,14 @@ export function createGhostHands(scene, connections) {
           bone.scale.x = bone.scale.z = BONE_RADIUS;
           bone.material.color.setHex(fisted ? FIST_COLOR : JOINT_COLOR);
         });
+
+        const palmPos = pool.palm.geometry.getAttribute('position');
+        PALM_LOOP.forEach((landmarkIdx, i) => palmPos.setXYZ(i, points[landmarkIdx].x, points[landmarkIdx].y, points[landmarkIdx].z));
+        palmPos.needsUpdate = true;
+        pool.palm.geometry.computeVertexNormals();
+        pool.palm.geometry.computeBoundingSphere();
+        pool.palm.material.color.setHex(fisted ? FIST_COLOR : JOINT_COLOR);
+        pool.palm.visible = true;
       }
     },
 
