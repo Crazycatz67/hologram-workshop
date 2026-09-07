@@ -12,8 +12,10 @@ manipulates a *downloaded* model. This one manipulates a scan of an object you a
 No install, no server — every page runs entirely in the browser:
 
 - **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience. Includes a **practice mode** that arms one gesture at a time (move, spin, tilt, push/pull, scale, explode, clap) so each can be learned and tuned without the others firing, plus live sensitivity / trigger-delay / momentum controls. `D` shows the camera and tracking overlay, `P` toggles the panel
-- **[Model viewer](https://crazycatz67.github.io/hologram-workshop/)** — the hologram alone, drag to orbit, no camera needed
+- **[Model viewer](https://crazycatz67.github.io/hologram-workshop/)** — the hologram alone, drag to orbit, no camera needed. `?model=<path>` loads a different mesh and `?plain=1` swaps in an opaque material, both for judging a `clean_scan.py` result
 - **[Hand tracking](https://crazycatz67.github.io/hologram-workshop/hands.html)** — tracking on its own, with the raw pinch/gesture numbers on screen
+
+Both pages carry a **measurement panel**: real dimensions of the scanned object, a tape measure between any two points you pick on it, and a will-it-fit check against an opening. The scan carries true real-world scale, so these are measurements rather than decoration — and scaling the hologram never changes them, since resizing a hologram does not resize the real object. `M` hides the panel.
 
 Gesture pages need camera permission. On macOS you may have to allow it twice: once in the
 browser, and once in System Settings → Privacy & Security → Camera.
@@ -27,7 +29,7 @@ browser, and once in System Settings → Privacy & Security → Camera.
 | 2 — Static model in the browser | Done. Three.js + OrbitControls, no build step |
 | 3 — Hologram shader | Done. Fresnel glow + scanlines, tunable live |
 | 4 — Gesture-driven manipulation | All v1 gestures built, plus practice mode and live tuning. Feel and thresholds still need a real-hands tuning pass |
-| 5 — Polish and stretch | Not started |
+| 5 — Polish and stretch | Measurement tools built (dimensions, tape measure, fit check) |
 
 Full breakdown in [ROADMAP.md](ROADMAP.md); working conventions in [CLAUDE.md](CLAUDE.md).
 
@@ -51,6 +53,8 @@ Then open <http://localhost:8080>.
 | `hands.html`, `hands.js` | Hand tracking only, with raw gesture numbers on screen |
 | `scene.js` | Renderer, camera, lights, controls, render loop |
 | `loadModel.js` | Model loader (GLB, or OBJ with or without MTL) and camera framing |
+| `measure.js` | Real-world measurement: oriented footprint, volume, surface area, fit check |
+| `measurePanel.js` | The measurement UI (dimensions, tape measure, will-it-fit), shared by both pages |
 | `trimGeometry.js` | Cylinder crop, kept for reference — no longer used by either page now that cleanup happens offline |
 | `HolographicMaterial.js` | The hologram shader (vendored MIT source, not an npm package) |
 | `camera.js` | Webcam setup and teardown |

@@ -36,6 +36,50 @@
       color: rgba(255, 255, 255, 0.45);
       pointer-events: none;
     }
+
+    /* ---- measurement panel ---- */
+    #measure {
+      position: fixed; top: 56px; left: 12px; z-index: 4; width: 250px;
+      background: var(--panel, rgba(8,14,22,0.82));
+      border: 1px solid var(--edge, rgba(120,200,255,0.16));
+      border-radius: 8px; padding: 12px; backdrop-filter: blur(8px);
+      color: var(--text, #c9dcec);
+      font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #measure.hidden { display: none; }
+    #measure .panel-title {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
+      color: var(--dim, #6b7d94); margin: 0 0 8px;
+    }
+    #measure .panel-title + .panel-title { margin-top: 14px; }
+    button.unit {
+      font: inherit; font-size: 11px; padding: 1px 7px; border-radius: 3px;
+      background: transparent; color: var(--accent, #4fd1ff);
+      border: 1px solid rgba(79,209,255,0.4); cursor: pointer; text-transform: none;
+    }
+    .measure-dims { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .dim {
+      background: rgba(0,0,0,0.3); border: 1px solid var(--edge, rgba(120,200,255,0.16));
+      border-radius: 4px; padding: 6px 4px; text-align: center;
+    }
+    .dim-k { display: block; font-size: 10px; color: var(--dim, #6b7d94); letter-spacing: 0.1em; }
+    .dim-v { display: block; font-size: 13px; color: var(--text, #c9dcec); margin-top: 2px; }
+    .measure-scaled { margin-top: 7px; font-size: 11px; color: #ffd166; }
+    .measure-stats { margin-top: 7px; font-size: 11px; color: var(--dim, #6b7d94); line-height: 1.5; }
+    button.wide { width: 100%; margin-top: 10px; text-align: center; }
+    button.ghost.active { color: #ffd166; border-color: rgba(255,209,102,0.55); }
+    .measure-tape { margin-top: 6px; font-size: 11px; color: var(--dim, #6b7d94); }
+    .fit-row { display: flex; align-items: center; gap: 5px; }
+    .fit-input {
+      width: 100%; min-width: 0; font: inherit; font-size: 12px; padding: 4px 6px;
+      background: rgba(0,0,0,0.35); color: var(--text, #c9dcec);
+      border: 1px solid var(--edge, rgba(120,200,255,0.16)); border-radius: 4px;
+    }
+    .fit-x, .fit-unit { color: var(--dim, #6b7d94); font-size: 11px; }
+    .measure-fit { margin-top: 7px; font-size: 11px; color: var(--dim, #6b7d94); line-height: 1.45; }
+    .measure-fit.ok { color: #7fe3a1; }
+    .measure-fit.bad { color: #ff8a65; }
   </style>
   <script type="importmap">
     {
@@ -52,6 +96,8 @@
     <span id="fps">— fps</span>
   </div>
   <div id="hint" hidden>drag to orbit · scroll to zoom · right-drag to pan · R to toggle auto-rotate</div>
+  <div id="measure"></div>
+
   <script type="module">
     import(`./main.js?v=${Date.now()}`);
   </script>

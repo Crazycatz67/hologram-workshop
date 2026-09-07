@@ -17,6 +17,7 @@ const { createManipulator, MODE, CHANNELS } = await import('./manipulator.js' + 
 const { default: HolographicMaterial } = await import('./HolographicMaterial.js' + V);
 const { createGhostHands } = await import('./ghostHands.js' + V);
 const { smoothHandLandmarks, resetLandmarkSmoothing } = await import('./smoothLandmarks.js' + V);
+const { createMeasurePanel } = await import('./measurePanel.js' + V);
 
 const video = document.getElementById('cam');
 const overlay = document.getElementById('overlay');
@@ -97,6 +98,12 @@ loadModel({ objPath: 'assets/chair/chair_clean.obj' })
     window.hologram.manipulator = manipulator;
     applyDrill(activeDrill);
     applyTuning();
+    // Live dimensions sit next to the gestures on purpose: scaling or stretching the model
+    // reports what the size has become, which is the whole reason to have both on one page.
+    createMeasurePanel({
+      mount: document.getElementById('measure'),
+      object, camera, renderer, scene
+    });
     // Decided once from the loaded model's own mesh count — see manipulator.js. No manual
     // override control exists yet since only a single-mesh scan exists to test against.
     document.getElementById('explodeMode').textContent = manipulator.explodeIsLiteral
@@ -153,6 +160,7 @@ window.addEventListener('keydown', (e) => {
   if (key === 'r') manipulator?.reset();
   if (key === 'd') document.body.classList.toggle('debug-camera');
   if (key === 'p') togglePanel();
+  if (key === 'm') document.getElementById('measure').classList.toggle('hidden');
 });
 
 startRenderLoop({

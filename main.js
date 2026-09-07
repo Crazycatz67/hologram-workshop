@@ -6,6 +6,7 @@ const THREE = await import('three');
 const { createScene, startRenderLoop } = await import('./scene.js' + V);
 const { loadModel, frameObject } = await import('./loadModel.js' + V);
 const { default: HolographicMaterial } = await import('./HolographicMaterial.js' + V);
+const { createMeasurePanel } = await import('./measurePanel.js' + V);
 
 const statusEl = document.getElementById('status');
 const fpsEl = document.getElementById('fps');
@@ -67,6 +68,10 @@ loadModel({ objPath })
     scene.add(object);
     window.hologram.model = object;
     const { size } = frameObject(object, camera, controls);
+    createMeasurePanel({
+      mount: document.getElementById('measure'),
+      object, camera, renderer, scene
+    });
     const dims = [size.x, size.y, size.z].map((n) => n.toFixed(2)).join(' × ');
     statusEl.textContent = `${path}  ·  ${dims} m`;
     hintEl.hidden = false;
