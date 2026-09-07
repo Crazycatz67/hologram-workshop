@@ -102,7 +102,10 @@ loadModel({ objPath: 'assets/chair/chair_clean.obj' })
     // reports what the size has become, which is the whole reason to have both on one page.
     createMeasurePanel({
       mount: document.getElementById('measure'),
-      object, camera, renderer, scene
+      object, camera, renderer, scene,
+      // Names the report and keys the saved notes, so notes follow the object they describe
+      // rather than whichever model happens to load into this page.
+      modelName: path.split('/').pop().replace(/\.[^.]+$/, '')
     });
     // Decided once from the loaded model's own mesh count — see manipulator.js. No manual
     // override control exists yet since only a single-mesh scan exists to test against.

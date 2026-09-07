@@ -15,7 +15,7 @@ No install, no server — every page runs entirely in the browser:
 - **[Model viewer](https://crazycatz67.github.io/hologram-workshop/)** — the hologram alone, drag to orbit, no camera needed. `?model=<path>` loads a different mesh and `?plain=1` swaps in an opaque material, both for judging a `clean_scan.py` result
 - **[Hand tracking](https://crazycatz67.github.io/hologram-workshop/hands.html)** — tracking on its own, with the raw pinch/gesture numbers on screen
 
-Both pages carry a **measurement panel**: real dimensions of the scanned object, a tape measure between any two points you pick on it, and a will-it-fit check against an opening. The scan carries true real-world scale, so these are measurements rather than decoration — and scaling the hologram never changes them, since resizing a hologram does not resize the real object. `M` hides the panel.
+Both pages carry a **measurement panel**: real dimensions, detected key heights (seat height and the like, found rather than assumed), an estimated weight and shipping carton, a tape measure between any two points you pick, a will-it-fit check against an opening, and notes you can pin to the object and export as a report. The scan carries true real-world scale, so these are measurements rather than decoration — and scaling the hologram never changes them, since resizing a hologram does not resize the real object. `M` hides the panel.
 
 Gesture pages need camera permission. On macOS you may have to allow it twice: once in the
 browser, and once in System Settings → Privacy & Security → Camera.
@@ -53,8 +53,9 @@ Then open <http://localhost:8080>.
 | `hands.html`, `hands.js` | Hand tracking only, with raw gesture numbers on screen |
 | `scene.js` | Renderer, camera, lights, controls, render loop |
 | `loadModel.js` | Model loader (GLB, or OBJ with or without MTL) and camera framing |
-| `measure.js` | Real-world measurement: oriented footprint, volume, surface area, fit check |
-| `measurePanel.js` | The measurement UI (dimensions, tape measure, will-it-fit), shared by both pages |
+| `measure.js` | Real-world measurement: oriented footprint, volume, detected surface heights, weight, shipping, fit check |
+| `annotations.js` | Notes pinned to points on the object, persisted, and the exported report |
+| `measurePanel.js` | The measurement UI (size, key heights, weight, tape, fit, notes), shared by both pages |
 | `trimGeometry.js` | Cylinder crop, kept for reference — no longer used by either page now that cleanup happens offline |
 | `HolographicMaterial.js` | The hologram shader (vendored MIT source, not an npm package) |
 | `camera.js` | Webcam setup and teardown |

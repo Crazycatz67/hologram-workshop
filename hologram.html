@@ -168,6 +168,48 @@
     #coachTitle { font-size: 15px; color: var(--accent); letter-spacing: 0.04em; }
     #coachBody { font-size: 13px; color: rgba(201, 220, 236, 0.72); margin-top: 5px; line-height: 1.5; }
     #coachKeys { font-size: 11px; color: var(--dim); margin-top: 8px; }
+
+    /* measurement panel: collapsible sections, notes, labels */
+    #measure { max-height: calc(100vh - 120px); overflow-y: auto; }
+    .measure-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .measure-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
+      color: var(--dim, #6b7d94);
+    }
+    .sec { border-top: 1px solid var(--edge, rgba(120,200,255,0.16)); }
+    .sec:first-of-type { border-top: none; }
+    .sec-head {
+      display: flex; align-items: center; justify-content: space-between; width: 100%;
+      background: transparent; border: none; padding: 8px 0; cursor: pointer;
+      font: inherit; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--dim, #6b7d94);
+    }
+    .sec-head:hover { color: var(--text, #c9dcec); }
+    .sec-caret { color: var(--dim, #6b7d94); }
+    .sec-body { padding-bottom: 10px; }
+    select.fit-input { width: 100%; cursor: pointer; }
+    .surface-row { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
+    .surface-h { color: var(--accent, #4fd1ff); min-width: 62px; }
+    .surface-d { color: var(--dim, #6b7d94); font-size: 11px; }
+    .measure-caveat {
+      margin-top: 7px; font-size: 10px; line-height: 1.45; color: #ff8a65;
+      border-left: 2px solid rgba(255,138,101,0.5); padding-left: 7px;
+    }
+    .note-list { margin-top: 8px; display: grid; gap: 5px; }
+    .note-row { display: flex; gap: 5px; align-items: center; }
+    .note-row .fit-input { flex: 1; }
+    button.note-del { padding: 2px 8px; line-height: 1.2; }
+    .note-layer { position: fixed; inset: 0; z-index: 3; pointer-events: none; }
+    .note-label {
+      position: absolute; transform: translate(10px, -50%);
+      background: rgba(8,14,22,0.9); border: 1px solid rgba(127,227,161,0.55);
+      border-radius: 3px; padding: 2px 6px; white-space: nowrap;
+      font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #7fe3a1; max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+    }
   </style>
   <script type="importmap">
     {

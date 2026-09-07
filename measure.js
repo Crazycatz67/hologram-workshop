@@ -212,3 +212,159 @@ export function fitCheck(dims, openingWidth, openingHeight) {
     all: results
   };
 }
+
+// ---------------------------------------------------------------------------------------
+// Horizontal surfaces: seat height, table top, shelf levels.
+//
+// The useful dimension of a chair is not its bounding box, it is how high the seat is — and
+// that is the kind of number a spec sheet carries. Detected rather than assumed, so this
+// works on whatever gets scanned next instead of hard-coding "chair".
+//
+// The signal is the area of UPWARD-FACING triangles at each height. A seat, a table top or a
+// shelf is a large horizontal surface concentrated in a narrow band of heights; legs, posts
+// and sides are vertical and contribute almost nothing however tall they are. Two weaker
+// signals were considered and rejected against the real scan: cross-section bounding-box
+// area barely moves between the legs and the seat (the box spans the splayed legs the whole
+// way up), and raw vertex count works but is a proxy that drifts with mesh density rather
+// than measuring anything physical.
+const SURFACE_BANDS = 120;
+const SURFACE_UPNESS = 0.7;        // |normal.y| above this counts as horizontal, ~45 degrees
+const SURFACE_PEAK_SHARE = 0.25;   // a band must hold this share of the strongest band to count
+
+export function horizontalSurfaces(object) {
+  const points = collectVertices(object);
+  if (points.length === 0) return [];
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const p of points) {
+    if (p[1] < minY) minY = p[1];
+    if (p[1] > maxY) maxY = p[1];
+  }
+  const height = maxY - minY;
+  if (height <= 0) return [];
+
+  const area = new Float64Array(SURFACE_BANDS);
+  const extent = Array.from({ length: SURFACE_BANDS }, () => ({
+    minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity
+  }));
+
+  object.traverse((child) => {
+    if (!child.isMesh) return;
+    const position = child.geometry?.getAttribute('position');
+    if (!position) return;
+    const index = child.geometry.getIndex();
+    const count = index ? index.count / 3 : position.count / 3;
+
+    for (let t = 0; t < count; t++) {
+      const i0 = index ? index.getX(t * 3) : t * 3;
+      const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+      const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+      const ax = position.getX(i0), ay = position.getY(i0), az = position.getZ(i0);
+      const bx = position.getX(i1), by = position.getY(i1), bz = position.getZ(i1);
+      const cx = position.getX(i2), cy = position.getY(i2), cz = position.getZ(i2);
+
+      const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
+      const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
+      const nx = e1y * e2z - e1z * e2y;
+      const ny = e1z * e2x - e1x * e2z;
+      const nz = e1x * e2y - e1y * e2x;
+      const length = Math.hypot(nx, ny, nz);
+      if (length === 0) continue;
+      if (Math.abs(ny / length) < SURFACE_UPNESS) continue;
+
+      const centreY = (ay + by + cy) / 3;
+      let band = Math.floor(((centreY - minY) / height) * SURFACE_BANDS);
+      if (band < 0) band = 0;
+      if (band >= SURFACE_BANDS) band = SURFACE_BANDS - 1;
+
+      area[band] += length / 2;
+      const e = extent[band];
+      e.minX = Math.min(e.minX, ax, bx, cx);
+      e.maxX = Math.max(e.maxX, ax, bx, cx);
+      e.minZ = Math.min(e.minZ, az, bz, cz);
+      e.maxZ = Math.max(e.maxZ, az, bz, cz);
+    }
+  });
+
+  const peak = Math.max(...area);
+  if (peak <= 0) return [];
+  const threshold = peak * SURFACE_PEAK_SHARE;
+
+  // Group contiguous strong bands into one surface each, so a seat several centimetres thick
+  // is reported once rather than as a stack of slices.
+  const surfaces = [];
+  let run = null;
+  for (let b = 0; b < SURFACE_BANDS; b++) {
+    if (area[b] >= threshold) {
+      if (!run) run = { from: b, to: b, best: b };
+      else {
+        run.to = b;
+        if (area[b] > area[run.best]) run.best = b;
+      }
+    } else if (run) {
+      surfaces.push(run);
+      run = null;
+    }
+  }
+  if (run) surfaces.push(run);
+
+  return surfaces.map((s) => {
+    const e = extent[s.best];
+    let total = 0;
+    for (let b = s.from; b <= s.to; b++) total += area[b];
+    return {
+      // The strongest band is the surface people actually meet — the top face of the seat.
+      height: minY + ((s.best + 0.5) / SURFACE_BANDS) * height - minY,
+      heightFromBase: minY + ((s.best + 0.5) / SURFACE_BANDS) * height - minY,
+      area: total,
+      width: Number.isFinite(e.maxX) ? e.maxX - e.minX : 0,
+      depth: Number.isFinite(e.maxZ) ? e.maxZ - e.minZ : 0,
+      share: total / area.reduce((sum, v) => sum + v, 0)
+    };
+  }).sort((a, b) => b.area - a.area);
+}
+
+// ---------------------------------------------------------------------------------------
+// Weight and shipping.
+//
+// Both numbers come with a caveat that has to travel with them, so it is stated in the UI
+// rather than buried: the mesh volume is the volume ENCLOSED by the scanned surface, which
+// equals the material volume only for a solid object. A tubular steel frame is mostly air
+// inside its own surface, so treating it as solid steel overestimates badly. It is a fair
+// estimate for a solid wooden or foam-filled object and an upper bound otherwise.
+export const MATERIALS = [
+  { name: 'upholstered / foam', density: 90 },
+  { name: 'softwood (pine)', density: 500 },
+  { name: 'plywood / MDF', density: 650 },
+  { name: 'hardwood (oak)', density: 700 },
+  { name: 'ABS plastic', density: 1050 },
+  { name: 'glass', density: 2500 },
+  { name: 'aluminium', density: 2700 },
+  { name: 'steel', density: 7850 }
+];
+
+export function estimateWeight(volume, density) {
+  return volume * density; // m³ × kg/m³ = kg
+}
+
+// Carriers bill the greater of real weight and "volumetric" weight — the space the parcel
+// occupies — so a light bulky object like a chair is almost always billed on its size. The
+// 5000 divisor is the usual air/courier convention for centimetres.
+const VOLUMETRIC_DIVISOR = 5000;
+
+export function shippingBox(dims, paddingMetres = 0.03) {
+  const w = (dims.width + paddingMetres * 2) * 100;
+  const d = (dims.depth + paddingMetres * 2) * 100;
+  const h = (dims.height + paddingMetres * 2) * 100;
+  return {
+    widthCm: w,
+    depthCm: d,
+    heightCm: h,
+    volumetricKg: (w * d * h) / VOLUMETRIC_DIVISOR
+  };
+}
+
+export function formatWeight(kg, unit) {
+  if (unit === 'in') return `${(kg * 2.20462).toFixed(1)} lb`;
+  return kg >= 1 ? `${kg.toFixed(1)} kg` : `${(kg * 1000).toFixed(0)} g`;
+}

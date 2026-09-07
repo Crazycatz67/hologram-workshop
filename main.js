@@ -70,7 +70,10 @@ loadModel({ objPath })
     const { size } = frameObject(object, camera, controls);
     createMeasurePanel({
       mount: document.getElementById('measure'),
-      object, camera, renderer, scene
+      object, camera, renderer, scene,
+      // Names the report and keys the saved notes, so notes follow the object they describe
+      // rather than whichever model happens to load into this page.
+      modelName: path.split('/').pop().replace(/\.[^.]+$/, '')
     });
     const dims = [size.x, size.y, size.z].map((n) => n.toFixed(2)).join(' × ');
     statusEl.textContent = `${path}  ·  ${dims} m`;
