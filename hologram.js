@@ -72,7 +72,9 @@ const isFist = (h) => h.fistLike;
 // the legs while rotating) is a bigger, separate undertaking, not done here.
 // Floor raised in step with the material's own hologramBrightness -- this map is written
 // to the uniform every frame, so leaving idle at 1.0 would undo the fix on every idle frame.
-const MODE_BRIGHTNESS = { idle: 1.25, grab: 1.8, transform: 1.8 };
+// explode needs its own entry: the lookup falls back to 1.0, so without one the model
+// would DIM below its idle brightness the moment explode engaged.
+const MODE_BRIGHTNESS = { idle: 1.25, grab: 1.8, transform: 1.8, explode: 1.8 };
 
 window.hologram = { scene, camera, renderer, controls, model: null, material: hologramMaterial };
 

@@ -59,12 +59,25 @@ const MIN_LINEAR_VELOCITY = 0.00005;
 // takes a timestamp) fixes both directions at once: a genuine clap has real velocity high
 // enough to clear the bar regardless of frame rate, and a slow relaxation doesn't, also
 // regardless of frame rate.
-const CLAP_CLOSE_SPAN = 0.45;
-const CLAP_ARM_SPAN = 0.6;
-// Span-units per second, not per frame. A full arm-to-close swing (~0.6 span) covered in
-// under ~300ms clears this; the same swing taken over a second or more doesn't. Still an
-// untuned guess pending a real clap's actual numbers, same as everything else here.
-const CLAP_MIN_CLOSING_SPEED = 1.5;
+// UNITS: handSpan() returns the distance between the wrists divided by the average PALM
+// LENGTH — i.e. "how many palms apart are the hands", not a 0-1 fraction of the frame.
+// These constants were originally written as though it were the latter, which made the
+// clap gesture impossible to perform rather than merely fussy: measured across realistic
+// geometry, span only drops below the old 0.45 threshold when the two wrists are 0.01-0.03
+// of the frame apart, i.e. essentially the same point in the image. In a real clap the
+// palms touch while the wrists stay roughly 0.06-0.10 apart, giving a span near 1.0-1.8 —
+// so the close test could never pass and reset-by-clapping never fired at all. That matches
+// it being reported as not working during live testing.
+//
+// Re-derived from the measured span table: hands spread apart read 4-9 palms, hands clapped
+// together read 0.8-1.5 palms.
+const CLAP_CLOSE_SPAN = 1.5;
+const CLAP_ARM_SPAN = 4.0;
+// Span-units (palm-lengths) per second, not per frame. Rescaled along with the two spans
+// above, since it was expressed in the same wrong unit: a deliberate clap closes roughly 5
+// palm-lengths in about 200ms, so ~25/s, while slowly bringing the hands together over a
+// couple of seconds is nearer 2.5/s. This sits between them.
+const CLAP_MIN_CLOSING_SPEED = 8.0;
 
 // Explode: two open hands (neither fisted nor pinching, keeping it out of grab/scale's
 // hand-shape space) pulling apart drives it, continuously, like scale rather than a
@@ -85,6 +98,70 @@ const MAX_EXPLODE_SPAN_DELTA_PER_FRAME = 2;
 // centroid along its own direction, up to this fraction of the object's own size. Only
 // unit-tested against synthetic multi-mesh data — no real multi-part scan exists yet.
 const MAX_EXPLODE_OFFSET = 0.6;
+
+// Hand tracking is never perfectly still: even with a hand held motionless and landmark
+// smoothing applied, positions jitter by roughly 0.002 in normalized frame units every
+// frame. Nothing rejected that, so every frame of noise was written straight into a
+// velocity and then coasted by momentum. Measured before this existed: a completely
+// stationary fist drifted the model 6.0cm, spun it 2.2 degrees and pushed it 3.5cm in
+// depth over 1.5 seconds -- reported as "it keeps accidentally moving around and doing
+// commands I never intended".
+//
+// These are SOFT deadzones (see deadzone()): the threshold is subtracted rather than
+// gating, so motion eases up from zero instead of snapping to full speed the instant it
+// crosses the line. Hard gating would trade drift for a jolt at the threshold, which is
+// the other half of the complaint -- that none of it felt fluid.
+//
+// Sized between the two: noise is ~0.002/frame, while deliberately sweeping a hand across
+// the frame in a second is ~0.008/frame at 60fps.
+// Velocity is read as the GAP BETWEEN two exponential filters of the same signal — one
+// quick, one slow — instead of the difference between consecutive frames.
+//
+// Frame-to-frame differencing cannot work here, and that is measured, not assumed. For a
+// hand held still with realistic landmark jitter, the per-frame noise in each signal versus
+// the per-frame signal from deliberately moving that hand across the frame in one second:
+//
+//                        noise (median)    deliberate motion
+//   wrist position       0.0012 - 0.0026   0.0083     workable
+//   twist angle          0.0141 - 0.0417   ~0.026     marginal
+//   palm size ratio      0.0157 - 0.0360   0.0082     HOPELESS -- noise exceeds signal
+//
+// Push/pull read frame-to-frame is pure noise: a deadzone high enough to reject it would be
+// several times larger than the real gesture, so the choice was drift or a dead gesture.
+//
+// Two filters fix it because real motion is SUSTAINED and noise is not. Both filters track
+// a moving hand, the quick one leading the slow one by an amount proportional to speed, so
+// the gap between them is a velocity estimate averaged over many frames. Noise averages
+// out; a steady push does not. When the hand stops, the two converge and the gap decays to
+// zero on its own, which also gives motion a natural run-down instead of a hard stop.
+const FILTER_FAST = 0.35;
+const FILTER_SLOW = 0.12;
+// Converts the filter gap back into per-frame units. For a signal ramping at v per frame,
+// an exponential filter with weight a settles v*(1-a)/a behind it, so the gap between the
+// two filters settles at v * ((1-SLOW)/SLOW - (1-FAST)/FAST). Dividing by that recovers v
+// and keeps hand-to-object motion at roughly 1:1, as it was before.
+const FILTER_GAIN =
+  1 / ((1 - FILTER_SLOW) / FILTER_SLOW - (1 - FILTER_FAST) / FILTER_FAST);
+
+// These apply to the FILTERED velocity, not to a raw frame-to-frame difference, so they are
+// much smaller than the raw noise figures above — the filter has already removed most of it
+// and these only mop up the residue. Sizing them for raw noise was a mistake worth recording:
+// at 0.004 the deadzone was subtracting most of a real gesture (deliberate motion is only
+// ~0.005/frame), and a full hand sweep across a third of the frame moved the model 5cm
+// instead of tracking the hand.
+const MOVE_DEADZONE = 0.0008;   // normalized frame units per frame
+const TWIST_DEADZONE = 0.004;   // radians per frame
+const PITCH_DEADZONE = 0.0008;  // normalized frame units per frame
+const DEPTH_DEADZONE = 0.005;   // ratio deviation per frame -- larger than the others on
+                                // purpose: apparent hand size is the noisiest signal here,
+                                // and also the one with the most headroom, since a real
+                                // push moves the model far more than a real sideways sweep
+
+function deadzone(value, threshold) {
+  if (value > threshold) return value - threshold;
+  if (value < -threshold) return value + threshold;
+  return 0;
+}
 
 function wristOf(hand) {
   return hand.landmarks[0];
@@ -170,6 +247,12 @@ export function createManipulator(object, camera) {
   let lastTwist = null;
   let lastPitchWrist = null;
   let lastPalm = null;
+  let twistAccum = 0;
+  // Two exponential filters over every tracked signal, one quick and one slow. See
+  // FILTER_FAST for why velocity is read from the gap between them rather than from a
+  // frame-to-frame difference.
+  let fast = null;
+  let slow = null;
   let lastSpan = null;
   let lastExplodeSpan = null;
   let explodeAmount = 0;
@@ -190,6 +273,9 @@ export function createManipulator(object, camera) {
     lastTwist = null;
     lastPitchWrist = null;
     lastPalm = null;
+    twistAccum = 0;
+    fast = null;
+    slow = null;
   }
 
   function clearTransform() {
@@ -338,8 +424,16 @@ export function createManipulator(object, camera) {
         mode = MODE.GRAB;
         clearTransform();
         clearExplode();
-        if (hands.length >= 1) setGrabVelocity(hands, aspect);
-        else clearGrab(); // hand is gone, not just paused — drop the reference so no jump on return
+        // Only steer while the fist is ACTUALLY closed, not merely while grab mode is still
+        // held open by hysteresis. The exit hysteresis exists so a dropped tracking frame
+        // cannot cancel a gesture — but it was also letting an opened hand keep driving the
+        // model for its whole exit window: measured, opening the hand and sweeping it away
+        // dragged the model a further 28cm, so releasing did not release. Now the velocity
+        // simply stops being written and existing momentum coasts out, which is what
+        // letting go should feel like. clearGrab() also drops the stale wrist reference, so
+        // re-closing the fist measures from where it actually is rather than jumping.
+        if (hands.length >= 1 && fisted) setGrabVelocity(hands, aspect);
+        else clearGrab();
       } else {
         mode = MODE.IDLE;
         clearGrab();
@@ -368,64 +462,122 @@ export function createManipulator(object, camera) {
   // to the camera makes it read bigger in frame, farther makes it read smaller, and that
   // change is a genuine depth signal — see palmLength() in gestures.js for why it's used
   // over MediaPipe's own (noisier) z-coordinate.
+  // Which hand is doing the grabbing has to be decided by CONTINUITY, not by taking the
+  // first match in the array. MediaPipe can reorder `hands` between frames, and it can also
+  // change its mind about which hands read as fists — so "the grabbing hand" could silently
+  // become the other hand, and its position would then be differenced against the previous
+  // frame's OTHER hand, producing a jump out of nothing. MAX_MOVE_PER_FRAME hides this while
+  // the hands are far apart (the bogus delta is too big and gets rejected) but not when they
+  // are close: measured, two fists 0.10 apart in frame jumped the model 5.2cm on a reorder,
+  // while the same test at 0.20 apart showed nothing. Nearest-to-last-known wins instead,
+  // the same reasoning smoothLandmarks.js uses — a hand cannot teleport between frames.
+  function nearestTo(pool, reference) {
+    if (!reference || pool.length === 1) return pool[0];
+    let best = pool[0];
+    let bestDistance = Infinity;
+    for (const candidate of pool) {
+      const wrist = wristOf(candidate);
+      const d = Math.hypot(wrist.x - reference.x, wrist.y - reference.y);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = candidate;
+      }
+    }
+    return best;
+  }
+
   function setGrabVelocity(hands, aspect) {
-    const hand = hands.find((h) => isFistLike(h.gesture, h.landmarks, aspect)) ?? hands[0];
+    const fists = hands.filter((h) => isFistLike(h.gesture, h.landmarks, aspect));
+    const hand = nearestTo(fists.length ? fists : hands, lastWrist);
     const wrist = wristOf(hand);
-    const twist = handTwist(hand.landmarks, aspect);
     const palm = palmLength(hand.landmarks, aspect);
-    const pitchHand = hands.find((h) => h !== hand);
+    const others = hands.filter((h) => h !== hand);
+    const pitchHand = others.length ? nearestTo(others, lastPitchWrist) : null;
 
-    if (lastWrist) {
-      // Landmark x runs left-to-right in the raw frame while the view is mirrored, so the
-      // sign is flipped here to make the model follow the hand the user actually sees.
-      const dx = -(wrist.x - lastWrist.x);
-      const dy = wrist.y - lastWrist.y;
-
-      if (on('move') && Math.abs(dx) < MAX_MOVE_PER_FRAME && Math.abs(dy) < MAX_MOVE_PER_FRAME) {
-        const perUnit = worldPerScreenUnit(camera, object);
-        linearVelocityX = dx * perUnit.x * settings.sensitivity;
-        linearVelocityY = -dy * perUnit.y * settings.sensitivity;
-      }
-    }
-
+    // Twist has to be unwrapped into a continuous angle before it can be filtered, or the
+    // ±180° seam registers as a full-speed spin every time it is crossed.
+    const rawTwist = handTwist(hand.landmarks, aspect);
     if (lastTwist !== null) {
-      let delta = twist - lastTwist;
-      // Keep the shortest way round, so crossing the ±180° seam doesn't spin the model.
-      if (delta > Math.PI) delta -= Math.PI * 2;
-      if (delta < -Math.PI) delta += Math.PI * 2;
+      let step = rawTwist - lastTwist;
+      if (step > Math.PI) step -= Math.PI * 2;
+      if (step < -Math.PI) step += Math.PI * 2;
+      twistAccum += step;
+    }
+    lastTwist = rawTwist;
 
-      // Twisting your wrist is really a roll around the camera-viewing axis, but mapping
-      // that to spin the object around ITS vertical axis instead — like a lazy Susan —
-      // is what's actually useful for looking at the sides of something like a chair.
-      // Deliberate stylization, not a literal transfer of the physical motion.
-      if (on('spin') && Math.abs(delta) < MAX_TWIST_PER_FRAME) angularVelocity = delta * settings.sensitivity;
+    const pitchY = pitchHand ? wristOf(pitchHand).y : null;
+
+    const sample = { x: wrist.x, y: wrist.y, twist: twistAccum, palm, pitch: pitchY };
+
+    // First frame of a grab: seed both filters and produce no motion, so taking hold of the
+    // object never itself moves it.
+    if (!fast) {
+      fast = { ...sample };
+      slow = { ...sample };
+      lastWrist = { x: wrist.x, y: wrist.y };
+      if (pitchY !== null) lastPitchWrist = { y: pitchY };
+      return;
     }
 
-    if (pitchHand) {
-      const pitchWrist = wristOf(pitchHand);
-      if (lastPitchWrist) {
-        const dy = pitchWrist.y - lastPitchWrist.y;
-        if (on('tilt') && Math.abs(dy) * PITCH_SENSITIVITY < MAX_PITCH_PER_FRAME) {
-          pitchVelocity = -dy * PITCH_SENSITIVITY * settings.sensitivity;
-        }
+    for (const key of ['x', 'y', 'twist', 'palm']) {
+      fast[key] += (sample[key] - fast[key]) * FILTER_FAST;
+      slow[key] += (sample[key] - slow[key]) * FILTER_SLOW;
+    }
+    if (pitchY !== null) {
+      if (fast.pitch === null || slow.pitch === null) {
+        fast.pitch = pitchY;
+        slow.pitch = pitchY;
+      } else {
+        fast.pitch += (pitchY - fast.pitch) * FILTER_FAST;
+        slow.pitch += (pitchY - slow.pitch) * FILTER_SLOW;
       }
-      lastPitchWrist = { y: pitchWrist.y };
+    } else {
+      fast.pitch = null;
+      slow.pitch = null;
+    }
+
+    const perUnit = worldPerScreenUnit(camera, object);
+
+    // Landmark x runs left-to-right in the raw frame while the view is mirrored, so the sign
+    // is flipped to make the model follow the hand the user actually sees.
+    const vx = deadzone(-(fast.x - slow.x) * FILTER_GAIN, MOVE_DEADZONE);
+    const vy = deadzone((fast.y - slow.y) * FILTER_GAIN, MOVE_DEADZONE);
+    if (on('move') && Math.abs(vx) < MAX_MOVE_PER_FRAME && Math.abs(vy) < MAX_MOVE_PER_FRAME) {
+      linearVelocityX = vx * perUnit.x * settings.sensitivity;
+      linearVelocityY = -vy * perUnit.y * settings.sensitivity;
+    }
+
+    // Twisting your wrist is really a roll around the camera-viewing axis, but mapping that
+    // to spin the object around ITS vertical axis instead — like a lazy Susan — is what is
+    // actually useful for looking at the sides of something like a chair. Deliberate
+    // stylization, not a literal transfer of the physical motion.
+    const vTwist = deadzone((fast.twist - slow.twist) * FILTER_GAIN, TWIST_DEADZONE);
+    if (on('spin') && Math.abs(vTwist) < MAX_TWIST_PER_FRAME) {
+      angularVelocity = vTwist * settings.sensitivity;
+    }
+
+    if (fast.pitch !== null) {
+      const vPitch = deadzone((fast.pitch - slow.pitch) * FILTER_GAIN, PITCH_DEADZONE);
+      if (on('tilt') && Math.abs(vPitch) * PITCH_SENSITIVITY < MAX_PITCH_PER_FRAME) {
+        pitchVelocity = -vPitch * PITCH_SENSITIVITY * settings.sensitivity;
+      }
+      lastPitchWrist = { y: pitchY };
     } else {
       lastPitchWrist = null;
     }
 
-    if (lastPalm && palm > 0) {
-      const ratio = palm / lastPalm;
-      if (ratio > 1 / MAX_DEPTH_RATIO_PER_FRAME && ratio < MAX_DEPTH_RATIO_PER_FRAME) {
-        // Hand got bigger (closer to camera) -> pull the object closer too; smaller -> push
-        // it away. Stored as a ratio, same shape as scale's, not a screen-space delta.
-        if (on('push')) depthVelocity = (ratio - 1) * settings.sensitivity;
+    // Hand got bigger (closer to camera) -> pull the object closer; smaller -> push it away.
+    // Kept as a ratio, the same shape scale uses, rather than a screen-space delta.
+    if (slow.palm > 0) {
+      const ratio = fast.palm / slow.palm;
+      const change = deadzone((ratio - 1) * FILTER_GAIN, DEPTH_DEADZONE);
+      if (on('push') && ratio > 1 / MAX_DEPTH_RATIO_PER_FRAME && ratio < MAX_DEPTH_RATIO_PER_FRAME) {
+        depthVelocity = change * settings.sensitivity;
       }
     }
-    lastPalm = palm;
 
     lastWrist = { x: wrist.x, y: wrist.y };
-    lastTwist = twist;
+    lastPalm = palm;
   }
 
   // Applies whatever velocity currently exists and decays it — runs every update() call
