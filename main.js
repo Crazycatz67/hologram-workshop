@@ -2,6 +2,7 @@
 // along is what stops GitHub Pages' ten-minute cache from serving stale code.
 const V = new URL(import.meta.url).search;
 
+const THREE = await import('three');
 const { createScene, startRenderLoop } = await import('./scene.js' + V);
 const { loadModel, frameObject } = await import('./loadModel.js' + V);
 const { default: HolographicMaterial } = await import('./HolographicMaterial.js' + V);
@@ -14,12 +15,17 @@ const { scene, camera, renderer, controls } = createScene();
 
 // The real scan texture is fully replaced by this material's procedural shader — that's
 // the intended Phase 3 look, not a hybrid of scanned color and hologram effect.
+// scanlineSize is high on purpose. At the library's default (8) the scanline bands are
+// wide enough to cut clean across a chair leg, and thin parts read as SEVERED -- reported
+// as the model looking "half disconnected". Confirmed it was the shader and not the mesh by
+// rendering the same file with an opaque material (index.html?plain=1), where the chair is
+// visibly whole. Finer bands read as surface texture instead of breaks.
 const hologramMaterial = new HolographicMaterial({
   hologramColor: '#4fd1ff',
-  hologramBrightness: 1.0,
+  hologramBrightness: 1.25,
   fresnelAmount: 0.45,
   fresnelOpacity: 1.0,
-  scanlineSize: 8.0,
+  scanlineSize: 40.0,
   signalSpeed: 0.6,
   hologramOpacity: 1.0,
   enableBlinking: true,
@@ -47,8 +53,16 @@ startRenderLoop({
 const objPath = new URLSearchParams(location.search).get('model') ?? 'assets/chair/chair_clean.obj';
 loadModel({ objPath })
   .then(({ object, path }) => {
+    // ?plain=1 swaps in an opaque material. The hologram shader is semi-transparent with a
+    // fresnel edge, which can make a genuinely-connected thin part (a chair leg seen
+    // head-on) look broken — so when something reads as damaged, this separates "the mesh
+    // is wrong" from "the shader is hiding it" before any geometry gets re-cut.
+    const plain = new URLSearchParams(location.search).get('plain') === '1';
+    const surface = plain
+      ? new THREE.MeshStandardMaterial({ color: 0x8fd3ff, roughness: 0.6, metalness: 0.0 })
+      : hologramMaterial;
     object.traverse((child) => {
-      if (child.isMesh) child.material = hologramMaterial;
+      if (child.isMesh) child.material = surface;
     });
     scene.add(object);
     window.hologram.model = object;

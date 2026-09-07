@@ -305,8 +305,6 @@ def symmetrize(ms, normal, offset):
     ms.add_mesh(pymeshlab.Mesh(vertex_matrix=v, face_matrix=f), "mirrored")
     ms.generate_by_merging_visible_meshes()
     ms.compute_normal_per_vertex()
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("scan_path")
@@ -333,6 +331,16 @@ def main():
     ap.add_argument("--symmetry-axis", choices=["auto", "x", "z"], default="auto")
     ap.add_argument("--no-fill", action="store_true", help="Skip Poisson reconstruction.")
     ap.add_argument("--poisson-depth", type=int, default=9)
+    ap.add_argument("--poisson-samples", type=float, default=1.5, metavar="N",
+                    help="Samples averaged per octree cell. THIS is the knob for a wavy, lumpy "
+                         "reconstruction of thin parts (chair legs, table legs, spindles) -- raising "
+                         "it makes the surface average more of the noisy scan points instead of "
+                         "chasing each one. Smoothing afterwards cannot fix that waviness, because "
+                         "it is low-frequency shape, not high-frequency noise. Try 5-20 on a noisy "
+                         "handheld scan; the default 1.5 assumes clean data.")
+    ap.add_argument("--poisson-weight", type=float, default=4.0, metavar="W",
+                    help="Screening weight: how hard the surface is pulled onto the data points. "
+                         "Lower is smoother and more forgiving of noise.")
     ap.add_argument("--no-rebase", action="store_true",
                     help="Leave Poisson's rounded overshoot below the floor instead of cutting it flat.")
     ap.add_argument("--smooth", type=int, default=0, metavar="STEPS",
@@ -430,7 +438,11 @@ def main():
         # so set_current_mesh(mesh_number()-1) selects a deleted mesh and everything after
         # it fails with "MeshSet has no current Mesh".
         before_id = ms.current_mesh_id()
-        ms.generate_surface_reconstruction_screened_poisson(depth=args.poisson_depth)
+        ms.generate_surface_reconstruction_screened_poisson(
+            depth=args.poisson_depth,
+            samplespernode=args.poisson_samples,
+            pointweight=args.poisson_weight,
+        )
         if ms.current_mesh_id() == before_id:
             raise SystemExit("Poisson reconstruction produced no new mesh -- input too sparse, "
                              "or vertex normals are missing.")

@@ -46,12 +46,17 @@ let tracking = false;
 let hands = [];
 let lastVideoTime = -1;
 
+// scanlineSize is high on purpose. At the library's default (8) the scanline bands are
+// wide enough to cut clean across a chair leg, and thin parts read as SEVERED -- reported
+// as the model looking "half disconnected". Confirmed it was the shader and not the mesh by
+// rendering the same file with an opaque material (index.html?plain=1), where the chair is
+// visibly whole. Finer bands read as surface texture instead of breaks.
 const hologramMaterial = new HolographicMaterial({
   hologramColor: '#4fd1ff',
-  hologramBrightness: 1.0,
+  hologramBrightness: 1.25,
   fresnelAmount: 0.45,
   fresnelOpacity: 1.0,
-  scanlineSize: 8.0,
+  scanlineSize: 40.0,
   signalSpeed: 0.6,
   hologramOpacity: 1.0,
   enableBlinking: true,
@@ -65,7 +70,9 @@ const isFist = (h) => h.fistLike;
 // have — requested directly during testing ("depending on what we're interacting with,
 // add more color"). This is the coarse whole-object version; per-region glow (e.g. just
 // the legs while rotating) is a bigger, separate undertaking, not done here.
-const MODE_BRIGHTNESS = { idle: 1.0, grab: 1.6, transform: 1.6 };
+// Floor raised in step with the material's own hologramBrightness -- this map is written
+// to the uniform every frame, so leaving idle at 1.0 would undo the fix on every idle frame.
+const MODE_BRIGHTNESS = { idle: 1.25, grab: 1.8, transform: 1.8 };
 
 window.hologram = { scene, camera, renderer, controls, model: null, material: hologramMaterial };
 
