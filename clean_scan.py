@@ -26,7 +26,14 @@ visible rather than silent:
                 is junk, and the same filter is safe.
   7. REBASE     Shave Poisson's overshoot back to the real floor plane and cap it flat,
                 so feet end in a clean edge instead of a melted dome.
-  8. SIMPLIFY   Optional. Decimate to a target face count so the result is web-loadable.
+  8. SMOOTH     Remove the bumpy, orange-peel surface noise a handheld scan always carries.
+                Uses Taubin smoothing specifically, not plain Laplacian: Laplacian pulls
+                every vertex toward its neighbours' average, which shrinks the whole model
+                a little more with every step (thin parts like chair legs suffer worst).
+                Taubin alternates a smoothing step with a slight outward step, so noise
+                averages away while overall volume stays put. Reconstructed regions show
+                the noise most, because Poisson interpolates through sparse data.
+  9. SIMPLIFY   Optional. Decimate to a target face count so the result is web-loadable.
                 Reconstruction roughly doubles the triangle count of the original scan
                 and those extra triangles carry no extra detail -- they are subdivision of
                 a smooth interpolated surface, not measurements.
@@ -328,6 +335,10 @@ def main():
     ap.add_argument("--poisson-depth", type=int, default=9)
     ap.add_argument("--no-rebase", action="store_true",
                     help="Leave Poisson's rounded overshoot below the floor instead of cutting it flat.")
+    ap.add_argument("--smooth", type=int, default=0, metavar="STEPS",
+                    help="Taubin smoothing steps, to remove scan surface noise. Volume-preserving, "
+                         "so it will not thin out legs. Try 10-20; too high erases real detail "
+                         "(upholstery seams) along with the noise. 0 disables.")
     ap.add_argument("--target-faces", type=int,
                     help="Decimate to about this many faces so the mesh is web-loadable. "
                          "The chair scan ships at ~76k, measured at 0.07ms/frame in Phase 2.")
@@ -442,6 +453,13 @@ def main():
             ms.meshing_close_holes(maxholesize=300)
             describe(ms, "7. rebase")
 
+    if args.smooth:
+        # Runs before decimation, not after: smoothing a dense mesh then simplifying gives
+        # the decimator a cleaner surface to approximate, whereas smoothing afterwards has
+        # far fewer vertices to work with and blurs the silhouette instead of the noise.
+        ms.apply_coord_taubin_smoothing(stepsmoothnum=args.smooth)
+        describe(ms, "8. smooth")
+
     if args.target_faces:
         if ms.current_mesh().face_number() > args.target_faces:
             # preservetopology matters: without it, quadric collapse happily creates
@@ -454,7 +472,7 @@ def main():
                 preservetopology=True,
                 planarquadric=True,
             )
-            describe(ms, "8. simplify")
+            describe(ms, "9. simplify")
 
     ms.save_current_mesh(args.output, save_textures=False)
     print(f"\nwrote {args.output}\n")

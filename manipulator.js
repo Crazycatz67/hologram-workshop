@@ -132,10 +132,30 @@ function findExplodeParts(object) {
   return { literal: true, parts };
 }
 
+// Every channel a gesture can drive, individually switchable. Reported live as "it keeps
+// accidentally moving around and doing commands I never intended": with everything armed
+// at once there is no way to tell which channel misfired, because a single fist drives
+// four of them simultaneously (move, spin, tilt, push) and a misread hand shape can hand
+// control to a different mode entirely. Practice mode arms exactly one of these, so a
+// gesture can be learned and tuned in isolation without anything else bleeding in.
+export const CHANNELS = ['move', 'spin', 'tilt', 'push', 'scale', 'explode', 'clap'];
+
 export function createManipulator(object, camera) {
-  const grab = createStabilizer({ enter: 3, exit: 6 });
-  const transform = createStabilizer({ enter: 3, exit: 6 });
-  const explode = createStabilizer({ enter: 3, exit: 6 });
+  // Live-tunable, because every threshold in this file is an untuned guess made without a
+  // webcam (see ROADMAP.md Phase 1) and the only way to fix "out of proportion" is to
+  // adjust it against real hands and watch what happens.
+  const settings = {
+    channels: new Set(CHANNELS), // all armed = normal use; one entry = practice mode
+    sensitivity: 1.0,
+    momentum: true,
+    triggerFrames: 3             // consecutive frames a gesture must hold before it fires
+  };
+
+  let grab = createStabilizer({ enter: settings.triggerFrames, exit: 6 });
+  let transform = createStabilizer({ enter: settings.triggerFrames, exit: 6 });
+  let explode = createStabilizer({ enter: settings.triggerFrames, exit: 6 });
+
+  const on = (channel) => settings.channels.has(channel);
 
   const home = {
     position: object.position.clone(),
@@ -250,11 +270,29 @@ export function createManipulator(object, camera) {
 
     reset: performReset,
 
+    // Live tuning surface for the UI. Changing triggerFrames rebuilds the stabilizers,
+    // since their frame counts are fixed at construction.
+    configure(patch) {
+      if (patch.channels) settings.channels = new Set(patch.channels);
+      if (patch.sensitivity !== undefined) settings.sensitivity = patch.sensitivity;
+      if (patch.momentum !== undefined) settings.momentum = patch.momentum;
+      if (patch.triggerFrames !== undefined && patch.triggerFrames !== settings.triggerFrames) {
+        settings.triggerFrames = patch.triggerFrames;
+        grab = createStabilizer({ enter: settings.triggerFrames, exit: 6 });
+        transform = createStabilizer({ enter: settings.triggerFrames, exit: 6 });
+        explode = createStabilizer({ enter: settings.triggerFrames, exit: 6 });
+      }
+    },
+
+    get settings() {
+      return { ...settings, channels: [...settings.channels] };
+    },
+
     // timestampMs: defaults to performance.now() so existing callers (and every test in
     // this file's history) that don't pass one keep working — only checkClap's real-time
     // velocity measurement actually needs it.
     update(hands, aspect, timestampMs = performance.now()) {
-      if (hands.length === 2 && checkClap(hands, aspect, timestampMs)) {
+      if (on('clap') && hands.length === 2 && checkClap(hands, aspect, timestampMs)) {
         performReset();
         return mode;
       }
@@ -274,9 +312,13 @@ export function createManipulator(object, camera) {
       // Two-handed transform outranks grab and explode: with both hands up, a fist or
       // open-hand reading on either one is far more likely to be a misclassification mid-
       // pinch than a real change of gesture.
-      const transforming = transform.update(twoHanded);
-      const exploding = explode.update(openHanded && !transforming);
-      const grabbing = grab.update(fisted && !transforming && !exploding);
+      // Each mode is additionally gated on its channel being armed, so practice mode can
+      // silence a gesture completely rather than merely ignoring its effect -- a disarmed
+      // gesture must not even claim the mode, or it would still block the one being practised.
+      const grabArmed = on('move') || on('spin') || on('tilt') || on('push');
+      const transforming = transform.update(twoHanded && on('scale'));
+      const exploding = explode.update(openHanded && on('explode') && !transforming);
+      const grabbing = grab.update(fisted && grabArmed && !transforming && !exploding);
 
       if (transforming) {
         mode = MODE.TRANSFORM;
@@ -339,10 +381,10 @@ export function createManipulator(object, camera) {
       const dx = -(wrist.x - lastWrist.x);
       const dy = wrist.y - lastWrist.y;
 
-      if (Math.abs(dx) < MAX_MOVE_PER_FRAME && Math.abs(dy) < MAX_MOVE_PER_FRAME) {
+      if (on('move') && Math.abs(dx) < MAX_MOVE_PER_FRAME && Math.abs(dy) < MAX_MOVE_PER_FRAME) {
         const perUnit = worldPerScreenUnit(camera, object);
-        linearVelocityX = dx * perUnit.x;
-        linearVelocityY = -dy * perUnit.y;
+        linearVelocityX = dx * perUnit.x * settings.sensitivity;
+        linearVelocityY = -dy * perUnit.y * settings.sensitivity;
       }
     }
 
@@ -356,14 +398,16 @@ export function createManipulator(object, camera) {
       // that to spin the object around ITS vertical axis instead — like a lazy Susan —
       // is what's actually useful for looking at the sides of something like a chair.
       // Deliberate stylization, not a literal transfer of the physical motion.
-      if (Math.abs(delta) < MAX_TWIST_PER_FRAME) angularVelocity = delta;
+      if (on('spin') && Math.abs(delta) < MAX_TWIST_PER_FRAME) angularVelocity = delta * settings.sensitivity;
     }
 
     if (pitchHand) {
       const pitchWrist = wristOf(pitchHand);
       if (lastPitchWrist) {
         const dy = pitchWrist.y - lastPitchWrist.y;
-        if (Math.abs(dy) * PITCH_SENSITIVITY < MAX_PITCH_PER_FRAME) pitchVelocity = -dy * PITCH_SENSITIVITY;
+        if (on('tilt') && Math.abs(dy) * PITCH_SENSITIVITY < MAX_PITCH_PER_FRAME) {
+          pitchVelocity = -dy * PITCH_SENSITIVITY * settings.sensitivity;
+        }
       }
       lastPitchWrist = { y: pitchWrist.y };
     } else {
@@ -375,7 +419,7 @@ export function createManipulator(object, camera) {
       if (ratio > 1 / MAX_DEPTH_RATIO_PER_FRAME && ratio < MAX_DEPTH_RATIO_PER_FRAME) {
         // Hand got bigger (closer to camera) -> pull the object closer too; smaller -> push
         // it away. Stored as a ratio, same shape as scale's, not a screen-space delta.
-        depthVelocity = ratio - 1;
+        if (on('push')) depthVelocity = (ratio - 1) * settings.sensitivity;
       }
     }
     lastPalm = palm;
@@ -387,11 +431,23 @@ export function createManipulator(object, camera) {
   // Applies whatever velocity currently exists and decays it — runs every update() call
   // regardless of mode, which is what lets a released grab keep coasting briefly instead
   // of stopping dead the instant the gesture ends.
+  // Momentum off means damping 0: whatever velocity exists is applied for this frame and
+  // then dies, so the object stops the instant the gesture does. Reported live that things
+  // 'keep accidentally moving around' -- coasting is a prime suspect, since a single jittery
+  // frame sets a velocity that then keeps being applied after the hand has already stopped.
+  // Must be a function declaration, not a const arrow: everything below here sits after
+  // createManipulator's `return`, so a const would never initialize and every call would
+  // throw "Cannot access 'damping' before initialization". The other helpers down here are
+  // function declarations for the same reason — they get hoisted, a const does not.
+  function damping() {
+    return settings.momentum ? VELOCITY_DAMPING : 0;
+  }
+
   function applyMomentum() {
     if (Math.abs(angularVelocity) > MIN_ANGULAR_VELOCITY) {
       object.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), angularVelocity);
     }
-    angularVelocity *= VELOCITY_DAMPING;
+    angularVelocity *= damping();
 
     if (Math.abs(pitchVelocity) > MIN_ANGULAR_VELOCITY) {
       // World X, not the object's own local X: yaw already changes what the object's
@@ -400,7 +456,7 @@ export function createManipulator(object, camera) {
       // using world Y rather than local Y.
       object.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), pitchVelocity);
     }
-    pitchVelocity *= VELOCITY_DAMPING;
+    pitchVelocity *= damping();
 
     if (Math.abs(depthVelocity) > MIN_LINEAR_VELOCITY) {
       // Moves along the actual camera-to-object line (via the camera's current basis),
@@ -419,15 +475,15 @@ export function createManipulator(object, camera) {
       );
       object.position.copy(camera.position).addScaledVector(direction, targetDistance);
     }
-    depthVelocity *= VELOCITY_DAMPING;
+    depthVelocity *= damping();
 
     if (linearVelocityX * linearVelocityX + linearVelocityY * linearVelocityY > MIN_LINEAR_VELOCITY * MIN_LINEAR_VELOCITY) {
       object.position.x += linearVelocityX;
       object.position.y += linearVelocityY;
       clampToView(object, camera);
     }
-    linearVelocityX *= VELOCITY_DAMPING;
-    linearVelocityY *= VELOCITY_DAMPING;
+    linearVelocityX *= damping();
+    linearVelocityY *= damping();
   }
 
   function applyTransform(hands, aspect) {

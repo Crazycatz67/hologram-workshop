@@ -41,7 +41,11 @@ startRenderLoop({
 });
 
 // Pre-cleaned by clean_scan.py; see hologram.js for why cropping moved offline.
-loadModel({ objPath: 'assets/chair/chair_clean.obj' })
+// ?model=<path> loads a different mesh, so a candidate coming out of clean_scan.py can be
+// judged through the actual hologram shader (which is what ships) rather than in a separate
+// grey-material preview that flatters or hides surface noise differently.
+const objPath = new URLSearchParams(location.search).get('model') ?? 'assets/chair/chair_clean.obj';
+loadModel({ objPath })
   .then(({ object, path }) => {
     object.traverse((child) => {
       if (child.isMesh) child.material = hologramMaterial;

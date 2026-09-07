@@ -5,19 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Hologram Project — Phase 4: Gesture Control</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #05070a; overflow: hidden; }
+    :root {
+      --bg: #05070a;
+      --panel: rgba(8, 14, 22, 0.82);
+      --edge: rgba(120, 200, 255, 0.16);
+      --text: #c9dcec;
+      --dim: #6b7d94;
+      --accent: #4fd1ff;
+      --warm: #ffd166;
+      --good: #7fe3a1;
+    }
 
-    /* Tracking runs on the video regardless of whether it's visible -- MediaPipe reads
-       actual camera frames, not the rendered page. Hidden by default, 2026-09-05: seeing
-       your own video feed broke the "object floating in space" illusion rather than
-       completing it. Press D to show it back for debugging tracking accuracy. */
+    html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+    body { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text); }
+
+    /* Tracking runs on the video whether or not it's visible -- MediaPipe reads camera
+       frames, not the rendered page. Hidden by default: seeing your own video feed broke
+       the "object floating in space" illusion. D shows it for debugging tracking. */
     #cam, #overlay {
-      position: fixed;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      visibility: hidden;
+      position: fixed; inset: 0; width: 100%; height: 100%;
+      object-fit: cover; visibility: hidden;
     }
     body.debug-camera #cam, body.debug-camera #overlay { visibility: visible; }
     #cam { z-index: 0; transform: scaleX(-1); background: #000; }
@@ -26,73 +33,96 @@
     #stage { position: fixed; inset: 0; z-index: 2; }
     #stage canvas { display: block; width: 100%; height: 100%; }
 
-    #hud {
-      position: fixed;
-      top: 12px;
-      left: 12px;
-      z-index: 3;
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      flex-wrap: wrap;
-      font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      max-width: calc(100% - 24px);
+    /* ---- top bar: only what you need at a glance ---- */
+    #topbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 4;
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px;
+      background: linear-gradient(to bottom, rgba(5, 7, 10, 0.9), transparent);
     }
-    #hud > * {
-      background: rgba(0, 0, 0, 0.6);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      padding: 5px 9px;
-      border-radius: 4px;
+    #mode {
+      padding: 4px 10px; border-radius: 999px;
+      border: 1px solid var(--edge); color: var(--dim);
+      text-transform: uppercase; letter-spacing: 0.1em; font-size: 11px;
     }
-    #status { color: #7fe3a1; }
+    #mode.grab { color: var(--warm); border-color: rgba(255, 209, 102, 0.5); }
+    #mode.transform { color: var(--accent); border-color: rgba(79, 209, 255, 0.5); }
+    #mode.explode { color: #ff8a65; border-color: rgba(255, 138, 101, 0.5); }
+    #status { color: var(--good); }
     #status.error { color: #ff5c5c; }
-    #fps { color: #9db4d0; }
-    #loaded { color: #6b7d94; }
-    #explodeMode { color: #ff8a65; }
-
-    #mode { color: #6b7d94; text-transform: uppercase; letter-spacing: 0.08em; }
-    #mode.grab { color: #ffd166; border-color: rgba(255, 209, 102, 0.4); }
-    #mode.transform { color: #4fd1ff; border-color: rgba(79, 209, 255, 0.4); }
-    #mode.explode { color: #ff8a65; border-color: rgba(255, 138, 101, 0.4); }
+    #fps, #explodeMode { color: var(--dim); font-size: 12px; }
+    .spacer { flex: 1; }
 
     button {
-      font: inherit;
-      color: #dff6ff;
-      background: rgba(30, 90, 130, 0.75);
+      font: inherit; color: #dff6ff;
+      background: rgba(30, 90, 130, 0.7);
       border: 1px solid rgba(120, 220, 255, 0.35);
-      padding: 5px 12px;
-      border-radius: 4px;
-      cursor: pointer;
+      padding: 5px 12px; border-radius: 4px; cursor: pointer;
     }
-    button:disabled { opacity: 0.45; cursor: default; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    button.ghost { background: transparent; color: var(--dim); border-color: var(--edge); }
+    button.ghost:hover { color: var(--text); }
 
-    #readout {
-      position: fixed;
-      left: 12px;
-      bottom: 12px;
-      z-index: 3;
-      margin: 0;
-      font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      color: #9db4d0;
-      background: rgba(0, 0, 0, 0.6);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      padding: 8px 10px;
-      border-radius: 4px;
-      white-space: pre;
-      min-height: 1em;
+    /* ---- practice panel ---- */
+    #panel {
+      position: fixed; top: 52px; right: 12px; z-index: 4; width: 234px;
+      background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
+      padding: 12px; backdrop-filter: blur(8px);
+    }
+    #panel.hidden { display: none; }
+    .panel-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
+      color: var(--dim); margin-bottom: 8px;
     }
 
-    #hint {
-      position: fixed;
-      left: 50%;
-      bottom: 14px;
-      z-index: 3;
-      transform: translateX(-50%);
-      font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      color: rgba(255, 255, 255, 0.4);
-      text-align: center;
+    .drill { display: grid; grid-template-columns: 1fr; gap: 4px; margin-bottom: 12px; }
+    .drill button {
+      text-align: left; background: transparent; border: 1px solid transparent;
+      color: var(--dim); padding: 6px 8px; border-radius: 4px;
+    }
+    .drill button:hover { color: var(--text); border-color: var(--edge); }
+    .drill button.active {
+      background: rgba(79, 209, 255, 0.14);
+      border-color: rgba(79, 209, 255, 0.55);
+      color: var(--accent);
+    }
+    .drill button .k { color: inherit; }
+    .drill button .sub { display: block; font-size: 11px; color: var(--dim); margin-top: 2px; }
+    .drill button.active .sub { color: rgba(201, 220, 236, 0.75); }
+
+    /* live "is it firing right now" light */
+    #live {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px; border-radius: 4px; margin-bottom: 12px;
+      border: 1px solid var(--edge); background: rgba(0, 0, 0, 0.3);
+    }
+    #lamp {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #33404e; flex: none;
+      transition: background 90ms linear, box-shadow 90ms linear;
+    }
+    #lamp.on { background: var(--good); box-shadow: 0 0 10px rgba(127, 227, 161, 0.9); }
+    #liveText { font-size: 12px; color: var(--dim); }
+
+    label.tune {
+      display: block; font-size: 11px; color: var(--dim);
+      margin: 10px 0 3px; letter-spacing: 0.04em;
+    }
+    label.tune b { color: var(--text); font-weight: normal; }
+    input[type="range"] { width: 100%; accent-color: var(--accent); }
+    .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+    .row input[type="checkbox"] { accent-color: var(--accent); }
+    .row label { font-size: 12px; color: var(--dim); }
+
+    /* ---- the instruction line: one gesture, big, instead of a wall of tiny text ---- */
+    #coach {
+      position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+      z-index: 4; text-align: center; max-width: min(680px, 88vw);
       pointer-events: none;
     }
+    #coachTitle { font-size: 15px; color: var(--accent); letter-spacing: 0.04em; }
+    #coachBody { font-size: 13px; color: rgba(201, 220, 236, 0.72); margin-top: 5px; line-height: 1.5; }
+    #coachKeys { font-size: 11px; color: var(--dim); margin-top: 8px; }
   </style>
   <script type="importmap">
     {
@@ -108,22 +138,47 @@
   <canvas id="overlay"></canvas>
   <div id="stage"></div>
 
-  <div id="hud">
+  <div id="topbar">
     <button id="start" disabled>start camera</button>
-    <button id="reset">reset</button>
-    <span id="status">loading model…</span>
+    <button id="reset" class="ghost">reset</button>
     <span id="mode">idle</span>
+    <span id="status">loading model…</span>
+    <span class="spacer"></span>
     <span id="explodeMode">—</span>
     <span id="fps">— fps</span>
-    <span id="loaded">—</span>
+    <button id="togglePanel" class="ghost">hide panel</button>
   </div>
 
-  <pre id="readout"></pre>
-  <div id="hint">closed fist — grab: move it, twist your wrist to spin it left/right, hand bigger/smaller — push/pull · raise your other hand, move it up/down — tilt it · two-hand pinch — scale · two open hands apart — explode/stretch · clap open hands — reset · R — reset · D — show camera/tracking · drag — orbit camera</div>
+  <div id="panel">
+    <div class="panel-title">Practice — one at a time</div>
+    <div class="drill" id="drills"></div>
+
+    <div id="live">
+      <span id="lamp"></span>
+      <span id="liveText">camera off</span>
+    </div>
+
+    <div class="panel-title">Feel</div>
+    <label class="tune">sensitivity <b id="sensVal">1.0×</b></label>
+    <input type="range" id="sens" min="0.2" max="2" step="0.1" value="1" />
+
+    <label class="tune">trigger delay <b id="trigVal">3 frames</b></label>
+    <input type="range" id="trig" min="1" max="12" step="1" value="3" />
+
+    <div class="row">
+      <input type="checkbox" id="momentum" checked />
+      <label for="momentum">momentum (coast after release)</label>
+    </div>
+  </div>
+
+  <div id="coach">
+    <div id="coachTitle">—</div>
+    <div id="coachBody"></div>
+    <div id="coachKeys">R — reset · D — camera view · P — panel · drag — orbit</div>
+  </div>
 
   <script type="module">
     const stamp = Date.now();
-    document.getElementById('loaded').textContent = 'loaded ' + new Date().toTimeString().slice(0, 8);
     import(`./hologram.js?v=${stamp}`);
   </script>
 </body>

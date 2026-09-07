@@ -11,7 +11,7 @@ manipulates a *downloaded* model. This one manipulates a scan of an object you a
 
 No install, no server — every page runs entirely in the browser:
 
-- **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience: closed fist to grab — move it, twist your wrist to spin it, move your hand closer/farther to push/pull it; raise your other hand and move it up/down to tilt it; two-hand pinch to scale it; two open hands pulling apart to stretch it; clap open hands to reset it (press `D` to reveal the camera/tracking view, hidden by default — real 3D "ghost hands" in the scene are the normal feedback instead)
+- **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience. Includes a **practice mode** that arms one gesture at a time (move, spin, tilt, push/pull, scale, explode, clap) so each can be learned and tuned without the others firing, plus live sensitivity / trigger-delay / momentum controls. `D` shows the camera and tracking overlay, `P` toggles the panel
 - **[Model viewer](https://crazycatz67.github.io/hologram-workshop/)** — the hologram alone, drag to orbit, no camera needed
 - **[Hand tracking](https://crazycatz67.github.io/hologram-workshop/hands.html)** — tracking on its own, with the raw pinch/gesture numbers on screen
 
@@ -26,7 +26,7 @@ browser, and once in System Settings → Privacy & Security → Camera.
 | 1 — Hand tracking foundation | Done, confirmed on a real webcam |
 | 2 — Static model in the browser | Done. Three.js + OrbitControls, no build step |
 | 3 — Hologram shader | Done. Fresnel glow + scanlines, tunable live |
-| 4 — Gesture-driven manipulation | All v1 gestures built. Grab (move/yaw/push-pull), pitch, scale, and clap confirmed on real hands; pitch/push-pull/explode still need their first live-hands test |
+| 4 — Gesture-driven manipulation | All v1 gestures built, plus practice mode and live tuning. Feel and thresholds still need a real-hands tuning pass |
 | 5 — Polish and stretch | Not started |
 
 Full breakdown in [ROADMAP.md](ROADMAP.md); working conventions in [CLAUDE.md](CLAUDE.md).
@@ -50,7 +50,7 @@ Then open <http://localhost:8080>.
 | `index.html`, `main.js` | Model viewer only (no camera) |
 | `hands.html`, `hands.js` | Hand tracking only, with raw gesture numbers on screen |
 | `scene.js` | Renderer, camera, lights, controls, render loop |
-| `loadModel.js` | GLB loader with OBJ+MTL fallback, and camera framing |
+| `loadModel.js` | Model loader (GLB, or OBJ with or without MTL) and camera framing |
 | `trimGeometry.js` | Cylinder crop, kept for reference — no longer used by either page now that cleanup happens offline |
 | `HolographicMaterial.js` | The hologram shader (vendored MIT source, not an npm package) |
 | `camera.js` | Webcam setup and teardown |
@@ -58,14 +58,15 @@ Then open <http://localhost:8080>.
 | `gestures.js` | Pinch, two-hand span and angle |
 | `overlay.js` | Canvas skeleton and labels |
 | `stabilizer.js` | Hysteresis so a gesture needs a few consistent frames to start or stop |
-| `manipulator.js` | Maps stabilised gestures onto the model (grab/move/rotate with momentum, scale, clap-reset) |
+| `manipulator.js` | Maps stabilised gestures onto the model. Each channel (move/spin/tilt/push/scale/explode/clap) is individually armable, which is what practice mode drives |
 | `ghostHands.js` | Renders tracked hands as real 3D geometry in the scene, not a flat overlay |
-| `smoothLandmarks.js` | Exponential smoothing on raw landmark positions, keyed by handedness |
+| `smoothLandmarks.js` | Exponential smoothing on raw landmark positions, matched frame-to-frame by nearest wrist position |
 | `serve.py` | Static server that sends `no-store` |
 | `analyze_scan.py` | Suggests crop parameters for a new raw scan (see ROADMAP.md) |
 | `clean_scan.py` | **Raw scan → clean object.** Detects and removes the ground plane (without deleting the object's base), rebuilds missing structure by mirroring, fills gaps, welds watertight, decimates for the web |
 | `repair_scan.py` | Lower-level mesh repair (PyMeshLab, no GUI) — see ROADMAP.md for what worked and what didn't |
 
 No bundler and no dependencies to install for the site itself — Three.js and MediaPipe
-both load from a CDN via an import map. `analyze_scan.py` needs `numpy`; `repair_scan.py`
-needs `pymeshlab`. Both are local dev tools, not part of what ships to the browser.
+both load from a CDN via an import map. `analyze_scan.py` needs `numpy`; `clean_scan.py`
+needs both; `repair_scan.py` needs `pymeshlab`. All three are local dev tools, not part of
+what ships to the browser.
