@@ -226,7 +226,7 @@ const DRILLS = [
     sub: 'normal use',
     channels: CHANNELS,
     title: 'All gestures active',
-    body: 'Fist — move, twist to spin, hand nearer/farther to push-pull · second hand up/down — tilt · two-hand pinch — scale · two open hands apart — explode · clap — reset'
+    body: 'Fist — move, twist to spin, hand nearer/farther to push-pull · second hand up/down tips it, left/right rolls it · two-hand pinch — scale · two open hands apart — explode · clap — reset'
   },
   {
     id: 'move',
@@ -247,10 +247,10 @@ const DRILLS = [
   {
     id: 'tilt',
     label: 'Tilt',
-    sub: 'second hand up / down',
+    sub: 'second hand: up/down tips, left/right rolls',
     channels: ['tilt'],
     title: 'Tilt',
-    body: 'Hold a fist with one hand to take hold, then raise and lower your OTHER hand to tip it toward or away from you. The second hand can be any shape.'
+    body: 'Hold a fist with one hand to take hold. Raise and lower your OTHER hand to tip it toward or away from you; move that hand left and right to roll it side to side. Both read from the same hand at once. It can be any shape.'
   },
   {
     id: 'push',
@@ -308,6 +308,22 @@ for (const drill of DRILLS) {
   btn.append(name, sub);
   btn.addEventListener('click', () => applyDrill(drill));
   drillsEl.appendChild(btn);
+}
+
+// A standing reference of what each hand shape actually does, visible regardless of which
+// drill is selected -- the drills teach one gesture at a time, but nothing showed the whole
+// map at a glance once you'd learned them. Built from DRILLS itself rather than a separate
+// list, so the wording can't drift out of sync with what the drills already say.
+const legendEl = document.getElementById('legend');
+if (legendEl) {
+  for (const drill of DRILLS.filter((d) => d.id !== 'free')) {
+    const row = document.createElement('div');
+    row.className = 'legend-row';
+    row.innerHTML = `<span class="legend-k"></span><span class="legend-v"></span>`;
+    row.firstChild.textContent = drill.label;
+    row.lastChild.textContent = drill.sub;
+    legendEl.appendChild(row);
+  }
 }
 
 function togglePanel() {
@@ -381,7 +397,20 @@ function updateLive(mode) {
     case 'reset':
       setLive(false, hands.length < 2 ? 'need both hands' : 'ready — clap quickly');
       break;
-    default:
-      setLive(mode !== MODE.IDLE, hands.length + (hands.length === 1 ? ' hand · ' : ' hands · ') + mode);
+    default: {
+      // The three exclusive modes (grab/transform/explode) can't run at once by design --
+      // this says so explicitly rather than leaving it to be inferred, since "why didn't my
+      // pinch do anything" has an actual answer (something else is currently holding the
+      // mode) that the mode badge alone doesn't convey.
+      const lockedFor = {
+        [MODE.GRAB]: 'scale, explode locked',
+        [MODE.TRANSFORM]: 'move/spin/tilt/push, explode locked',
+        [MODE.EXPLODE]: 'move/spin/tilt/push, scale locked'
+      };
+      const locked = lockedFor[mode];
+      const base = hands.length + (hands.length === 1 ? ' hand · ' : ' hands · ') + mode;
+      setLive(mode !== MODE.IDLE, locked ? `${base} (${locked})` : base);
+      break;
+    }
   }
 }

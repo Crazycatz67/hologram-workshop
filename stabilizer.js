@@ -22,7 +22,16 @@ export function createStabilizer({ enterMs = 90, exitMs = 220 } = {}) {
   return {
     // timestampMs: defaults to performance.now() so a caller that never passes one (existing
     // tests, anything not on the live tracking path) keeps working exactly as before.
-    update(input, timestampMs = performance.now()) {
+    //
+    // enterOverrideMs: raises the bar for entering, for this call only, without touching the
+    // instance's own configured enterMs. Exists for mode-switch rigidity (see
+    // manipulator.js): a gesture should need only its normal, already-tuned confirmation to
+    // start from idle, but a LONGER, harder-to-reach confirmation to interrupt some OTHER
+    // gesture that's already actively engaged — a single misread frame shouldn't be able to
+    // hijack an in-progress grab into transform. Passing a bigger number here for exactly
+    // that situation, and leaving it out otherwise, gets both behaviors from one stabilizer
+    // instance rather than needing the caller to juggle two.
+    update(input, timestampMs = performance.now(), enterOverrideMs = null) {
       // Coerced rather than compared with ===: a truthy non-boolean would otherwise never
       // equal `state` and every call would count as disagreement, which fires the gesture
       // off a single spike.
@@ -35,7 +44,7 @@ export function createStabilizer({ enterMs = 90, exitMs = 220 } = {}) {
 
       if (agreeingSince === null) agreeingSince = timestampMs;
       const held = timestampMs - agreeingSince;
-      const needed = raw ? enterMs : exitMs;
+      const needed = raw ? (enterOverrideMs ?? enterMs) : exitMs;
       if (held >= needed) {
         state = raw;
         agreeingSince = null;

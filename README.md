@@ -15,6 +15,8 @@ No install, no server — every page runs entirely in the browser:
 - **[Model viewer](https://crazycatz67.github.io/hologram-workshop/)** — the hologram alone, drag to orbit, no camera needed. `?model=<path>` loads a different mesh and `?plain=1` swaps in an opaque material, both for judging a `clean_scan.py` result
 - **[Hand tracking](https://crazycatz67.github.io/hologram-workshop/hands.html)** — tracking on its own, with the raw pinch/gesture numbers on screen
 
+The gesture page carries an always-visible **gesture reference** (what each hand shape does) and a live status line naming which gestures are currently locked out by whichever one is active — mode-switching itself needs sustained, deliberate confirmation to interrupt an in-progress gesture, not just a brief flicker, so a misread frame can't hijack an active grab into something else.
+
 Both pages carry a **measurement panel**: real dimensions, detected key heights (seat height and the like, found rather than assumed), an estimated weight and shipping carton, a tape measure between any two points you pick, a will-it-fit check against an opening, and notes you can pin to the object and export as a report. **Calibrate** against one hand measurement to correct the whole scan — LiDAR carries real scale but is typically a few percent out, and the report says whether it was calibrated. The scan carries true real-world scale, so these are measurements rather than decoration — and scaling the hologram never changes them, since resizing a hologram does not resize the real object. `M` hides the panel.
 
 Gesture pages need camera permission. On macOS you may have to allow it twice: once in the

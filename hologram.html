@@ -68,6 +68,10 @@
       position: fixed; top: 52px; right: 12px; z-index: 4; width: 234px;
       background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
       padding: 12px; backdrop-filter: blur(8px);
+      /* Same reasoning as #measure's own max-height: adding the gesture reference made
+         this panel taller, and a fixed-position panel that just overflows the viewport
+         on a shorter screen is invisible past the fold rather than merely inconvenient. */
+      max-height: calc(100vh - 64px); overflow-y: auto;
     }
     #panel.hidden { display: none; }
     .panel-title {
@@ -113,6 +117,17 @@
     .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
     .row input[type="checkbox"] { accent-color: var(--accent); }
     .row label { font-size: 12px; color: var(--dim); }
+
+    /* always-visible reference: what each hand shape does, regardless of which drill
+       is selected -- distinct from the per-drill coach text below the stage, which only
+       covers the one gesture currently being practiced. */
+    #legend { display: grid; gap: 3px; }
+    .legend-row {
+      display: flex; justify-content: space-between; gap: 10px;
+      font-size: 11px; padding: 3px 0;
+    }
+    .legend-k { color: var(--text); flex: none; }
+    .legend-v { color: var(--dim); text-align: right; }
 
 
     /* ---- measurement panel ---- */
@@ -256,6 +271,9 @@
       <input type="checkbox" id="momentum" checked />
       <label for="momentum">momentum (coast after release)</label>
     </div>
+
+    <div class="panel-title">Gesture reference</div>
+    <div id="legend"></div>
   </div>
 
   <div id="measure"></div>

@@ -310,6 +310,37 @@ async function main() {
     m.reset();
   });
 
+  group('Mode-switch rigidity — an active gesture resists a brief interruption', () => {
+    // Reported live as "two hands, it breaks out": mid-tilt, a single misread frame where
+    // the second (open) hand briefly LOOKED like it was pinching was enough to hijack
+    // control into transform, using the same short confirmation window a fresh gesture
+    // gets from idle. Two things have to both be true for the fix to be right: a brief
+    // flicker must NOT switch modes, but a genuine, sustained gesture change still must.
+    const m = createManipulator(object, camera);
+
+    m.reset();
+    m.configure({ channels: ALL_CHANNELS, sensitivity: 1, momentum: false, triggerFrames: 3 });
+    let t = 1000;
+    // establish a confirmed, active grab first
+    for (let i = 0; i < 10; i++) { m.update([hand(0.5, 0.5, 0, 'fist')], 1.78, t); t += 16.7; }
+    checkTrue('grab is confirmed active before the interruption test', m.mode === MODE.GRAB, `mode=${m.mode}`);
+
+    // a single-frame flicker: both hands suddenly read as pinching for ONE call, then back
+    for (let i = 0; i < 3; i++) {
+      m.update([hand(0.35, 0.5, 0, 'pinch'), hand(0.65, 0.5, 0, 'pinch')], 1.78, t);
+      t += 16.7;
+    }
+    checkTrue('a brief pinch flicker does not hijack an active grab', m.mode === MODE.GRAB, `mode=${m.mode}`);
+
+    // a genuine, sustained pinch -- held well past SWITCH_AWAY_MS -- should still take over
+    for (let i = 0; i < 25; i++) {
+      m.update([hand(0.35, 0.5, 0, 'pinch'), hand(0.65, 0.5, 0, 'pinch')], 1.78, t);
+      t += 16.7;
+    }
+    checkTrue('a sustained pinch still switches into transform', m.mode === MODE.TRANSFORM, `mode=${m.mode}`);
+    m.reset();
+  });
+
   group('Tilt — roll (second hand left/right), added after live feedback', () => {
     const m = createManipulator(object, camera);
     m.reset();

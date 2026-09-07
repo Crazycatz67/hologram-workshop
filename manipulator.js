@@ -250,6 +250,15 @@ export function createManipulator(object, camera) {
     triggerFrames: 3
   };
   const framesToMs = (frames) => (frames / 60) * 1000;
+  // How long a DIFFERENT gesture must be confirmed before it's allowed to interrupt one
+  // that's already active (see update() below). Deliberately several times a normal
+  // enterMs: a normal enterMs is tuned to feel instant for a gesture starting fresh, and
+  // reusing that same short window for an interrupt is exactly what let a brief
+  // misclassification hijack an active grab. Not tied to triggerFrames — the practice
+  // panel's trigger-delay slider is about how quickly a gesture starts, not about how hard
+  // it is to rip control away from one already running, and conflating the two would make
+  // that slider affect something the user didn't ask it to.
+  const SWITCH_AWAY_MS = 300;
 
   let grab = createStabilizer({ enterMs: framesToMs(settings.triggerFrames), exitMs: 220 });
   let transform = createStabilizer({ enterMs: framesToMs(settings.triggerFrames), exitMs: 220 });
@@ -438,9 +447,22 @@ export function createManipulator(object, camera) {
       // silence a gesture completely rather than merely ignoring its effect -- a disarmed
       // gesture must not even claim the mode, or it would still block the one being practised.
       const grabArmed = on('move') || on('spin') || on('tilt') || on('push');
-      const transforming = transform.update(twoHanded && on('scale'), timestampMs);
-      const exploding = explode.update(openHanded && on('explode') && !transforming, timestampMs);
-      const grabbing = grab.update(fisted && grabArmed && !transforming && !exploding, timestampMs);
+
+      // Starting a gesture from IDLE and INTERRUPTING a different, already-active gesture
+      // are not the same decision, and treating them the same was a real source of
+      // "finicky" — reported as "two hands, it breaks out": mid-tilt, a single misread
+      // frame where the open second hand briefly looked like it was pinching was enough to
+      // yank control away into transform, using the exact same brief confirmation window a
+      // fresh gesture gets from idle. SWITCH_AWAY_MS raises that bar specifically for the
+      // interrupt case — a genuine, deliberate gesture change still gets through, just not
+      // off a single flicker — while leaving how quickly a gesture starts from idle alone,
+      // since that responsiveness was tuned separately and wasn't the complaint.
+      const startingFromIdle = mode === MODE.IDLE;
+      const enterFor = (targetMode) => (startingFromIdle || mode === targetMode ? undefined : SWITCH_AWAY_MS);
+
+      const transforming = transform.update(twoHanded && on('scale'), timestampMs, enterFor(MODE.TRANSFORM));
+      const exploding = explode.update(openHanded && on('explode') && !transforming, timestampMs, enterFor(MODE.EXPLODE));
+      const grabbing = grab.update(fisted && grabArmed && !transforming && !exploding, timestampMs, enterFor(MODE.GRAB));
 
       if (transforming) {
         mode = MODE.TRANSFORM;
