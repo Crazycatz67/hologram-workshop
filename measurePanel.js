@@ -529,6 +529,7 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
   // by constructing the panel and nothing else. Text is only rewritten when a value actually
   // changes, so the steady-state cost is a string comparison per frame.
   let lastKey = '';
+  let frame = 0;
   function tick() {
     const s = object.scale;
     const key = `${s.x.toFixed(3)}|${s.y.toFixed(3)}|${s.z.toFixed(3)}|${unit}`;
@@ -538,7 +539,7 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
     }
     refreshTapeGeometry();
     annotations.update();
-    requestAnimationFrame(tick);
+    frame = requestAnimationFrame(tick);
   }
 
   renderDims();
@@ -553,6 +554,9 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
     surfaces,
     report: currentReport,
     dispose() {
+      // Without this the panel's own animation frame kept running after disposal, holding
+      // the object, scene and every note alive with it.
+      cancelAnimationFrame(frame);
       renderer.domElement.removeEventListener('pointerdown', onDown);
       renderer.domElement.removeEventListener('pointerup', onUp);
       clearTape();

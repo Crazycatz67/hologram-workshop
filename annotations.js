@@ -109,12 +109,16 @@ export function createAnnotations({ object, camera, renderer, scene, labelLayer,
   // Labels are HTML rather than sprites so the text stays crisp at any zoom and can be
   // styled with the rest of the UI. Positions are projected each frame; a label behind the
   // camera projects to a nonsense coordinate, so those are hidden rather than drawn.
+  // Scratch vectors reused across notes and frames. cloning per note per frame allocated
+  // garbage on every rendered frame for as long as any note existed.
   const projected = new THREE.Vector3();
+  const world = new THREE.Vector3();
   function update() {
     if (notes.length === 0) return;
     const rect = renderer.domElement.getBoundingClientRect();
     for (const note of notes) {
-      const world = object.localToWorld(note.local.clone());
+      world.copy(note.local);
+      object.localToWorld(world);
       note.marker.position.copy(world);
       projected.copy(world).project(camera);
       if (projected.z > 1) {

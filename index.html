@@ -43,6 +43,7 @@
       background: var(--panel, rgba(8,14,22,0.82));
       border: 1px solid var(--edge, rgba(120,200,255,0.16));
       border-radius: 8px; padding: 12px; backdrop-filter: blur(8px);
+      max-height: calc(100vh - 120px); overflow-y: auto;
       color: var(--text, #c9dcec);
       font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
@@ -82,7 +83,6 @@
     .measure-fit.bad { color: #ff8a65; }
 
     /* measurement panel: collapsible sections, notes, labels */
-    #measure { max-height: calc(100vh - 120px); overflow-y: auto; }
     .measure-head {
       display: flex; align-items: center; justify-content: space-between;
       margin-bottom: 8px;

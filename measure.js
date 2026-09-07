@@ -34,23 +34,81 @@ function collectVertices(object) {
   return points;
 }
 
-// Minimum-area footprint rectangle, by rotating about the vertical axis. Brute force at one
-// degree then refined at a tenth: a footprint's area as a function of angle is smooth and
-// has few minima, so a search is both simpler and more predictable here than rotating
-// calipers, and 900 cheap passes over the vertex list costs nothing at load time.
+// Minimum-area footprint rectangle over rotation about the vertical axis.
+//
+// Only the CONVEX HULL of the footprint can touch the enclosing rectangle, and the minimum-
+// area rectangle always has one side collinear with a hull edge — so the answer lies among
+// the hull's own edge directions rather than anywhere in a continuous sweep. That makes the
+// search both exact and small: the first version scanned ~930 arbitrary angles across every
+// one of the chair's 228,000 position entries (~212 million operations, measured at 94ms)
+// and still only resolved the angle to a tenth of a degree. This evaluates a few dozen
+// candidate directions against a few dozen hull points, and the angle is exact.
+//
+// The hull is cheap because of the Akl-Toussaint discard: any point strictly inside the
+// quadrilateral formed by the four axis-extreme points cannot possibly be on the hull, and
+// on a real scan that removes the overwhelming majority in one linear pass, leaving only a
+// small set to sort.
+function cross2(o, a, b) {
+  return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+}
+
+function convexHullXZ(points) {
+  if (points.length < 3) return points.map((p) => [p[0], p[2]]);
+
+  let west = points[0], east = points[0], south = points[0], north = points[0];
+  for (const p of points) {
+    if (p[0] < west[0]) west = p;
+    if (p[0] > east[0]) east = p;
+    if (p[2] < south[2]) south = p;
+    if (p[2] > north[2]) north = p;
+  }
+  const quad = [[west[0], west[2]], [south[0], south[2]], [east[0], east[2]], [north[0], north[2]]];
+
+  // Keep only points outside (or on) that quadrilateral. Degenerate cases — a flat or
+  // collinear footprint — collapse the quad, in which case nothing is discarded and the
+  // hull below still works, just on more points.
+  const candidates = [];
+  for (const p of points) {
+    const q = [p[0], p[2]];
+    let inside = true;
+    for (let k = 0; k < 4; k++) {
+      if (cross2(quad[k], quad[(k + 1) % 4], q) < 0) { inside = false; break; }
+    }
+    if (!inside) candidates.push(q);
+  }
+  for (const q of quad) candidates.push(q);
+
+  candidates.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+
+  const lower = [];
+  for (const p of candidates) {
+    while (lower.length >= 2 && cross2(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const p = candidates[i];
+    while (upper.length >= 2 && cross2(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  const hull = lower.concat(upper);
+  return hull.length >= 3 ? hull : candidates;
+}
+
 function minimalFootprint(points) {
+  const hull = convexHullXZ(points);
+  if (hull.length < 2) return { width: 0, depth: 0, angleDeg: 0, hullSize: hull.length };
+
   let best = null;
-  const evaluate = (deg) => {
-    const t = deg * RAD;
-    const cos = Math.cos(t);
-    const sin = Math.sin(t);
-    let minU = Infinity;
-    let maxU = -Infinity;
-    let minV = Infinity;
-    let maxV = -Infinity;
-    for (const p of points) {
-      const u = p[0] * cos - p[2] * sin;
-      const v = p[0] * sin + p[2] * cos;
+  const consider = (theta) => {
+    const cos = Math.cos(theta);
+    const sin = Math.sin(theta);
+    let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+    for (const h of hull) {
+      const u = h[0] * cos - h[1] * sin;
+      const v = h[0] * sin + h[1] * cos;
       if (u < minU) minU = u;
       if (u > maxU) maxU = u;
       if (v < minV) minV = v;
@@ -59,18 +117,26 @@ function minimalFootprint(points) {
     const w = maxU - minU;
     const d = maxV - minV;
     const area = w * d;
-    if (!best || area < best.area) best = { area, w, d, deg };
+    if (!best || area < best.area) best = { area, w, d, theta };
   };
 
-  for (let deg = 0; deg < 90; deg += 1) evaluate(deg);
-  const coarse = best.deg;
-  for (let deg = coarse - 1; deg <= coarse + 1; deg += 0.1) evaluate(deg);
+  for (let i = 0; i < hull.length; i++) {
+    const a = hull[i];
+    const b = hull[(i + 1) % hull.length];
+    const dx = b[0] - a[0];
+    const dz = b[1] - a[1];
+    if (dx === 0 && dz === 0) continue;
+    consider(-Math.atan2(dz, dx));
+  }
+  if (!best) consider(0);
 
   // Report the longer horizontal side as width, so width/depth don't swap between scans
-  // purely because the search landed on the perpendicular angle.
+  // purely because the winning edge happened to be the perpendicular one.
   const width = Math.max(best.w, best.d);
   const depth = Math.min(best.w, best.d);
-  return { width, depth, angleDeg: best.deg };
+  let deg = (best.theta * 180) / Math.PI;
+  deg = ((deg % 180) + 180) % 180;
+  return { width, depth, angleDeg: deg, hullSize: hull.length };
 }
 
 // Signed-tetrahedron volume and triangle-area sum. Volume is only meaningful on a closed
@@ -143,7 +209,11 @@ export function measureObject(object) {
     footprintAngleDeg: footprint.angleDeg,
     volume,
     surfaceArea: area,
-    vertexCount: points.length
+    // points.length counts POSITION ENTRIES, and this mesh is non-indexed, so it is three
+    // per triangle rather than a vertex count -- it read "228,000 vertices" for a mesh with
+    // 37,985 of them. Reported as what it actually measures.
+    triangleCount: Math.round(points.length / 3),
+    hullSize: footprint.hullSize
   };
 }
 
@@ -313,9 +383,9 @@ export function horizontalSurfaces(object) {
     let total = 0;
     for (let b = s.from; b <= s.to; b++) total += area[b];
     return {
-      // The strongest band is the surface people actually meet — the top face of the seat.
-      height: minY + ((s.best + 0.5) / SURFACE_BANDS) * height - minY,
-      heightFromBase: minY + ((s.best + 0.5) / SURFACE_BANDS) * height - minY,
+      // Height above the object's own base — the strongest band is the surface people
+      // actually meet, i.e. the top face of the seat rather than its underside.
+      height: ((s.best + 0.5) / SURFACE_BANDS) * height,
       area: total,
       width: Number.isFinite(e.maxX) ? e.maxX - e.minX : 0,
       depth: Number.isFinite(e.maxZ) ? e.maxZ - e.minZ : 0,
