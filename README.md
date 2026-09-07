@@ -33,6 +33,8 @@ browser, and once in System Settings → Privacy & Security → Camera.
 
 Full breakdown in [ROADMAP.md](ROADMAP.md); working conventions in [CLAUDE.md](CLAUDE.md).
 
+**Regression tests:** open [`test.html`](test.html) locally and read the page — 37 checks covering gesture isolation, tracking-noise robustness, and every measurement figure against the shipped chair scan. No framework, no build step; a run is opening the page.
+
 ## Running locally
 
 Needs a static server — `GLTFLoader` uses `fetch()`, which browsers block on `file://`
@@ -67,6 +69,7 @@ Then open <http://localhost:8080>.
 | `ghostHands.js` | Renders tracked hands as real 3D geometry in the scene, not a flat overlay |
 | `smoothLandmarks.js` | Exponential smoothing on raw landmark positions, matched frame-to-frame by nearest wrist position |
 | `serve.py` | Static server that sends `no-store` |
+| `test.html`, `test.js` | Regression suite — open the page, read pass/fail. Synthetic hand geometry and the shipped chair scan; no build step, no framework |
 | `analyze_scan.py` | Suggests crop parameters for a new raw scan (see ROADMAP.md) |
 | `clean_scan.py` | **Raw scan → clean object.** Detects and removes the ground plane (without deleting the object's base), rebuilds missing structure by mirroring, fills gaps, welds watertight, decimates for the web |
 | `repair_scan.py` | Lower-level mesh repair (PyMeshLab, no GUI) — see ROADMAP.md for what worked and what didn't |

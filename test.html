@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hologram Project — Regression Tests</title>
+  <style>
+    html, body { margin: 0; background: #05070a; color: #c9dcec; }
+    body {
+      font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      padding: 20px; max-width: 900px; margin: 0 auto;
+    }
+    h1 { font-size: 15px; color: #4fd1ff; font-weight: normal; letter-spacing: 0.04em; }
+    #summary { margin: 4px 0 18px; font-size: 13px; }
+    #summary.pass { color: #7fe3a1; }
+    #summary.fail { color: #ff5c5c; }
+    .group { margin-bottom: 18px; }
+    .group-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+      color: #6b7d94; margin-bottom: 6px; border-bottom: 1px solid rgba(120,200,255,0.16);
+      padding-bottom: 4px;
+    }
+    .case { display: flex; gap: 10px; padding: 3px 0; align-items: baseline; }
+    .case .mark { width: 18px; flex: none; }
+    .case.pass .mark { color: #7fe3a1; }
+    .case.fail .mark { color: #ff5c5c; }
+    .case .name { flex: none; width: 260px; color: #c9dcec; }
+    .case .detail { color: #6b7d94; }
+    .case.fail .detail { color: #ff8a65; }
+    #raw { margin-top: 20px; color: #444; font-size: 11px; }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <h1>Hologram Project — Regression Tests</h1>
+  <div id="summary">running…</div>
+  <div id="results"></div>
+  <div id="raw"></div>
+
+  <script type="module">
+    const stamp = Date.now();
+    import(`./test.js?v=${stamp}`);
+  </script>
+</body>
+</html>
