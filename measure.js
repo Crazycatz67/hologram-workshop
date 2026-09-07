@@ -368,3 +368,42 @@ export function formatWeight(kg, unit) {
   if (unit === 'in') return `${(kg * 2.20462).toFixed(1)} lb`;
   return kg >= 1 ? `${kg.toFixed(1)} kg` : `${(kg * 1000).toFixed(0)} g`;
 }
+
+// ---------------------------------------------------------------------------------------
+// Calibration.
+//
+// A LiDAR scan carries real scale, but not perfect scale — phone LiDAR typically lands
+// within a few percent, and that error is a single scale factor across the whole scan
+// rather than random per-dimension noise. So one hand measurement of any known feature is
+// enough to correct everything: measure the seat height with a tape, tell the app what it
+// really is, and every other number moves with it.
+//
+// This is the difference between numbers that look plausible and numbers someone else can
+// act on. Without it the honest description of every figure here is "about".
+//
+// Note the exponents — these are the easy thing to get wrong. A length scales by f, an area
+// by f², a volume by f³, so a 3% length error is a 9% volume error and therefore a 9% weight
+// error. Getting that wrong would make the weight estimate quietly worse the more precisely
+// someone calibrated.
+export function calibrate(base, factor) {
+  if (!(factor > 0) || factor === 1) return base;
+  return {
+    ...base,
+    width: base.width * factor,
+    depth: base.depth * factor,
+    height: base.height * factor,
+    volume: base.volume * factor ** 3,
+    surfaceArea: base.surfaceArea * factor ** 2
+  };
+}
+
+export function calibrateSurfaces(surfaces, factor) {
+  if (!(factor > 0) || factor === 1) return surfaces;
+  return surfaces.map((s) => ({
+    ...s,
+    height: s.height * factor,
+    width: s.width * factor,
+    depth: s.depth * factor,
+    area: s.area * factor ** 2
+  }));
+}

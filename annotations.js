@@ -143,12 +143,18 @@ export function createAnnotations({ object, camera, renderer, scene, labelLayer,
 
 // A plain-text report, because the point of writing notes down is being able to send them to
 // someone. Markdown so it stays readable as-is but pastes into anything.
-export function buildReport({ modelName, dims, surfaces, weight, shipping, notes, unit, formatLength, formatVolume, formatWeight }) {
+export function buildReport({ modelName, dims, surfaces, weight, shipping, notes, calibration = 1, unit, formatLength, formatVolume, formatWeight }) {
   const L = (m) => formatLength(m, unit);
   const lines = [];
   lines.push(`# ${modelName}`);
   lines.push('');
   lines.push(`_Measured from a LiDAR scan on ${new Date().toISOString().slice(0, 10)}._`);
+  lines.push('');
+  // Whether the figures were checked against a hand measurement is exactly what a reader
+  // needs to know before trusting them, so it goes at the top rather than in a footnote.
+  lines.push(calibration === 1
+    ? '_Uncalibrated — taken directly from the scan, so treat these as approximate._'
+    : `_Calibrated against a hand measurement (${(calibration - 1) * 100 >= 0 ? '+' : ''}${((calibration - 1) * 100).toFixed(1)}% correction applied)._`);
   lines.push('');
   lines.push('## Dimensions');
   lines.push('');

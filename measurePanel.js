@@ -18,18 +18,31 @@
 import * as THREE from 'three';
 import {
   measureObject, scaleDimensions, formatLength, formatVolume, formatWeight,
-  fitCheck, horizontalSurfaces, MATERIALS, estimateWeight, shippingBox
+  fitCheck, horizontalSurfaces, MATERIALS, estimateWeight, shippingBox,
+  calibrate, calibrateSurfaces
 } from './measure.js';
 import { createAnnotations, buildReport } from './annotations.js';
 
 const MARKER_COLOR = 0xffd166;
 const DRAG_TOLERANCE = 5;    // px of mouse travel still counted as a click, not an orbit drag
 const SURFACE_MIN_SHARE = 0.10; // below this a "surface" is a foot pad, not something to report
+const CAL_STORAGE_PREFIX = 'hologram-cal:';
+// Phone LiDAR normally lands within a few percent. A correction much larger than this is far
+// more likely to be a typo or the wrong reference picked than a genuinely bad scan, so it is
+// flagged rather than silently applied to everything.
+const CAL_SUSPICIOUS = 0.10;
 
 export function createMeasurePanel({ mount, object, camera, renderer, scene, modelName = 'Scanned object' }) {
-  const base = measureObject(object);
-  if (!base) return null;
-  const surfaces = horizontalSurfaces(object).filter((s) => s.share >= SURFACE_MIN_SHARE);
+  const rawBase = measureObject(object);
+  if (!rawBase) return null;
+  const rawSurfaces = horizontalSurfaces(object).filter((s) => s.share >= SURFACE_MIN_SHARE);
+
+  // Everything downstream reads `base` and `surfaces`, which are the calibrated views. The
+  // raw measurements are kept so re-calibrating is always computed against the scan itself
+  // and never compounds a previous correction.
+  let factor = loadFactor();
+  let base = calibrate(rawBase, factor);
+  let surfaces = calibrateSurfaces(rawSurfaces, factor);
 
   // Sections that need re-rendering when the unit changes register here. Per panel, not
   // module-level: two panels on one page would otherwise share and double up handlers.
@@ -40,6 +53,38 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
   const picks = [];
   const markers = [];
   let line = null;
+
+  function calKey() {
+    return CAL_STORAGE_PREFIX + modelName;
+  }
+
+  function loadFactor() {
+    try {
+      const stored = parseFloat(localStorage.getItem(CAL_STORAGE_PREFIX + modelName));
+      return stored > 0 ? stored : 1;
+    } catch {
+      return 1;
+    }
+  }
+
+  function setFactor(next) {
+    factor = next > 0 ? next : 1;
+    base = calibrate(rawBase, factor);
+    surfaces = calibrateSurfaces(rawSurfaces, factor);
+    try {
+      if (factor === 1) localStorage.removeItem(calKey());
+      else localStorage.setItem(calKey(), String(factor));
+    } catch {
+      // Private windows throw; losing persistence is not worth breaking the tool over.
+    }
+    lastKey = '';           // force the dimensions to redraw
+    renderDims();
+    renderWeight();
+    reportTape();
+    runFit();
+    for (const fn of onUnitChange) fn();
+    renderCalibration();
+  }
 
   // ---- markup helpers -------------------------------------------------------------------
   const el = (tag, cls, text) => {
@@ -84,6 +129,93 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
   const scaledNote = el('div', 'measure-scaled');
   const stats = el('div', 'measure-stats');
   dimsBody.append(dims, scaledNote, stats);
+
+  // ---- calibration ----------------------------------------------------------------------
+  const calBody = section('Calibrate', false);
+  const calIntro = el('div', 'measure-stats',
+    'Measure one feature on the real object by hand, then tell it the true value. Everything else is corrected with it.');
+  const calRef = el('select', 'fit-input');
+  const calRow = el('div', 'fit-row');
+  const calValue = el('input');
+  calValue.type = 'number';
+  calValue.min = '0.1';
+  calValue.step = 'any';
+  calValue.placeholder = 'true value';
+  calValue.className = 'fit-input';
+  const calUnit = el('span', 'fit-unit', 'cm');
+  const calApply = el('button', 'ghost', 'apply');
+  calRow.append(calValue, calUnit, calApply);
+  const calStatus = el('div', 'measure-stats');
+  const calReset = el('button', 'ghost wide', 'clear calibration');
+  calBody.append(calIntro, calRef, calRow, calStatus, calReset);
+
+  // References are always the RAW measurements: calibrating against an already-corrected
+  // number would fold the old correction into the new one.
+  function calibrationReferences() {
+    const refs = [
+      { id: 'width', label: 'Width', metres: rawBase.width },
+      { id: 'depth', label: 'Depth', metres: rawBase.depth },
+      { id: 'height', label: 'Overall height', metres: rawBase.height }
+    ];
+    rawSurfaces.forEach((srf, i) => {
+      refs.push({
+        id: 'surface' + i,
+        label: `${i === 0 ? 'Main surface' : 'Surface ' + (i + 1)} height`,
+        metres: srf.height
+      });
+    });
+    if (picks.length === 2) {
+      refs.push({ id: 'tape', label: 'Current tape measurement', metres: picks[0].distanceTo(picks[1]) });
+    }
+    return refs;
+  }
+
+  function renderCalibration() {
+    const refs = calibrationReferences();
+    const previous = calRef.value;
+    calRef.innerHTML = '';
+    for (const r of refs) {
+      const opt = el('option', null, `${r.label} — scan says ${formatLength(r.metres * factor, unit)}`);
+      opt.value = r.id;
+      calRef.append(opt);
+    }
+    if (refs.some((r) => r.id === previous)) calRef.value = previous;
+
+    if (factor === 1) {
+      calStatus.textContent = 'not calibrated — figures are straight from the scan';
+      calStatus.className = 'measure-stats';
+      calReset.style.display = 'none';
+    } else {
+      const pct = (factor - 1) * 100;
+      const text = `calibrated ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% (×${factor.toFixed(4)})`;
+      calReset.style.display = '';
+      if (Math.abs(factor - 1) > CAL_SUSPICIOUS) {
+        calStatus.textContent = `${text} — that is a big correction for a LiDAR scan. Check the reference and the units.`;
+        calStatus.className = 'measure-fit bad';
+      } else {
+        calStatus.textContent = text;
+        calStatus.className = 'measure-fit ok';
+      }
+    }
+  }
+
+  calApply.addEventListener('click', () => {
+    const refs = calibrationReferences();
+    const ref = refs.find((r) => r.id === calRef.value) ?? refs[0];
+    const entered = parseFloat(calValue.value);
+    if (!(entered > 0) || !(ref.metres > 0)) {
+      calStatus.textContent = 'enter the measured value first';
+      calStatus.className = 'measure-fit bad';
+      return;
+    }
+    const trueMetres = unit === 'in' ? entered * 0.0254 : entered / 100;
+    setFactor(trueMetres / ref.metres);
+  });
+
+  calReset.addEventListener('click', () => {
+    calValue.value = '';
+    setFactor(1);
+  });
 
   // ---- detected surfaces ----------------------------------------------------------------
   if (surfaces.length) {
@@ -198,6 +330,7 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
       weight: { material: MATERIALS.find((m) => m.density === density).name, kg: estimateWeight(base.volume, density) },
       shipping: shippingBox(base),
       notes: annotations.all,
+      calibration: factor,
       unit, formatLength, formatVolume, formatWeight
     });
   }
@@ -303,6 +436,7 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
     markers.push(marker);
     refreshTapeGeometry();
     reportTape();
+    renderCalibration();
   };
   renderer.domElement.addEventListener('pointerdown', onDown);
   renderer.domElement.addEventListener('pointerup', onUp);
@@ -314,7 +448,7 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
     }
     // Distance in LOCAL space is the real distance on the scanned object, independent of
     // whatever the model has been scaled to on screen.
-    tapeOut.textContent = `${formatLength(picks[0].distanceTo(picks[1]), unit)} apart on the real object`;
+    tapeOut.textContent = `${formatLength(picks[0].distanceTo(picks[1]) * factor, unit)} apart on the real object`;
   }
 
   function setMode(next) {
@@ -381,6 +515,8 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
     unit = unit === 'cm' ? 'in' : 'cm';
     unitBtn.textContent = unit;
     fitUnit.textContent = unit;
+    calUnit.textContent = unit;
+    renderCalibration();
     renderDims();
     renderWeight();
     reportTape();
@@ -408,6 +544,7 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
   renderDims();
   renderWeight();
   renderNotes();
+  renderCalibration();
   runFit();
   tick();
 
