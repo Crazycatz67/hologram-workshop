@@ -396,6 +396,67 @@ async function main() {
       `60fps=${(at60 * 100).toFixed(1)}cm, 24fps=${(at24 * 100).toFixed(1)}cm`);
   });
 
+  group('Clap survives a transient pinch misread mid-close', () => {
+    // Reported live: clap "barely registered, had to try many times". Reproduced directly:
+    // a real clap's closing speed clears the threshold easily on its own (measured through
+    // landmark smoothing too -- that damps it only ~6%, nowhere near enough to explain the
+    // report) -- but the whole in-progress measurement was thrown away the instant EITHER
+    // hand read as pinching for even one frame, and fast clapping hand shapes are exactly
+    // the pose that can transiently misread as a pinch. Combined with a real, imperfect
+    // camera frame rate (a documented risk since Phase 1, meaning as few as 3-4 samples
+    // across the whole clap to begin with), losing even one sample to a false pinch
+    // reading routinely left too little data to reconstruct real speed before the hands
+    // finished closing. A single glitched frame now just isn't used to update the
+    // measurement, rather than wiping out every prior sample.
+    function hand(x, y, pinching) {
+      const lm = []; for (let i = 0; i < 21; i++) lm.push({ x, y, z: 0 });
+      lm[0] = { x, y, z: 0 }; lm[9] = { x, y: y - 0.12, z: 0 };
+      lm[5] = { x: x + 0.05, y: y - 0.08, z: 0 }; lm[17] = { x: x - 0.05, y: y - 0.08, z: 0 };
+      return { gesture: 'Open_Palm', handedness: 'Right', landmarks: lm,
+               pinch: { pinching: !!pinching }, fistLike: false };
+    }
+    function clapTrial(fps, glitchAtFrame) {
+      const m = createManipulator(object, camera);
+      m.configure({ channels: ['clap'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+      const stepMs = 1000 / fps;
+      const steps = Math.round(180 / stepMs); // a genuinely fast, ~180ms clap
+      let t = 1000;
+      for (let i = 0; i < 5; i++) { m.update([hand(0.25, 0.5), hand(0.75, 0.5)], 1.78, t); t += stepMs; }
+      object.scale.set(1.3, 1.3, 1.3);
+      let fired = false;
+      for (let i = 1; i <= steps; i++) {
+        const sep = 0.5 + (0.02 - 0.5) * (i / steps);
+        const glitch = glitchAtFrame === i;
+        m.update([hand(0.5 - sep / 2, 0.5, glitch), hand(0.5 + sep / 2, 0.5)], 1.78, t);
+        if (object.scale.x < 1.05) fired = true;
+        t += stepMs;
+      }
+      m.reset();
+      return fired;
+    }
+    // 22fps is a realistic, not extreme, real-webcam rate for this pipeline.
+    checkTrue('a clean fast clap fires at a realistic frame rate', clapTrial(22, -1));
+    checkTrue('a clap still fires despite ONE glitched (falsely pinching) frame mid-close', clapTrial(22, 2));
+
+    // A GENUINE, sustained pinch must still block a clap -- the fix must not have traded
+    // away the guard it was built to keep.
+    const m2 = createManipulator(object, camera);
+    m2.configure({ channels: ['clap', 'scale'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    let t = 1000;
+    for (let i = 0; i < 5; i++) { m2.update([hand(0.15, 0.5), hand(0.85, 0.5)], 1.78, t); t += 16.7; }
+    for (let i = 0; i < 30; i++) { m2.update([hand(0.3, 0.5, true), hand(0.7, 0.5, true)], 1.78, t); t += 16.7; } // real, sustained pinch
+    object.position.set(0.3, 0.1, 0);
+    let clapFiredWhilePinching = false;
+    for (let i = 1; i <= 10; i++) {
+      const sep = 0.4 - 0.038 * i;
+      m2.update([hand(0.5 - sep / 2, 0.5, true), hand(0.5 + sep / 2, 0.5, true)], 1.78, t);
+      if (object.position.length() < 0.001) clapFiredWhilePinching = true;
+      t += 16.7;
+    }
+    checkTrue('a genuinely sustained pinch still blocks a clap entirely', !clapFiredWhilePinching);
+    m2.reset();
+  });
+
   group('handSpan units — the bug that made clap impossible', () => {
     // handSpan returns wrist separation in PALM LENGTHS, not a 0-1 screen fraction. This
     // pins that contract down so a future refactor can't silently invert it again.

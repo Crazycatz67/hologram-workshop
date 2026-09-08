@@ -89,6 +89,12 @@ const CLAP_ARM_SPAN = 2.5;
 // velocity (span change per real second), not a per-call delta; that fix predates this
 // session. Still an untuned guess pending real clap numbers, same as everything else here.
 const CLAP_MIN_CLOSING_SPEED = 8.0;
+// How long a pinch reading must hold, uninterrupted, before it's trusted enough to discard
+// an in-progress clap measurement -- see checkClap. Matches the same "brief flicker vs
+// genuine, sustained gesture" reasoning as SWITCH_AWAY_MS elsewhere in this file, just
+// smaller: a real pinch-to-scale is held far longer than this, but a single glitched frame
+// during a fast clap is not.
+const PINCH_GLITCH_MS = 100;
 
 // Explode: two open hands (neither fisted nor pinching, keeping it out of grab/scale's
 // hand-shape space) pulling apart drives it, continuously, like scale rather than a
@@ -301,6 +307,7 @@ export function createManipulator(object, camera) {
   let clapArmed = true;
   let lastClapSpan = null;
   let lastClapTime = null;
+  let pinchSince = null; // see checkClap -- how long pinching has read true, uninterrupted
 
   function clearGrab() {
     lastWrist = null;
@@ -352,11 +359,34 @@ export function createManipulator(object, camera) {
   // the way down to nearly-touching in one quick step triggered a false reset before this
   // guard existed.
   function checkClap(hands, aspect, timestampMs) {
-    if (hands.some((h) => h.pinch?.pinching)) {
-      lastClapSpan = null;
-      lastClapTime = null;
+    // Reported live: clap "barely registered, had to try many times". Reproduced directly:
+    // a real clap's closing speed easily clears CLAP_MIN_CLOSING_SPEED on its own, even
+    // through landmark smoothing (measured ~6% speed loss there, nowhere near enough to
+    // explain it) -- but the whole in-progress measurement gets thrown away the instant
+    // EITHER hand reads as pinching for even a single frame, and fast clapping hand shapes
+    // are exactly the kind of pose that can transiently misread as a pinch. Combine that
+    // with a real, imperfect camera frame rate (documented risk since Phase 1) and there
+    // may only be 3-4 samples across the whole clap to begin with -- lose one to a false
+    // pinch reading and there often isn't enough left to reconstruct real speed before the
+    // hands finish closing. Simulated exactly this (12fps camera + a single glitched frame
+    // mid-clap) and it silently failed to fire at all.
+    //
+    // A genuine, sustained pinch (actually doing the scale gesture) still has to disqualify
+    // a clap -- that guard is real and stays. The fix is not treating a single bad frame as
+    // proof of that: require pinching to hold for a short PINCH_GLITCH_MS before it's
+    // trusted enough to discard the in-progress measurement. A momentary misread this frame
+    // just isn't used to update the measurement, rather than wiping out every prior sample.
+    const anyPinching = hands.some((h) => h.pinch?.pinching);
+    if (anyPinching) {
+      if (pinchSince === null) pinchSince = timestampMs;
+      if (timestampMs - pinchSince >= PINCH_GLITCH_MS) {
+        lastClapSpan = null;
+        lastClapTime = null;
+      }
       return false;
     }
+    pinchSince = null;
+
     const span = handSpan(hands[0], hands[1], aspect);
     if (span > CLAP_ARM_SPAN) clapArmed = true;
 
