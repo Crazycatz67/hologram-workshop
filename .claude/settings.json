@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/farhanamin/Developer/hologram-workshop && s=$(git status --porcelain 2>/dev/null); if [ -n \"$s\" ]; then git add -A && git commit -m 'WIP checkpoint (auto)' --quiet; fi; exit 0",
+            "statusMessage": "Checkpointing uncommitted work...",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
