@@ -18,6 +18,8 @@ const { default: HolographicMaterial } = await import('./HolographicMaterial.js'
 const { createGhostHands } = await import('./ghostHands.js' + V);
 const { smoothHandLandmarks, resetLandmarkSmoothing } = await import('./smoothLandmarks.js' + V);
 const { createMeasurePanel } = await import('./measurePanel.js' + V);
+const { MODELS } = await import('./models.js' + V);
+const { createCarousel } = await import('./carousel.js' + V);
 
 const video = document.getElementById('cam');
 const overlay = document.getElementById('overlay');
@@ -46,6 +48,9 @@ let stream = null;
 let tracking = false;
 let hands = [];
 let lastVideoTime = -1;
+let currentMeasurePanel = null;
+let currentModelId = null;
+let swapping = false;
 
 // scanlineSize is high on purpose. At the library's default (8) the scanline bands are
 // wide enough to cut clean across a chair leg, and thin parts read as SEVERED -- reported
@@ -84,40 +89,98 @@ function setStatus(text, isError = false) {
   statusEl.classList.toggle('error', isError);
 }
 
-loadModel({ objPath: 'assets/chair/chair_clean.obj' })
-  .then(({ object, path }) => {
-    object.traverse((child) => {
-      if (child.isMesh) child.material = hologramMaterial;
-    });
-    scene.add(object);
-    window.hologram.model = object;
-    frameObject(object, camera, controls);
-    manipulator = createManipulator(object, camera);
-    // Same live-tuning handle the material already uses — lets thresholds be poked from the
-    // console (window.hologram.manipulator.configure({ sensitivity: 0.4 })) without a redeploy.
-    window.hologram.manipulator = manipulator;
-    applyDrill(activeDrill);
-    applyTuning();
-    // Live dimensions sit next to the gestures on purpose: scaling or stretching the model
-    // reports what the size has become, which is the whole reason to have both on one page.
-    createMeasurePanel({
-      mount: document.getElementById('measure'),
-      object, camera, renderer, scene,
-      // Names the report and keys the saved notes, so notes follow the object they describe
-      // rather than whichever model happens to load into this page.
-      modelName: path.split('/').pop().replace(/\.[^.]+$/, '')
-    });
-    // Decided once from the loaded model's own mesh count — see manipulator.js. No manual
-    // override control exists yet since only a single-mesh scan exists to test against.
-    document.getElementById('explodeMode').textContent = manipulator.explodeIsLiteral
-      ? 'explode: literal'
-      : 'explode: stretch';
-    setStatus(`${path} loaded · start the camera to control it`);
-    startBtn.disabled = false;
-  })
-  .catch((err) => {
+// Swaps which hologram is loaded, live, with no page reload -- the carousel's whole point.
+// Load-then-swap on purpose: the new model is fully fetched and parsed BEFORE anything about
+// the old one is touched, so a failed load (bad path, bad file) leaves the current hologram
+// completely untouched instead of leaving the scene empty.
+async function loadModelById(id) {
+  if (swapping || id === currentModelId) return;
+  const entry = MODELS.find((m) => m.id === id);
+  if (!entry) return;
+
+  swapping = true;
+  carousel.setBusy(true);
+  setStatus(`loading ${entry.name}…`);
+
+  let object, path;
+  try {
+    ({ object, path } = await loadModel(entry));
+  } catch (err) {
     setStatus(err.message, true);
+    swapping = false;
+    carousel.setBusy(false);
+    return;
+  }
+
+  // Only now, with the replacement confirmed loadable, tear down whatever was loaded before.
+  const oldObject = window.hologram.model;
+  if (oldObject) {
+    // Must run before scene.remove() below -- dispose() still needs live references to the
+    // object it was measuring.
+    currentMeasurePanel?.dispose();
+    scene.remove(oldObject);
+    // Geometry only, never the material: hologramMaterial is one shared instance assigned by
+    // reference to every mesh (see the traverse below) and has to survive to serve the next
+    // model too.
+    oldObject.traverse((child) => {
+      if (child.isMesh) child.geometry.dispose();
+    });
+  }
+  // createManipulator has no rebind -- it closes over one object for its whole lifetime -- so
+  // the old one is simply discarded and a fresh one built below.
+  manipulator = null;
+  window.hologram.manipulator = null;
+
+  object.traverse((child) => {
+    if (child.isMesh) child.material = hologramMaterial;
   });
+  scene.add(object);
+  // Both of these must be reassigned together, synchronously: the render loop's onTick reads
+  // window.hologram.model live every frame for ghost-hands, but reads the closed-over
+  // `manipulator` variable for gesture control. Letting them drift out of sync for even one
+  // frame means gestures would silently keep acting on a model that's no longer in the scene.
+  window.hologram.model = object;
+  frameObject(object, camera, controls);
+  manipulator = createManipulator(object, camera);
+  window.hologram.manipulator = manipulator;
+
+  // Re-apply whatever practice drill/tuning was active -- otherwise a mid-session drill
+  // selection would silently reset to "everything on" with default tuning on the new model.
+  applyDrill(activeDrill);
+  applyTuning();
+
+  // Decided once per model from its own mesh count — see manipulator.js. No manual override
+  // control exists yet since only single-mesh scans exist to test against.
+  document.getElementById('explodeMode').textContent = manipulator.explodeIsLiteral
+    ? 'explode: literal'
+    : 'explode: stretch';
+
+  // Live dimensions sit next to the gestures on purpose: scaling or stretching the model
+  // reports what the size has become, which is the whole reason to have both on one page.
+  currentMeasurePanel = createMeasurePanel({
+    mount: document.getElementById('measure'),
+    object, camera, renderer, scene,
+    // A stable id from the registry, not a filename -- two models could otherwise collide on
+    // the same derived name and share localStorage keys.
+    modelName: entry.id
+  });
+
+  currentModelId = id;
+  carousel.setActive(id);
+  carousel.setBusy(false);
+  swapping = false;
+  setStatus(`${path} loaded · start the camera to control it`);
+  startBtn.disabled = false;
+}
+
+const carousel = createCarousel({
+  mount: document.getElementById('modelCarousel'),
+  models: MODELS,
+  activeId: MODELS[0].id,
+  onSelect: (id) => loadModelById(id)
+});
+
+loadModelById(MODELS[0].id);
 
 async function startTracking() {
   startBtn.disabled = true;
@@ -164,6 +227,12 @@ window.addEventListener('keydown', (e) => {
   if (key === 'd') document.body.classList.toggle('debug-camera');
   if (key === 'p') togglePanel();
   if (key === 'm') document.getElementById('measure').classList.toggle('hidden');
+  if (key === 'arrowleft' || key === 'arrowright') {
+    const idx = MODELS.findIndex((m) => m.id === currentModelId);
+    const dir = key === 'arrowleft' ? -1 : 1;
+    const next = MODELS[(idx + dir + MODELS.length) % MODELS.length];
+    loadModelById(next.id);
+  }
 });
 
 startRenderLoop({

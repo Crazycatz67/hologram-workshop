@@ -175,6 +175,25 @@
     .measure-fit.ok { color: #7fe3a1; }
     .measure-fit.bad { color: #ff8a65; }
 
+    /* ---- model carousel: which hologram is currently loaded ---- */
+    #modelCarousel.carousel {
+      position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+      z-index: 4; display: flex; gap: 8px;
+    }
+    #modelCarousel .model-card {
+      background: var(--panel); border: 1px solid var(--edge); color: var(--dim);
+      border-radius: 8px; padding: 8px 16px; backdrop-filter: blur(8px);
+      transition: transform 120ms ease, border-color 120ms ease, color 120ms ease;
+    }
+    #modelCarousel .model-card:hover:not(:disabled) {
+      color: var(--text); border-color: rgba(79, 209, 255, 0.4); transform: scale(1.06);
+    }
+    #modelCarousel .model-card.active {
+      color: var(--accent); border-color: rgba(79, 209, 255, 0.6);
+      background: rgba(79, 209, 255, 0.14); transform: scale(1.08);
+    }
+    #modelCarousel.busy .model-card { opacity: 0.5; cursor: default; }
+
     /* ---- the instruction line: one gesture, big, instead of a wall of tiny text ---- */
     #coach {
       position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
@@ -278,10 +297,12 @@
 
   <div id="measure"></div>
 
+  <div id="modelCarousel"></div>
+
   <div id="coach">
     <div id="coachTitle">—</div>
     <div id="coachBody"></div>
-    <div id="coachKeys">R — reset · D — camera view · P — panel · drag — orbit</div>
+    <div id="coachKeys">R — reset · D — camera view · P — panel · ← → — switch model · drag — orbit</div>
   </div>
 
   <script type="module">

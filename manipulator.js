@@ -125,6 +125,19 @@ const MAX_EXPLODE_SPAN_RATE_PER_SECOND = 120.0;
 // (scale.y) — matching how the gesture actually looks rather than a fixed axis.
 const MAX_EXPLODE_OFFSET = 0.6;
 
+// Once explode has separated the parts past this point, grab/spin/tilt/scale retarget from
+// the whole assembly to whichever single part is currently selected (see
+// selectPartAtScreenPoint) -- pieces read as "genuinely separate" past half-exploded, not
+// while they're still mostly overlapping the group. Below this, everything behaves exactly
+// as it always has (whole-object mode) -- literalMode objects with nothing ever selected are
+// completely unaffected by any of this.
+const EXPLODE_PART_SELECT_THRESHOLD = 0.5;
+// How far a grabbed part can be carried from its own exploded position, as a multiple of
+// MAX_EXPLODE_OFFSET -- generous room to actually reposition a piece, but still bounded so a
+// stray gesture can't fling it arbitrarily far off into space with no way back short of
+// Reset.
+const PART_GRAB_RANGE = 3;
+
 // Hand tracking is never perfectly still: even with a hand held motionless and landmark
 // smoothing applied, positions jitter by roughly 0.002 in normalized frame units every
 // frame. Nothing rejected that, so every frame of noise was written straight into a
@@ -191,16 +204,18 @@ function wristOf(hand) {
   return hand.landmarks[0];
 }
 
-// Converts a normalized screen delta into world units at the object's depth, so dragging
-// tracks the hand roughly 1:1 rather than at some arbitrary tuned speed.
-function worldPerScreenUnit(camera, object) {
-  const distance = camera.position.distanceTo(object.position);
+// Converts a normalized screen delta into world units at the given world-space point, so
+// dragging tracks the hand roughly 1:1 rather than at some arbitrary tuned speed. Takes a
+// world position rather than an object, since a part's own `.position` is LOCAL (relative to
+// its parent `object`), not the world-space point a camera distance needs.
+function worldPerScreenUnit(camera, worldPos) {
+  const distance = camera.position.distanceTo(worldPos);
   const height = 2 * distance * Math.tan((camera.fov * Math.PI) / 360);
   return { x: height * camera.aspect, y: height };
 }
 
 function clampToView(object, camera) {
-  const perUnit = worldPerScreenUnit(camera, object);
+  const perUnit = worldPerScreenUnit(camera, object.position);
   const maxX = (perUnit.x / 2) * VIEW_MARGIN;
   const maxY = (perUnit.y / 2) * VIEW_MARGIN;
   object.position.x = THREE.MathUtils.clamp(object.position.x, -maxX, maxX);
@@ -227,6 +242,11 @@ function findExplodeParts(object) {
   for (const part of parts) {
     const offset = part.position.clone().sub(centroid);
     part.userData.explodeHome = part.position.clone();
+    // Rotation/scale snapshots too, not just position -- needed so Reset can put a part that
+    // was individually grabbed/spun/scaled back EXACTLY as it started, not just back at the
+    // right spot but still rotated or resized from being handled.
+    part.userData.explodeHomeQuaternion = part.quaternion.clone();
+    part.userData.explodeHomeScale = part.scale.clone();
     part.userData.explodeDir = offset.lengthSq() > 1e-8 ? offset.normalize() : new THREE.Vector3(0, 1, 0);
   }
 
@@ -281,28 +301,76 @@ export function createManipulator(object, camera) {
 
   const { literal: literalMode, parts: explodeParts } = findExplodeParts(object);
 
-  let lastWrist = null;
-  let lastTwist = null;
-  let lastPitchWrist = null;
-  let lastPalm = null;
-  let twistAccum = 0;
-  // Two exponential filters over every tracked signal, one quick and one slow. See
-  // TAU_FAST for why velocity is read from the gap between them rather than from a
-  // frame-to-frame difference.
-  let fast = null;
-  let slow = null;
-  let lastSpan = null;
+  // Every gesture's tracking/velocity state, keyed by WHICHEVER thing it's currently being
+  // applied to -- `object` itself (every existing single-mesh model, and a literalMode
+  // object before/below the part-select threshold), or one specific part once the user has
+  // exploded past EXPLODE_PART_SELECT_THRESHOLD and selected it. `object`'s own entry
+  // behaves exactly like the single set of module-scope variables this replaced -- nothing
+  // about the existing single-target path changes.
+  const targetStates = new Map();
+  function stateFor(target) {
+    let s = targetStates.get(target);
+    if (!s) {
+      s = {
+        lastWrist: null, lastTwist: null, lastPitchWrist: null, lastPalm: null, twistAccum: 0,
+        // Two exponential filters over every tracked signal, one quick and one slow. See
+        // TAU_FAST for why velocity is read from the gap between them rather than from a
+        // frame-to-frame difference.
+        fast: null, slow: null, lastSpan: null,
+        angularVelocity: 0, pitchVelocity: 0, rollVelocity: 0, depthVelocity: 0,
+        linearVelocityX: 0, linearVelocityY: 0
+      };
+      targetStates.set(target, s);
+    }
+    return s;
+  }
+
+  // Which single part (if any) grab/spin/tilt/scale currently act on instead of the whole
+  // object -- see selectPartAtScreenPoint. Push/pull deliberately never retargets (see
+  // applyMomentum): it always moves the whole assembly along the camera ray, never one part
+  // along it, since that ray is only meaningful in world space and a part's transform is
+  // local to `object`, which may itself be arbitrarily rotated/scaled by the time a part is
+  // selected.
+  let activePart = null;
+  const raycaster = new THREE.Raycaster();
+
+  function currentTarget() {
+    return literalMode && explodeAmount > EXPLODE_PART_SELECT_THRESHOLD && activePart ? activePart : object;
+  }
+
+  // object's own parent (the scene) never rotates, so rotateOnWorldAxis is exactly right for
+  // it -- unchanged from before this per-part work existed. A part's parent IS `object`,
+  // which may itself be rotated by the time the part is selected; Three.js's
+  // rotateOnWorldAxis only accounts for the target's OWN quaternion; it does not correct for
+  // a rotated parent, so using it on a part would spin it around the wrong axis whenever the
+  // whole assembly has already been turned. rotateOnAxis (local) is correct regardless of
+  // parent transform, at the cost of a part's spin/pitch/roll meaning relative to its OWN
+  // current orientation rather than a fixed world direction -- a deliberate, documented v1
+  // simplification, not an oversight.
+  function rotateTarget(target, axis, angle) {
+    if (target === object) target.rotateOnWorldAxis(axis, angle);
+    else target.rotateOnAxis(axis, angle);
+  }
+
+  const _worldPos = new THREE.Vector3();
+  function targetWorldPosition(target) {
+    return target === object ? object.position : target.getWorldPosition(_worldPos);
+  }
+
+  const _partOffset = new THREE.Vector3();
+  function clampPartOffset(part) {
+    const maxDist = MAX_EXPLODE_OFFSET * PART_GRAB_RANGE;
+    _partOffset.copy(part.position).sub(part.userData.explodeHome);
+    if (_partOffset.lengthSq() > maxDist * maxDist) {
+      _partOffset.setLength(maxDist);
+      part.position.copy(part.userData.explodeHome).add(_partOffset);
+    }
+  }
+
   let lastExplodeSpan = null;
   let explodeAmount = 0;
   let mode = MODE.IDLE;
   let lastUpdateTime = null;
-
-  let angularVelocity = 0;
-  let pitchVelocity = 0;
-  let rollVelocity = 0;
-  let depthVelocity = 0;
-  let linearVelocityX = 0;
-  let linearVelocityY = 0;
 
   let clapArmed = true;
   let lastClapSpan = null;
@@ -310,17 +378,18 @@ export function createManipulator(object, camera) {
   let pinchSince = null; // see checkClap -- how long pinching has read true, uninterrupted
 
   function clearGrab() {
-    lastWrist = null;
-    lastTwist = null;
-    lastPitchWrist = null;
-    lastPalm = null;
-    twistAccum = 0;
-    fast = null;
-    slow = null;
+    const s = stateFor(currentTarget());
+    s.lastWrist = null;
+    s.lastTwist = null;
+    s.lastPitchWrist = null;
+    s.lastPalm = null;
+    s.twistAccum = 0;
+    s.fast = null;
+    s.slow = null;
   }
 
   function clearTransform() {
-    lastSpan = null;
+    stateFor(currentTarget()).lastSpan = null;
   }
 
   // Only clears the tracking reference, not explodeAmount or the applied transform itself
@@ -337,19 +406,20 @@ export function createManipulator(object, camera) {
     grab.reset();
     transform.reset();
     explode.reset();
-    clearGrab();
-    clearTransform();
+    // Wipes velocity/tracking state for every target at once -- object AND every part, not
+    // just whichever one was active -- so nothing keeps coasting or resumes mid-gesture
+    // after a reset.
+    targetStates.clear();
     clearExplode();
     explodeAmount = 0;
+    activePart = null;
     if (literalMode) {
-      for (const part of explodeParts) part.position.copy(part.userData.explodeHome);
+      for (const part of explodeParts) {
+        part.position.copy(part.userData.explodeHome);
+        part.quaternion.copy(part.userData.explodeHomeQuaternion);
+        part.scale.copy(part.userData.explodeHomeScale);
+      }
     }
-    angularVelocity = 0;
-    pitchVelocity = 0;
-    rollVelocity = 0;
-    depthVelocity = 0;
-    linearVelocityX = 0;
-    linearVelocityY = 0;
     mode = MODE.IDLE;
   }
 
@@ -420,6 +490,25 @@ export function createManipulator(object, camera) {
     },
 
     reset: performReset,
+
+    // Which part grab/spin/tilt/scale currently act on, or null when nothing is selected
+    // (whole-object mode). Read by the UI to name the active part on the coach HUD.
+    get activePart() {
+      return activePart;
+    },
+
+    // Raycasts against the exploded parts and selects whichever one was hit (or deselects,
+    // back to whole-object mode, on a miss). No-ops below EXPLODE_PART_SELECT_THRESHOLD or on
+    // a non-literalMode object -- there's nothing separate to select yet. ndcX/ndcY are
+    // normalized device coordinates in [-1, 1], the same convention THREE.Raycaster expects;
+    // converting a real pointer event into them is the caller's job.
+    selectPartAtScreenPoint(ndcX, ndcY) {
+      if (!literalMode || explodeAmount <= EXPLODE_PART_SELECT_THRESHOLD) return null;
+      raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
+      const hits = raycaster.intersectObjects(explodeParts, false);
+      activePart = hits.length ? hits[0].object : null;
+      return activePart;
+    },
 
     // Live tuning surface for the UI. Changing triggerFrames rebuilds the stabilizers,
     // since their durations are fixed at construction.
@@ -502,7 +591,7 @@ export function createManipulator(object, camera) {
         // the point of it, so a momentary tracking dropout doesn't cancel the gesture. But
         // it means `hands` can still have fewer than 2 entries here. Skipping the write
         // just holds the last scale until hysteresis resolves.
-        if (hands.length === 2) applyTransform(hands, aspect);
+        if (hands.length === 2) applyTransform(currentTarget(), hands, aspect);
       } else if (exploding) {
         mode = MODE.EXPLODE;
         clearGrab();
@@ -520,7 +609,7 @@ export function createManipulator(object, camera) {
         // simply stops being written and existing momentum coasts out, which is what
         // letting go should feel like. clearGrab() also drops the stale wrist reference, so
         // re-closing the fist measures from where it actually is rather than jumping.
-        if (hands.length >= 1 && fisted) setGrabVelocity(hands, aspect, dt);
+        if (hands.length >= 1 && fisted) setGrabVelocity(currentTarget(), hands, aspect, dt);
         else clearGrab();
       } else {
         mode = MODE.IDLE;
@@ -574,37 +663,47 @@ export function createManipulator(object, camera) {
     return best;
   }
 
-  function setGrabVelocity(hands, aspect, dt) {
+  // `target` is whatever currentTarget() resolved to when the caller checked -- `object`
+  // itself for every existing single-mesh model, or a selected part post-explode. All the
+  // tracking/velocity state below lives in `s`, target's own entry in the state map, so
+  // grabbing one part and later a different one never mixes their history.
+  function setGrabVelocity(target, hands, aspect, dt) {
+    const s = stateFor(target);
+    // Push/pull (depth) deliberately never retargets -- it always writes to `object`'s own
+    // depthVelocity, applied in applyMomentum, regardless of which part is selected. See the
+    // comment on `activePart` above for why.
+    const depthState = target === object ? s : stateFor(object);
+
     const fists = hands.filter((h) => isFistLike(h.gesture, h.landmarks, aspect));
-    const hand = nearestTo(fists.length ? fists : hands, lastWrist);
+    const hand = nearestTo(fists.length ? fists : hands, s.lastWrist);
     const wrist = wristOf(hand);
     const palm = palmLength(hand.landmarks, aspect);
     const others = hands.filter((h) => h !== hand);
-    const pitchHand = others.length ? nearestTo(others, lastPitchWrist) : null;
+    const pitchHand = others.length ? nearestTo(others, s.lastPitchWrist) : null;
 
     // Twist has to be unwrapped into a continuous angle before it can be filtered, or the
     // ±180° seam registers as a full-speed spin every time it is crossed.
     const rawTwist = handTwist(hand.landmarks, aspect);
-    if (lastTwist !== null) {
-      let step = rawTwist - lastTwist;
+    if (s.lastTwist !== null) {
+      let step = rawTwist - s.lastTwist;
       if (step > Math.PI) step -= Math.PI * 2;
       if (step < -Math.PI) step += Math.PI * 2;
-      twistAccum += step;
+      s.twistAccum += step;
     }
-    lastTwist = rawTwist;
+    s.lastTwist = rawTwist;
 
     const pitchX = pitchHand ? wristOf(pitchHand).x : null;
     const pitchY = pitchHand ? wristOf(pitchHand).y : null;
 
-    const sample = { x: wrist.x, y: wrist.y, twist: twistAccum, palm, pitchX, pitchY };
+    const sample = { x: wrist.x, y: wrist.y, twist: s.twistAccum, palm, pitchX, pitchY };
 
     // First frame of a grab: seed both filters and produce no motion, so taking hold of the
     // object never itself moves it.
-    if (!fast) {
-      fast = { ...sample };
-      slow = { ...sample };
-      lastWrist = { x: wrist.x, y: wrist.y };
-      if (pitchY !== null) lastPitchWrist = { x: pitchX, y: pitchY };
+    if (!s.fast) {
+      s.fast = { ...sample };
+      s.slow = { ...sample };
+      s.lastWrist = { x: wrist.x, y: wrist.y };
+      if (pitchY !== null) s.lastPitchWrist = { x: pitchX, y: pitchY };
       return;
     }
 
@@ -613,6 +712,7 @@ export function createManipulator(object, camera) {
     const alphaFast = 1 - Math.exp(-dt / TAU_FAST);
     const alphaSlow = 1 - Math.exp(-dt / TAU_SLOW);
 
+    const { fast, slow } = s;
     for (const key of ['x', 'y', 'twist', 'palm']) {
       fast[key] += (sample[key] - fast[key]) * alphaFast;
       slow[key] += (sample[key] - slow[key]) * alphaSlow;
@@ -632,15 +732,15 @@ export function createManipulator(object, camera) {
       fast.pitchY = null; slow.pitchY = null;
     }
 
-    const perUnit = worldPerScreenUnit(camera, object);
+    const perUnit = worldPerScreenUnit(camera, targetWorldPosition(target));
 
     // Landmark x runs left-to-right in the raw frame while the view is mirrored, so the sign
     // is flipped to make the model follow the hand the user actually sees.
     const vx = deadzone(-(fast.x - slow.x) * FILTER_GAIN, MOVE_DEADZONE);
     const vy = deadzone((fast.y - slow.y) * FILTER_GAIN, MOVE_DEADZONE);
     if (on('move') && Math.abs(vx) < MAX_MOVE_PER_SECOND && Math.abs(vy) < MAX_MOVE_PER_SECOND) {
-      linearVelocityX = vx * perUnit.x * settings.sensitivity;
-      linearVelocityY = -vy * perUnit.y * settings.sensitivity;
+      s.linearVelocityX = vx * perUnit.x * settings.sensitivity;
+      s.linearVelocityY = -vy * perUnit.y * settings.sensitivity;
     }
 
     // Twisting your wrist is really a roll around the camera-viewing axis, but mapping that
@@ -649,13 +749,13 @@ export function createManipulator(object, camera) {
     // stylization, not a literal transfer of the physical motion.
     const vTwist = deadzone((fast.twist - slow.twist) * FILTER_GAIN, TWIST_DEADZONE);
     if (on('spin') && Math.abs(vTwist) < MAX_TWIST_PER_SECOND) {
-      angularVelocity = vTwist * settings.sensitivity;
+      s.angularVelocity = vTwist * settings.sensitivity;
     }
 
     if (fast.pitchY !== null) {
       const vPitch = deadzone((fast.pitchY - slow.pitchY) * FILTER_GAIN, PITCH_DEADZONE);
       if (on('tilt') && Math.abs(vPitch) * PITCH_SENSITIVITY < MAX_PITCH_PER_SECOND) {
-        pitchVelocity = -vPitch * PITCH_SENSITIVITY * settings.sensitivity;
+        s.pitchVelocity = -vPitch * PITCH_SENSITIVITY * settings.sensitivity;
       }
       // Second hand's horizontal position rolls the object left/right -- requested directly
       // after living with pitch-only tilt ("have left and right to move left and right").
@@ -665,25 +765,26 @@ export function createManipulator(object, camera) {
       // matching how pitch already uses world X rather than the object's own local axis.
       const vRoll = deadzone((fast.pitchX - slow.pitchX) * FILTER_GAIN, ROLL_DEADZONE);
       if (on('tilt') && Math.abs(vRoll) * ROLL_SENSITIVITY < MAX_ROLL_PER_SECOND) {
-        rollVelocity = vRoll * ROLL_SENSITIVITY * settings.sensitivity;
+        s.rollVelocity = vRoll * ROLL_SENSITIVITY * settings.sensitivity;
       }
-      lastPitchWrist = { x: pitchX, y: pitchY };
+      s.lastPitchWrist = { x: pitchX, y: pitchY };
     } else {
-      lastPitchWrist = null;
+      s.lastPitchWrist = null;
     }
 
     // Hand got bigger (closer to camera) -> pull the object closer; smaller -> push it away.
-    // Kept as a ratio, the same shape scale uses, rather than a screen-space delta.
+    // Kept as a ratio, the same shape scale uses, rather than a screen-space delta. Always
+    // written to depthState (object's own entry), never the selected part's -- see above.
     if (slow.palm > 0) {
       const ratio = fast.palm / slow.palm;
       const change = deadzone((ratio - 1) * FILTER_GAIN, DEPTH_DEADZONE);
       if (on('push') && Math.abs(change) < MAX_DEPTH_RATIO_PER_SECOND) {
-        depthVelocity = change * settings.sensitivity;
+        depthState.depthVelocity = change * settings.sensitivity;
       }
     }
 
-    lastWrist = { x: wrist.x, y: wrist.y };
-    lastPalm = palm;
+    s.lastWrist = { x: wrist.x, y: wrist.y };
+    s.lastPalm = palm;
   }
 
   // Applies whatever velocity currently exists and decays it — runs every update() call
@@ -706,29 +807,40 @@ export function createManipulator(object, camera) {
     return Math.exp((-dt / DAMPING_HALFLIFE) * Math.LN2);
   }
 
+  // Applies momentum only for the CURRENT target each frame (plus object's own depth
+  // velocity, always). A part's residual velocity from before it was deselected simply sits
+  // dormant in its state entry rather than continuing to coast in the background -- it never
+  // produces incorrect motion, just means a deselected part stops exactly where it was
+  // rather than coasting a little further, which if anything reads as more predictable.
   function applyMomentum(dt) {
     const decay = damping(dt);
+    const target = currentTarget();
+    const s = stateFor(target);
 
-    if (Math.abs(angularVelocity) > MIN_ANGULAR_VELOCITY) {
-      object.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), angularVelocity * dt);
+    if (Math.abs(s.angularVelocity) > MIN_ANGULAR_VELOCITY) {
+      rotateTarget(target, new THREE.Vector3(0, 1, 0), s.angularVelocity * dt);
     }
-    angularVelocity *= decay;
+    s.angularVelocity *= decay;
 
-    if (Math.abs(pitchVelocity) > MIN_ANGULAR_VELOCITY) {
+    if (Math.abs(s.pitchVelocity) > MIN_ANGULAR_VELOCITY) {
       // World X, not the object's own local X: yaw already changes what the object's
       // local axes point in, and pitch should still mean "tip toward/away from the
       // camera" regardless of however much it's currently spun — same reasoning as yaw
-      // using world Y rather than local Y.
-      object.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), pitchVelocity * dt);
+      // using world Y rather than local Y. (For a part, rotateTarget uses the LOCAL axis
+      // instead -- see its own comment for why.)
+      rotateTarget(target, new THREE.Vector3(1, 0, 0), s.pitchVelocity * dt);
     }
-    pitchVelocity *= decay;
+    s.pitchVelocity *= decay;
 
-    if (Math.abs(rollVelocity) > MIN_ANGULAR_VELOCITY) {
-      object.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), rollVelocity * dt);
+    if (Math.abs(s.rollVelocity) > MIN_ANGULAR_VELOCITY) {
+      rotateTarget(target, new THREE.Vector3(0, 0, 1), s.rollVelocity * dt);
     }
-    rollVelocity *= decay;
+    s.rollVelocity *= decay;
 
-    if (Math.abs(depthVelocity) > MIN_LINEAR_VELOCITY / 10) {
+    // Depth (push/pull) always reads from and moves `object`, never a part -- see
+    // setGrabVelocity's comment on depthState for why.
+    const depthState = stateFor(object);
+    if (Math.abs(depthState.depthVelocity) > MIN_LINEAR_VELOCITY / 10) {
       // Moves along the actual camera-to-object line (via the camera's current basis),
       // not a fixed world axis, so this still behaves correctly after the view has been
       // orbited with the mouse.
@@ -739,42 +851,47 @@ export function createManipulator(object, camera) {
       // closer), not grow it. Multiplying here was backwards and sent the object away
       // from the camera when the hand approached it -- caught by testing before shipping.
       const targetDistance = THREE.MathUtils.clamp(
-        currentDistance / (1 + depthVelocity * dt),
+        currentDistance / (1 + depthState.depthVelocity * dt),
         home.distance * MIN_DEPTH_RATIO,
         home.distance * MAX_DEPTH_RATIO
       );
       object.position.copy(camera.position).addScaledVector(direction, targetDistance);
     }
-    depthVelocity *= decay;
+    depthState.depthVelocity *= decay;
 
-    const speedSq = linearVelocityX * linearVelocityX + linearVelocityY * linearVelocityY;
+    const speedSq = s.linearVelocityX * s.linearVelocityX + s.linearVelocityY * s.linearVelocityY;
     if (speedSq > MIN_LINEAR_VELOCITY * MIN_LINEAR_VELOCITY) {
-      object.position.x += linearVelocityX * dt;
-      object.position.y += linearVelocityY * dt;
-      clampToView(object, camera);
+      target.position.x += s.linearVelocityX * dt;
+      target.position.y += s.linearVelocityY * dt;
+      // Whole-object framing clamp only applies to the object itself -- a part's position
+      // is local to `object` and bounded separately, by distance from its own exploded
+      // position (see clampPartOffset / PART_GRAB_RANGE), not by the camera frustum.
+      if (target === object) clampToView(object, camera);
+      else clampPartOffset(target);
     }
-    linearVelocityX *= decay;
-    linearVelocityY *= decay;
+    s.linearVelocityX *= decay;
+    s.linearVelocityY *= decay;
   }
 
-  function applyTransform(hands, aspect) {
+  function applyTransform(target, hands, aspect) {
+    const s = stateFor(target);
     const span = handSpan(hands[0], hands[1], aspect);
 
-    if (lastSpan && span > 0) {
-      const ratio = span / lastSpan;
+    if (s.lastSpan && span > 0) {
+      const ratio = span / s.lastSpan;
       if (ratio > 1 / MAX_SPAN_RATIO_PER_FRAME && ratio < MAX_SPAN_RATIO_PER_FRAME) {
         // Multiplies each axis independently rather than setScalar-ing all three to one
         // value. Found by testing: stretching the object with explode first, then
         // scaling, silently flattened the stretch back to a uniform shape — setScalar
         // discarded whatever proportions already existed. Multiplying preserves them,
         // the same way scaling an already-non-uniform object works in any 3D tool.
-        object.scale.x = THREE.MathUtils.clamp(object.scale.x * ratio, MIN_SCALE, MAX_SCALE);
-        object.scale.y = THREE.MathUtils.clamp(object.scale.y * ratio, MIN_SCALE, MAX_SCALE);
-        object.scale.z = THREE.MathUtils.clamp(object.scale.z * ratio, MIN_SCALE, MAX_SCALE);
+        target.scale.x = THREE.MathUtils.clamp(target.scale.x * ratio, MIN_SCALE, MAX_SCALE);
+        target.scale.y = THREE.MathUtils.clamp(target.scale.y * ratio, MIN_SCALE, MAX_SCALE);
+        target.scale.z = THREE.MathUtils.clamp(target.scale.z * ratio, MIN_SCALE, MAX_SCALE);
       }
     }
 
-    lastSpan = span;
+    s.lastSpan = span;
   }
 
   // Two open hands pulling apart: on a multi-part object, each mesh slides outward from

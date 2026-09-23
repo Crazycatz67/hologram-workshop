@@ -466,6 +466,99 @@ async function main() {
     checkTrue('far-apart hands read several palm-lengths', apart > 3, `span=${apart.toFixed(2)}`);
   });
 
+  group('Literal explode + per-part retargeting (synthetic multi-mesh group)', () => {
+    // A real THREE.Group with several distinctly-positioned meshes -- this is what actually
+    // exercises literalMode (findExplodeParts needs >=2 meshes). Every other group in this
+    // file reuses the single shared box `object`, which can only ever exercise the stretch
+    // branch -- so despite ROADMAP.md's earlier claim of a synthetic 4-mesh explode test,
+    // no such coverage existed anywhere in this file until now (confirmed via git history).
+    const multiObject = new THREE.Group();
+    const partA = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.05));
+    partA.position.set(0.1, 0, 0);
+    const partB = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.05));
+    partB.position.set(-0.1, 0, 0);
+    const partC = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.05));
+    partC.position.set(0, 0.1, 0);
+    multiObject.add(partA, partB, partC);
+
+    // Raycasting-based selection needs real, current world matrices -- nothing here has a
+    // renderer/scene traversal keeping them fresh the way the real app's render loop does,
+    // so they're updated explicitly wherever a check below depends on them.
+    camera.updateMatrixWorld(true);
+
+    const m = createManipulator(multiObject, camera);
+    checkTrue('a 3-mesh group is detected as literal explode, not stretch', m.explodeIsLiteral,
+      `explodeIsLiteral=${m.explodeIsLiteral}`);
+
+    // Before any explode has happened, a literalMode object behaves exactly like a
+    // single-mesh one for grab -- currentTarget() must resolve to the whole group, not any
+    // part, until the user has actually exploded and selected something.
+    m.configure({ channels: ['move'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    let t = 1000;
+    for (let i = 0; i < 10; i++) { m.update([hand(0.5, 0.5, 0, 'fist')], 1.78, t); t += 16.7; }
+    for (let i = 1; i <= 20; i++) { m.update([hand(0.5 + 0.01 * i, 0.5, 0, 'fist')], 1.78, t); t += 16.7; }
+    checkTrue('before exploding, grab moves the WHOLE group -- unexploded literalMode is unaffected',
+      multiObject.position.length() > 0.01, `group moved ${(multiObject.position.length() * 100).toFixed(2)}cm`);
+    m.reset();
+
+    // Explode outward and confirm each part moved along ITS OWN precomputed direction, not
+    // just "something moved" -- exercises findExplodeParts' centroid/direction math.
+    m.configure({ channels: ['explode'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    t = 1000;
+    for (let i = 0; i < 8; i++) { m.update([hand(0.45, 0.5, 0, 'open'), hand(0.55, 0.5, 0, 'open')], 1.78, t); t += 16.7; }
+    for (let i = 1; i <= 40; i++) { m.update([hand(0.45 - 0.01 * i, 0.5, 0, 'open'), hand(0.55 + 0.01 * i, 0.5, 0, 'open')], 1.78, t); t += 16.7; }
+    checkTrue('part A moved outward along its own (+x) direction',
+      partA.position.x > 0.1 + 0.01, `partA.x=${partA.position.x.toFixed(3)}`);
+    checkTrue('part B moved outward along its own, opposite (-x) direction',
+      partB.position.x < -0.1 - 0.01, `partB.x=${partB.position.x.toFixed(3)}`);
+    checkTrue("part C moved along its own (+y) direction, not A/B's horizontal one",
+      partC.position.y > 0.1 + 0.01, `partC.y=${partC.position.y.toFixed(3)}`);
+
+    // Select part A by raycasting through its ACTUAL screen position -- the same mechanism
+    // hologram.js's pointerdown handler calls in the real app -- and confirm grab now moves
+    // ONLY that part, leaving the group and every other part untouched.
+    multiObject.updateMatrixWorld(true);
+    const worldA = partA.getWorldPosition(new THREE.Vector3());
+    const ndcA = worldA.clone().project(camera);
+    const selected = m.selectPartAtScreenPoint(ndcA.x, ndcA.y);
+    checkTrue("raycasting at part A's own screen position selects it", selected === partA,
+      selected ? (selected === partA ? 'selected A' : 'selected a different part') : 'selected nothing');
+
+    const groupPosBefore = multiObject.position.clone();
+    const partAPosBefore = partA.position.clone();
+    const partBPosBefore = partB.position.clone();
+
+    m.configure({ channels: ['move'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    for (let i = 0; i < 10; i++) { m.update([hand(0.5, 0.5, 0, 'fist')], 1.78, t); t += 16.7; }
+    for (let i = 1; i <= 20; i++) { m.update([hand(0.5 + 0.01 * i, 0.5, 0, 'fist')], 1.78, t); t += 16.7; }
+
+    checkTrue('grabbing after selecting part A moves ONLY part A',
+      partA.position.distanceTo(partAPosBefore) * 100 > 1,
+      `part A moved ${(partA.position.distanceTo(partAPosBefore) * 100).toFixed(2)}cm`);
+    check('the whole group does not move while a part is selected',
+      multiObject.position.distanceTo(groupPosBefore) * 100, 0, 0);
+    check('part B (not selected) does not move',
+      partB.position.distanceTo(partBPosBefore) * 100, 0, 0);
+
+    // Reset restores every part's exact position, rotation AND scale -- the extension
+    // performReset needed once a part could be individually grabbed/spun/scaled, not just
+    // moved by the uniform explode curve.
+    m.reset();
+    const posErr = partA.position.distanceTo(partA.userData.explodeHome);
+    const rotErr = partA.quaternion.angleTo(partA.userData.explodeHomeQuaternion);
+    const scaleErr = partA.scale.distanceTo(partA.userData.explodeHomeScale);
+    checkTrue('reset restores part A exactly (position + rotation + scale)',
+      posErr < 1e-6 && rotErr < 1e-6 && scaleErr < 1e-6,
+      `pos off by ${posErr.toExponential(2)}, rot off by ${rotErr.toExponential(2)}, scale off by ${scaleErr.toExponential(2)}`);
+    checkTrue('reset deselects the active part', m.activePart === null, `activePart=${m.activePart}`);
+
+    // Below the part-select threshold there's nothing separate to select yet -- a click
+    // must not silently grab a part before the user has actually pulled the pieces apart.
+    const missedSelect = m.selectPartAtScreenPoint(ndcA.x, ndcA.y);
+    checkTrue('selecting before any explode has happened selects nothing', missedSelect === null,
+      `selected=${missedSelect}`);
+  });
+
   // ---- measurement, against the real shipped chair -------------------------------------
   let model = null;
   try {

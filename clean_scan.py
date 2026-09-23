@@ -121,6 +121,18 @@ BOUNDARY_ANNULUS = 0.80  # "at the edge" means beyond this fraction of the crop 
 
 RANSAC_ITERATIONS = 400
 
+# --multi-part mode: a scan is treated as several separate objects (a chess board and its
+# pieces) rather than one. Components are split BEFORE Poisson fill, specifically so
+# reconstruction can never weld two pieces that sit close together into one blob -- Poisson
+# has no concept of "these are different objects", it just closes whatever surface it's given.
+# A component below this share of the LARGEST surviving component's own bbox diagonal is
+# dropped as a scan artifact (a stray speckle SPECKLE didn't catch, or a sliver broken off a
+# real piece) rather than kept as a "piece" -- real pieces on a real board are all within a
+# fairly narrow size band of each other, nothing like as extreme a ratio as junk debris is.
+MULTI_PART_MIN_SIZE = 3.0
+# See the warning in run_multi_part() for why this exists and what it means when tripped.
+MULTI_PART_FRAGMENTATION_WARNING = 40
+
 
 def load(path):
     ms = pymeshlab.MeshSet()
@@ -305,6 +317,187 @@ def symmetrize(ms, normal, offset):
     ms.add_mesh(pymeshlab.Mesh(vertex_matrix=v, face_matrix=f), "mirrored")
     ms.generate_by_merging_visible_meshes()
     ms.compute_normal_per_vertex()
+
+
+def bbox_diagonal(m):
+    v = m.vertex_matrix()
+    return float(np.linalg.norm(v.max(axis=0) - v.min(axis=0)))
+
+
+def apply_smooth(ms, steps):
+    """Taubin-smooth whatever mesh is current. Shared by the single-object path and each
+    component of --multi-part, so both get the same noise treatment (see STAGE 8's docstring
+    above for why Taubin, not Laplacian)."""
+    if steps:
+        ms.apply_coord_taubin_smoothing(stepsmoothnum=steps)
+
+
+def apply_simplify(ms, target_faces):
+    """Decimate whatever mesh is current down toward target_faces, if it's currently bigger.
+    Shared by the single-object path and each --multi-part component."""
+    if target_faces and ms.current_mesh().face_number() > target_faces:
+        ms.meshing_decimation_quadric_edge_collapse(
+            targetfacenum=target_faces,
+            preserveboundary=True,
+            preservenormal=True,
+            preservetopology=True,
+            planarquadric=True,
+        )
+
+
+def split_components(ms):
+    """Split the current mesh into its connected components as separate meshes.
+
+    generate_splitting_by_connected_components leaves the original mesh in place and appends
+    one new mesh per component with sequentially-increasing IDs (verified directly against
+    the installed pymeshlab, not assumed -- see PyMeshLab's own warning elsewhere in this file
+    about mesh IDs not being array indices). Returns the list of new component IDs, largest
+    (by bbox diagonal) first.
+    """
+    before_id = ms.current_mesh_id()
+    ms.generate_splitting_by_connected_components()
+    new_ids = list(range(before_id + 1, ms.current_mesh_id() + 1))
+    new_ids.sort(key=lambda i: bbox_diagonal(ms.mesh(i)), reverse=True)
+    return new_ids
+
+
+def process_component(ms, mesh_id, args, floor_y):
+    """Run FILL/DEBRIS/REBASE/SMOOTH/SIMPLIFY on one split-off component, independently of
+    every other component -- the whole point of --multi-part: Poisson reconstructing each
+    piece on its own means two pieces sitting close together on the board can never fuse into
+    one blob the way a single global reconstruction would.
+
+    Returns the id of the component's final mesh (fill produces a new one on success).
+    """
+    ms.set_current_mesh(mesh_id)
+    touches_floor = (
+        floor_y is not None
+        and float(ms.current_mesh().vertex_matrix()[:, 1].min()) < floor_y + PLANE_DISTANCE * 4
+    )
+
+    if not args.no_fill:
+        before_id = ms.current_mesh_id()
+        try:
+            ms.generate_surface_reconstruction_screened_poisson(
+                depth=args.poisson_depth,
+                samplespernode=args.poisson_samples,
+                pointweight=args.poisson_weight,
+            )
+        except Exception as exc:
+            print(f"    part {mesh_id}: Poisson failed ({exc}) -- keeping raw split geometry")
+        else:
+            if ms.current_mesh_id() == before_id:
+                print(f"    part {mesh_id}: Poisson produced no new mesh (too sparse) -- "
+                      f"keeping raw split geometry")
+            else:
+                mesh_id = ms.current_mesh_id()
+                # Sized against THIS component's own bbox diagonal, not the whole scene's --
+                # this is the actual fix for the bug that would otherwise delete every piece
+                # as "debris" (a pawn is nowhere near 20% of a board+32-piece scene, but is
+                # obviously not debris relative to its own, much smaller, reconstruction).
+                ms.meshing_remove_connected_component_by_diameter(
+                    mincomponentdiag=pymeshlab.PercentageValue(args.debris_percent)
+                )
+
+    if not args.no_rebase and touches_floor and floor_y is not None:
+        ms.compute_selection_by_condition_per_vertex(condselect=f"y < {floor_y}")
+        ms.meshing_remove_selected_vertices()
+        ms.meshing_remove_connected_component_by_diameter(
+            mincomponentdiag=pymeshlab.PercentageValue(args.debris_percent)
+        )
+        ms.meshing_close_holes(maxholesize=300)
+
+    apply_smooth(ms, args.smooth)
+    apply_simplify(ms, args.target_faces)
+    return ms.current_mesh_id()
+
+
+def write_multi_part_obj(ms, named_ids, output_path):
+    """Write several meshes into one OBJ, each under its own `o <name>` group header, with a
+    running vertex-index offset (OBJ face indices are global to the file, 1-based). This is
+    what lets OBJLoader parse the result back into separate named THREE.Mesh children -- the
+    single-object pipeline never needed this, since save_current_mesh only ever wrote one
+    ungrouped mesh.
+    """
+    offset = 0
+    with open(output_path, "w") as fh:
+        fh.write("# clean_scan.py --multi-part output\n")
+        for name, mesh_id in named_ids:
+            m = ms.mesh(mesh_id)
+            v = m.vertex_matrix()
+            f = m.face_matrix()
+            fh.write(f"o {name}\n")
+            for x, y, z in v:
+                fh.write(f"v {x:.6f} {y:.6f} {z:.6f}\n")
+            for a, b, c in f:
+                fh.write(f"f {a + 1 + offset} {b + 1 + offset} {c + 1 + offset}\n")
+            offset += len(v)
+
+
+def run_multi_part(ms, args, floor_y, rng):
+    """The --multi-part pipeline: split into components BEFORE reconstruction, process each
+    independently, name by size, write one grouped OBJ. See MULTI_PART_MIN_SIZE's comment for
+    why tiny components get dropped rather than kept as "pieces"."""
+    print("\n  splitting into connected components...")
+    component_ids = split_components(ms)
+    largest_diag = bbox_diagonal(ms.mesh(component_ids[0])) if component_ids else 0.0
+
+    kept, dropped = [], []
+    for cid in component_ids:
+        diag = bbox_diagonal(ms.mesh(cid))
+        share = 100.0 * diag / largest_diag if largest_diag else 0.0
+        (kept if share >= args.multi_part_min_size else dropped).append((cid, diag, share))
+
+    print(f"\n  {len(component_ids)} raw components after isolate/defloor/speckle:")
+    for cid, diag, share in kept:
+        print(f"    part {cid:>3}  {ms.mesh(cid).vertex_number():>6} verts  "
+              f"bbox diag {diag:.4f}m  ({share:5.1f}% of largest)  KEEP")
+    for cid, diag, share in dropped:
+        print(f"    part {cid:>3}  {ms.mesh(cid).vertex_number():>6} verts  "
+              f"bbox diag {diag:.4f}m  ({share:5.1f}% of largest)  "
+              f"DROP -- below --multi-part-min-size ({args.multi_part_min_size:.1f}%)")
+
+    # A real board+pieces set is at most a few dozen physical objects. A much higher kept
+    # count almost always means the SAME physical object (the board, or one piece) got split
+    # into several components by scan holes, not that there are genuinely that many objects --
+    # found the hard way against a real chess scan that came back as 320+ raw components.
+    # Plain connected-component splitting cannot fix this after the fact; only more thorough
+    # capture can (slower passes, watch the live mesh, re-sweep gaps -- see ROADMAP.md).
+    if len(kept) > MULTI_PART_FRAGMENTATION_WARNING:
+        print(f"\n  NOTE: {len(kept)} kept components is a lot for a board+pieces set (usually "
+              f"under {MULTI_PART_FRAGMENTATION_WARNING}). This almost always means the scan "
+              f"itself is fragmented -- the same physical piece broken into several disconnected "
+              f"components by scan holes -- rather than there really being this many objects. "
+              f"Re-scanning with slower, more thorough passes (watch the live mesh, re-sweep any "
+              f"gaps) is far more reliable than trying to merge fragments after the fact.")
+
+    if not kept:
+        raise SystemExit("--multi-part found no components above --multi-part-min-size -- "
+                          "check --crop-radius/--crop-center and the raw scan itself")
+
+    if args.dry_run:
+        print("\n(dry run -- nothing written)\n")
+        return
+
+    named_ids = []
+    print(f"\n  processing {len(kept)} kept components independently "
+          f"(fill/debris/rebase/smooth/simplify)...")
+    board_id, *piece_source_ids = [cid for cid, _, _ in kept]
+    final_board_id = process_component(ms, board_id, args, floor_y)
+    named_ids.append(("board", final_board_id))
+    describe(ms, "board")
+
+    for i, cid in enumerate(piece_source_ids, start=1):
+        final_id = process_component(ms, cid, args, floor_y)
+        name = f"piece_{i:02d}"
+        named_ids.append((name, final_id))
+        describe(ms, name)
+
+    write_multi_part_obj(ms, named_ids, args.output)
+    print(f"\nwrote {args.output}  ({len(named_ids)} parts: "
+          f"{', '.join(n for n, _ in named_ids)})\n")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("scan_path")
@@ -329,6 +522,18 @@ def main():
     ap.add_argument("--symmetrize", action="store_true",
                     help="Rebuild missing structure by mirroring across the object's symmetry plane.")
     ap.add_argument("--symmetry-axis", choices=["auto", "x", "z"], default="auto")
+    ap.add_argument("--multi-part", action="store_true",
+                    help="Treat the scan as SEVERAL separate objects (a board and its pieces) "
+                         "instead of one. Splits into connected components after isolate/defloor/"
+                         "speckle, runs fill/debris/rebase independently per component (so Poisson "
+                         "can never weld two pieces together), and writes one OBJ with each part "
+                         "under its own `o <name>` group -- largest component named `board`, the "
+                         "rest `piece_01..NN` by descending size. --symmetrize is not supported "
+                         "together with this yet.")
+    ap.add_argument("--multi-part-min-size", type=float, default=MULTI_PART_MIN_SIZE, metavar="PCT",
+                    help=f"Drop a split component smaller than this %% of the largest component's "
+                         f"own bbox diagonal, as scan debris rather than a real piece. "
+                         f"Default {MULTI_PART_MIN_SIZE}.")
     ap.add_argument("--no-fill", action="store_true", help="Skip Poisson reconstruction.")
     ap.add_argument("--poisson-depth", type=int, default=9)
     ap.add_argument("--poisson-samples", type=float, default=1.5, metavar="N",
@@ -389,7 +594,11 @@ def main():
     if floor_y is not None:
         print(f"\n  floor plane detected at y = {floor_y:.4f}")
 
-    if args.dry_run:
+    # --multi-part's own dry-run report needs defloor/speckle/split to actually run first (it
+    # reports PER-COMPONENT numbers, which don't exist yet at this point) -- it has its own
+    # dry-run stop further down, inside run_multi_part(). The single-object path's dry-run
+    # still stops right here, exactly as before.
+    if args.dry_run and not args.multi_part:
         print("\n(dry run -- nothing written)\n")
         return
 
@@ -417,6 +626,12 @@ def main():
         mincomponentdiag=pymeshlab.PercentageValue(args.speckle_percent)
     )
     describe(ms, "3. speckle")
+
+    if args.multi_part:
+        if args.symmetrize:
+            print("\n  NOTE: --symmetrize is not supported with --multi-part yet -- skipped.")
+        run_multi_part(ms, args, floor_y, rng)
+        return
 
     if args.symmetrize:
         m = ms.current_mesh()
