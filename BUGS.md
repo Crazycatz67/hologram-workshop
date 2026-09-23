@@ -52,19 +52,17 @@ written — the assertions are reasoned through carefully (including explicit
 
 ## 4. Chess scan is too fragmented for `clean_scan.py --multi-part`
 
-**Status: DEFERRED — blocked on a re-scan, not a code bug**
+**Status: DEFERRED — superseded by a capture-strategy change, not a code fix**
 
 `assets/chess/chess.glb` (2026-09-23 capture) splits into 376 disconnected
-components instead of ~33 real objects (board + pieces) — confirmed via
-`clean_scan.py --multi-part --dry-run`, and confirmed the pipeline itself is
-sound by testing a synthetic welded board+2-pieces scan successfully
-end-to-end. Root cause is scan-capture quality (thin/detailed/reflective
-geometry breaking apart under phone LiDAR, same class of issue as the
-chair's undersampled legs), not a pipeline defect. User decided to re-scan
-with slower, more thorough passes rather than build fragment-merging logic.
-See `ROADMAP.md`'s 2026-09-23 entry for the full investigation. Re-run
-`clean_scan.py --multi-part --dry-run` on the new scan and check the
-reported component count before committing to a full run.
+components instead of ~33 real objects. Confirmed this is not fixable by
+any pipeline change, not just `--multi-part`: a direct test of reconstructing
+the whole scan as ONE combined object (abandoning per-piece splitting
+entirely) crashes Poisson reconstruction outright. The whole-set-scan
+approach is abandoned — see item #6 and `ROADMAP.md`'s 2026-09-23(2) entry.
+`clean_scan.py --multi-part` itself is not deleted (still correct against
+synthetic data, might be useful for a smaller future multi-object scan) but
+is no longer the path to the chess hologram.
 
 ## 5. Pitch, push/pull, and stretch-explode — still not confirmed on real hands
 
@@ -73,3 +71,40 @@ reported component count before committing to a full run.
 Carried forward from `ROADMAP.md`'s 2026-09-08 entry: these three gestures
 have only ever been exercised by synthetic `test.js` sequences, never a real
 webcam session. Not touched this session.
+
+## 6. Chess pipeline rebuilt around per-piece-type scans + `assemble_chess_set.py`
+
+**Status: FIXED (verified offline) for the script; blocked on the user for real scans**
+
+New capture plan (see `ROADMAP.md` 2026-09-23(2)): scan the board once plus
+one example of each of the 6 unique piece types, clean each individually
+with the existing unmodified `clean_scan.py`, then run the new
+`assemble_chess_set.py` to lay them onto a standard starting position and
+write one combined `o`-grouped OBJ. The script itself was actually executed
+(not just reasoned through) against synthetic board+piece meshes and
+verified correct: every placed piece's bottom lands exactly at the board's
+detected top surface, and mirrored squares land at the expected symmetric
+coordinates. One real bug found and fixed during that run — the dry-run's
+board-diagram printout abbreviated King and Knight both as "K"; now uses
+standard algebraic notation. **Still needs**: the actual 7 scans (blocked on
+the user), then a run against real data and the same visual/live-app
+verification the chair went through.
+
+## 7. `findExplodeParts` didn't work on real OBJ-loaded multi-part meshes
+
+**Status: FIXED (needs live confirm)**
+
+`manipulator.js`'s `findExplodeParts` read `part.position` for centroid/
+explode-direction/home, which is meaningless for a real OBJ file with
+multiple `o`-named groups — OBJLoader gives every part `.position` at the
+default `(0,0,0)`, with real location baked into geometry vertex data. Every
+part's centroid would have read as `(0,0,0)` and every explode direction
+would collapse to the same degenerate fallback. Fixed by recentering each
+part's geometry around its own local bounding-box center and folding that
+into `.position`, composed with whatever position already existed rather
+than overwritten. A new `test.js` group builds parts the way a real
+multi-group OBJ actually loads and confirms explode/select/grab/reset all
+work correctly against that representation — this is reasoned through very
+carefully and the synthetic test is designed specifically to catch a
+regression here, but per items #1-3, `test.html` still hasn't actually been
+run in a browser this session to confirm it passes as written.
