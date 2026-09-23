@@ -224,9 +224,36 @@ function clampToView(object, camera) {
 
 // Finds every mesh under `object` and records where each sits relative to the group's own
 // centroid, so literal explode has a "this part's outward direction" for each one to push
-// along. Assumes each mesh's own `.position` is meaningful relative to a shared parent —
-// true for a simple multi-mesh group (what the synthetic test below uses), but real
-// multi-part exports vary in how they nest transforms; revisit once a real one exists.
+// along.
+//
+// Every part is first RE-CENTERED: geometry is shifted so its own local bounding-box center
+// lands at the origin, and that center is folded into `part.position`. This has to happen
+// before anything below reads `part.position`, because a real OBJ file with several
+// `o`-named groups has no per-object transform at all -- every part's `.position` comes out
+// of the loader at the default (0,0,0), with its real location baked directly into the
+// geometry's own vertex coordinates. Reading `.position` for the centroid/direction math
+// without this step would put every part's centroid at (0,0,0) and every explodeDir at the
+// same degenerate fallback -- every piece would try to explode straight up from the origin
+// instead of outward from its real spot, and Reset would snap every piece toward world
+// origin instead of its actual home.
+//
+// The geometry's LOCAL bounding box is used deliberately, not a world-space one -- a
+// world-space box would depend on every ancestor's current matrixWorld, which can be stale
+// at this point (findExplodeParts runs at construction time, before this object has ever
+// been through a render pass). Reading `part.geometry.boundingBox` sidesteps that: it's pure
+// vertex data, unaffected by any transform.
+//
+// The new center is ADDED to whatever `part.position` already held, not blindly overwritten
+// -- an already-correctly-positioned part (the synthetic test's THREE.Group children, whose
+// geometry is already centered on its own local origin) must keep its position, not have it
+// zeroed out by a geometry center of (0,0,0). Composing the two this way is exactly correct
+// as long as the part has no rotation/scale already applied before this runs, which holds for
+// every case this project actually produces: OBJLoader never sets a non-identity
+// quaternion/scale on a parsed mesh (OBJ has no per-object transform concept at all -- every
+// part comes out at identity, real placement baked purely into vertex data), and the
+// synthetic test fixture is built the same way. A hypothetical future GLTF-based multi-part
+// export with real per-node rotation would need the offset rotated into geometry space
+// first; not needed for the OBJ-only pipeline this project actually has.
 function findExplodeParts(object) {
   const parts = [];
   object.traverse((child) => {
@@ -234,6 +261,14 @@ function findExplodeParts(object) {
   });
 
   if (parts.length < 2) return { literal: false, parts: [] };
+
+  for (const part of parts) {
+    part.geometry.computeBoundingBox();
+    const geomCenter = part.geometry.boundingBox.getCenter(new THREE.Vector3());
+    const truePosition = geomCenter.clone().add(part.position);
+    part.geometry.translate(-geomCenter.x, -geomCenter.y, -geomCenter.z);
+    part.position.copy(truePosition);
+  }
 
   const centroid = new THREE.Vector3();
   for (const part of parts) centroid.add(part.position);

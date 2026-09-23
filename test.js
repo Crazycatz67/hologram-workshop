@@ -559,6 +559,90 @@ async function main() {
       `selected=${missedSelect}`);
   });
 
+  group('Literal explode on OBJ-style parts — geometry-baked positions', () => {
+    // A real OBJ file with several `o`-named groups has NO per-object transform concept at
+    // all: every part comes out of OBJLoader with `.position` at the default (0,0,0), and its
+    // real location is baked directly into the geometry's own vertex coordinates. The group
+    // above builds its fixture the OTHER way (via Object3D.position, geometry centered on its
+    // own local origin) -- the idiomatic THREE.js way, but NOT how the real chess pipeline's
+    // output will actually load. This is the representation that would have caught the
+    // findExplodeParts bug: reading `part.position` directly, without first recentering
+    // geometry into it, put every part's centroid at (0,0,0) and every explodeDir at the same
+    // degenerate fallback, since every part's `.position` read as identical and zero.
+    const multiObject = new THREE.Group();
+    const geomA = new THREE.BoxGeometry(0.05, 0.05, 0.05).translate(0.1, 0, 0);
+    const partA = new THREE.Mesh(geomA); // .position left at the Object3D default (0,0,0)
+    const geomB = new THREE.BoxGeometry(0.05, 0.05, 0.05).translate(-0.1, 0, 0);
+    const partB = new THREE.Mesh(geomB);
+    const geomC = new THREE.BoxGeometry(0.05, 0.05, 0.05).translate(0, 0.1, 0);
+    const partC = new THREE.Mesh(geomC);
+    multiObject.add(partA, partB, partC);
+
+    camera.updateMatrixWorld(true);
+
+    const m = createManipulator(multiObject, camera);
+    checkTrue('a 3-mesh OBJ-style group is still detected as literal explode', m.explodeIsLiteral,
+      `explodeIsLiteral=${m.explodeIsLiteral}`);
+
+    // The fix itself: findExplodeParts must have folded each part's baked-in geometry offset
+    // into `.position`, or every one of these would read back as (0,0,0).
+    checkTrue("part A's baked geometry offset survived into .position",
+      Math.abs(partA.position.x - 0.1) < 1e-6 && Math.abs(partA.position.y) < 1e-6,
+      `partA.position=(${partA.position.x.toFixed(3)}, ${partA.position.y.toFixed(3)})`);
+    checkTrue("part C's baked geometry offset survived into .position",
+      Math.abs(partC.position.y - 0.1) < 1e-6 && Math.abs(partC.position.x) < 1e-6,
+      `partC.position=(${partC.position.x.toFixed(3)}, ${partC.position.y.toFixed(3)})`);
+
+    // Recentering must not move any vertex on screen -- the geometry offset it removes is
+    // exactly cancelled by the position it adds, so the rendered box for A should still sit
+    // at world x=0.1, not x=0.2 (double-counted) or x=0 (offset lost).
+    const worldCheck = partA.getWorldPosition(new THREE.Vector3());
+    checkTrue('recentering does not change where the part actually renders',
+      Math.abs(worldCheck.x - 0.1) < 1e-6, `partA world position x=${worldCheck.x.toFixed(3)}`);
+
+    // Same full sequence as the position-based group: explode outward along each part's own
+    // direction, select part A by raycasting its real screen position, grab moves only that
+    // part, reset restores everything exactly.
+    m.configure({ channels: ['explode'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    let t = 1000;
+    for (let i = 0; i < 8; i++) { m.update([hand(0.45, 0.5, 0, 'open'), hand(0.55, 0.5, 0, 'open')], 1.78, t); t += 16.7; }
+    for (let i = 1; i <= 40; i++) { m.update([hand(0.45 - 0.01 * i, 0.5, 0, 'open'), hand(0.55 + 0.01 * i, 0.5, 0, 'open')], 1.78, t); t += 16.7; }
+    checkTrue('OBJ-style part A explodes outward along its own (+x) direction',
+      partA.position.x > 0.1 + 0.01, `partA.x=${partA.position.x.toFixed(3)}`);
+    checkTrue('OBJ-style part B explodes outward along its own, opposite (-x) direction',
+      partB.position.x < -0.1 - 0.01, `partB.x=${partB.position.x.toFixed(3)}`);
+
+    multiObject.updateMatrixWorld(true);
+    const worldA = partA.getWorldPosition(new THREE.Vector3());
+    const ndcA = worldA.clone().project(camera);
+    const selected = m.selectPartAtScreenPoint(ndcA.x, ndcA.y);
+    checkTrue('raycasting selects OBJ-style part A at its real screen position', selected === partA,
+      selected ? (selected === partA ? 'selected A' : 'selected a different part') : 'selected nothing');
+
+    const groupPosBefore = multiObject.position.clone();
+    const partAPosBefore = partA.position.clone();
+    const partBPosBefore = partB.position.clone();
+
+    m.configure({ channels: ['move'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    for (let i = 0; i < 10; i++) { m.update([hand(0.5, 0.5, 0, 'fist')], 1.78, t); t += 16.7; }
+    for (let i = 1; i <= 20; i++) { m.update([hand(0.5 + 0.01 * i, 0.5, 0, 'fist')], 1.78, t); t += 16.7; }
+    checkTrue('grabbing after selecting OBJ-style part A moves ONLY part A',
+      partA.position.distanceTo(partAPosBefore) * 100 > 1,
+      `part A moved ${(partA.position.distanceTo(partAPosBefore) * 100).toFixed(2)}cm`);
+    check('the whole group does not move while an OBJ-style part is selected',
+      multiObject.position.distanceTo(groupPosBefore) * 100, 0, 0);
+    check('OBJ-style part B (not selected) does not move',
+      partB.position.distanceTo(partBPosBefore) * 100, 0, 0);
+
+    m.reset();
+    const posErr = partA.position.distanceTo(partA.userData.explodeHome);
+    const rotErr = partA.quaternion.angleTo(partA.userData.explodeHomeQuaternion);
+    const scaleErr = partA.scale.distanceTo(partA.userData.explodeHomeScale);
+    checkTrue('reset restores OBJ-style part A exactly (position + rotation + scale)',
+      posErr < 1e-6 && rotErr < 1e-6 && scaleErr < 1e-6,
+      `pos off by ${posErr.toExponential(2)}, rot off by ${rotErr.toExponential(2)}, scale off by ${scaleErr.toExponential(2)}`);
+  });
+
   // ---- measurement, against the real shipped chair -------------------------------------
   let model = null;
   try {
