@@ -2,6 +2,7 @@
 
 ## Revision History
 
+- **2026-09-29:** **Project reorganised into three tracks.** A: Object Hologram (everything built so far). B: Room Hologram (scan a whole room and interact with every object in it). C: Neurotech Bionic Arm (the Neurotechnology Exploration Club's arm, plus hand-tracking and hologram tie-ins). The old `ROADMAP.md` moved intact to `plans/object-hologram/ROADMAP.md`, and the root `ROADMAP.md` is now a short track index holding the **isolation rules** that stop B and C from disrupting A. Hard Constraints below are now explicitly Track A's; B proposes keeping them, and C needs its own (hardware can't be avoided for an arm). Revision entries dated before today that say "`ROADMAP.md`" mean the file now at `plans/object-hologram/ROADMAP.md`.
 - **2026-09-06 (2):** **Practice mode added, UI rebuilt around one gesture at a time, and gesture feel made live-tunable.** Live feedback was that gestures fire unintentionally and don't feel fluid, with a direct request to test each function separately "without it bleeding across." The structural cause: one closed fist drives move, spin, tilt and push *simultaneously*, so nothing could be isolated or learned. Each channel is now individually armable and the practice panel arms exactly one, verified by test (identical hand motion produces only the armed channel's effect, and a disarmed gesture does nothing at all). Sensitivity, hysteresis depth and momentum are now adjustable live in the page — these are the "untuned guesses" this project has carried since Phase 1, and the drills exist so they can finally be tuned per-gesture against a real webcam. Also added Taubin smoothing to `clean_scan.py` for scan surface noise (chosen by measuring where the surface-area curve flattens, not by preference). Details in `ROADMAP.md`.
 - **2026-09-06:** **Scan cleanup became a real pipeline (`clean_scan.py`), and the chair was rebuilt with it.** Prompted by a height-based floor cut that deleted the chair's sled runners — it is a sled-base chair, so "below 8cm" is both the floor and the chair's own base. The general lesson, now encoded in the tool: **you cannot separate floor from object by height, only by surface identity** — a floor is a large flat plane that wraps the capture boundary (measured: 22/24 boundary sectors, vs 1/24 for the chair's own side), while an object's flat face stays bounded inside it. Missing geometry is rebuilt by mirroring the object across its own symmetry plane (found at any orientation — the chair's is at 164°, scoring 88.3% overlap vs 24% for axis-aligned), so gaps are filled with *measured* geometry rather than invention. The shipped asset is now `assets/chair/chair_clean.obj`, and cropping moved out of the browser entirely: `trimByCylinder`/`CHAIR_TRIM` are gone from both pages, because a radius crop can only remove what is beside the object, never the floor underneath it. Full findings and the bugs found along the way in `ROADMAP.md`.
 - **2026-09-05 (4):** Discussed how to get cleaner future scans, since the chair scan needed real cleanup work despite careful capture. Three separate problems, three separate fixes: capture technique (watch the live mesh while scanning and re-sweep gaps, physically isolate the object from walls/furniture — free, no code); automatic clutter removal (built `analyze_scan.py`, which automates the by-hand histogram analysis that found the chair's wall-vs-object gap — validated against the chair itself, reproduced the known-good answer blind); and actual mesh hole-filling, where the recommendation is an existing free tool (MeshLab's Close Holes / Screened Poisson Reconstruction, or Blender's Remesh) rather than building custom repair code, which would be disproportionate effort for a solved problem and arguably the same "research-grade difficulty" already ruled out for the broken-pottery idea in Out of Scope.
@@ -29,15 +30,29 @@ python serve.py          # then open http://localhost:8080
 
 A static server is required locally — `GLTFLoader` uses `fetch()`, which browsers block on `file://` URLs, and `getUserMedia` needs a secure context (localhost counts as one).
 
-## What This Is
+## Project Tracks
+
+This repo holds three tracks. **Read the root [`ROADMAP.md`](ROADMAP.md) first**: it's a short index plus the isolation rules. Then read only the plan for the track being worked on:
+
+| Track | Plan | Code / assets |
+| --- | --- | --- |
+| A — Object Hologram (original, live) | [`plans/object-hologram/ROADMAP.md`](plans/object-hologram/ROADMAP.md) | repo root / `assets/chair`, `assets/chess` |
+| B — Room Hologram | [`plans/room-hologram/ROADMAP.md`](plans/room-hologram/ROADMAP.md) | `room/` / `assets/rooms/` |
+| C — Neurotech Bionic Arm | [`plans/neurotech-arm/ROADMAP.md`](plans/neurotech-arm/ROADMAP.md) | `neurotech/` / `assets/arm/` (firmware: separate repo, proposed) |
+
+Everything below this section up to "How to Work on This Project" describes **Track A**, unless it says otherwise.
+
+## What This Is (Track A)
 
 A browser-based "hologram" demo: a real object is LiDAR-scanned on an iPhone, rendered in Three.js with a holographic shader, and manipulated live by hand gestures tracked through the webcam (pinch to scale, closed fist to grab/move, two-hand motion to rotate). Screen-based, Tony-Stark-workshop-monitor aesthetic — not AR passthrough, not a Vision Pro app. It directly extends the existing ASL fingerspelling project's hand-tracking pipeline rather than starting one from scratch.
 
 **What it isn't:** not a stock-model viewer (every reference project found controls a *downloaded* model — this project's whole point is scan-your-own-object → manipulate-its-own-hologram); not a native/Unity app; not glasses-based AR.
 
-Full phase breakdown lives in [`ROADMAP.md`](ROADMAP.md) — read that for what's currently being built. Don't propose work that conflicts with a later phase's plan without flagging it (see "Flag deviations" below).
+Full phase breakdown lives in [`plans/object-hologram/ROADMAP.md`](plans/object-hologram/ROADMAP.md) — read that for what's currently being built. Don't propose work that conflicts with a later phase's plan without flagging it (see "Flag deviations" below).
 
-## Hard Constraints
+## Hard Constraints (Track A)
+
+These bind Track A. Track B proposes keeping all of them. Track C can't (an arm needs hardware and firmware) and records its own constraints in its plan. A track that relaxes a constraint never relaxes it for A.
 
 - **No purchased hardware.** Established in Session 5 specifically to shelve the Ultraleap Leap Motion Controller option (true 3D hand tracking, ~$100–130) — good interaction quality, but ruled out purely on cost, not capability. Everything must run on the webcam + iPhone already on hand.
 - **Browser-based, no build step preferred.** Matches the ASL project's existing philosophy and mirrors how `3d-model-playground` ships (Three.js r161 via a `unpkg.com` CDN import map, tiny bootstrap file, no bundler). Don't introduce a build/bundler step unless a specific need forces it — ask first (see scope-creep rule).
@@ -60,7 +75,7 @@ Pipeline there: `camera.js` → `handTracker.js` → `normalize.js` → `knn.js`
 - `knn.js` and the labeled letter dataset — this project's gestures are geometric (pinch distance, hand-vector deltas), not classification against a fixed label set.
 - `handTracker.js` as-is — still MediaPipe under the hood, but swapped from raw `HandLandmarker` to `GestureRecognizer` (see Hard Constraints above) feeding a gesture interpreter instead of a letter classifier.
 
-## Reference Projects, by Build Phase
+## Reference Projects, by Build Phase (Track A)
 
 **Capture → static model (Phase 0–1):**
 - Scaniverse vs. Polycam vs. KIRI Engine comparison — Session 5 of the research doc.
@@ -91,18 +106,21 @@ Pipeline there: `camera.js` → `handTracker.js` → `normalize.js` → `knn.js`
 
 ## Open Questions — Ask the User, Don't Assume
 
+**Project-level (2026-09-29):** priority/time split between Tracks A, B and C; whether Track C's firmware gets its own repo. Track B and C open questions live in their own plans. The items below are Track A's.
+
 - **Voice-driven generative 3D content (new, 2026-09-05).** Proposed directly, inspired by HoloMat's voice → text-to-image → image-to-3D pipeline: let the hologram be *generated* from a spoken description, not only from a real LiDAR scan, on the reasoning that "a lot of times you want to make stuff you don't have access to [scan]." **This crosses a boundary CLAUDE.md has stated since the kickoff brief** — "not a stock-model viewer... this project's whole point is scan-your-own-object → manipulate-its-own-hologram." Flagged, not decided. Real costs to weigh before committing: this needs a paid API (speech-to-text + image generation + image-to-3D reconstruction), which would be the project's first ongoing paid dependency — everything so far (Three.js, MediaPipe, PyMeshLab) is free; and AI-generated 3D geometry is typically lower-fidelity/more approximate than a real scan, so a generated hologram would likely look meaningfully worse next to the scanned chair, not equivalent. If pursued, it reads as an *additive* second pipeline alongside scanning, not a replacement. Needs an explicit decision on scope and timing, not a guess.
 - Is an in-app **voice-command layer** (e.g. saying "bigger" or "reset" to the page itself) in scope for v1? **Resolved 2026-09-05: Phase 5 only, after gesture control itself is reliable** — explicit priority call, not a default assumption. Separate from the generative-content question above, which is a bigger scope question than a command layer.
 
 **Resolved 2026-09-04:** object to scan (toy plush, later revised to a chair — see Phase 0); push-pull/explode gesture *set* is in v1 scope; Draco/Meshopt approach (combine both benchmarks' findings rather than defaulting to Meshopt); Pepper's Ghost (provisionally in scope, gated on Phase 4 completion + cost check); Leap Motion Controller (stays shelved).
-**Resolved 2026-09-05:** explode gesture behavior — built as dual-mode (literal explode for multi-part meshes, stretch/expand for single-mesh objects like the chair), auto-detected from the loaded model's mesh count with a manual override. See ROADMAP.md Phase 4.
+**Resolved 2026-09-05:** explode gesture behavior — built as dual-mode (literal explode for multi-part meshes, stretch/expand for single-mesh objects like the chair), auto-detected from the loaded model's mesh count with a manual override. See Track A's roadmap, Phase 4.
 
 ## How to Work on This Project (Standing Conventions)
 
-- **Session recaps.** Start each session with a short "here's what we last did and where that puts us on the roadmap" before starting new work.
+- **Name the track.** Each session works on one track (A, B or C). Say which at the start, and follow the isolation rules in the root `ROADMAP.md`: new-track code in its own folder, shared root modules imported but not changed by default, and `test.html` green after any touch to a shared file.
+- **Session recaps.** Start each session with a short "here's what we last did and where that puts us on the roadmap" before starting new work, for the track being worked on.
 - **Teach, don't vibe-code.** Explain technical concepts in plain, non-jargon terms. Keep explanations short and in-chat by default. Only produce a diagram/visual for genuinely big or tangled ideas — not routinely.
-- **Track the full roadmap, not just the current step.** Advice on the current phase should stay consistent with later phases in `ROADMAP.md` — don't build something in an early phase that conflicts with or duplicates what a later phase already plans to build.
-- **Keep living docs current.** Update `ROADMAP.md` (and this file) the moment a new idea, research finding, or decision comes up in conversation — don't batch it for later. Every substantive change gets a dated entry in that doc's Revision History section at the top, describing what changed and why (not just "updated Phase 3").
+- **Track the full roadmap, not just the current step.** Advice on the current phase should stay consistent with later phases in that track's roadmap (and with the other tracks' plans where they share code) — don't build something in an early phase that conflicts with or duplicates what a later phase already plans to build.
+- **Keep living docs current.** Update the relevant track's roadmap under `plans/` (the root `ROADMAP.md` only for cross-track changes, and this file) the moment a new idea, research finding, or decision comes up in conversation — don't batch it for later. Every substantive change gets a dated entry in that doc's Revision History section at the top, describing what changed and why (not just "updated Phase 3").
 - **Flag deviations before acting.** If something discovered during implementation suggests a prior decision should change, say so explicitly — "this should probably work differently because X" — rather than silently doing it differently.
 - **Ask before scope creep.** Get a go-ahead before adding a new dependency, tool, or expanding scope beyond what's currently agreed. Anything deliberately out of scope gets its own visible "out of scope" note in the relevant doc, not silently dropped or silently absorbed.
 
@@ -110,5 +128,5 @@ Pipeline there: `camera.js` → `handTracker.js` → `normalize.js` → `knn.js`
 
 - **Backward-reasoning pass** — before implementing a phase, trace each decision forward to how it'll actually be tested/used; does it still hold up?
 - **Human-variation pass** — since this project involves live webcam hand tracking, explicitly sort concerns (lighting conditions, hand size, one- vs. two-handed use, skin tone via the upstream hand-detector) into "solved by current architecture," "needs an explicit test," or "matters later — log it," rather than assuming the pipeline is neutral by default.
-- **Efficiency gut-check** — before scaling any resource (mesh density, compression, dependency weight), ask whether the specific technique in use actually benefits from more of it, or just gets heavier for no real gain (this is why compression isn't applied by default in Phase 1 — see `ROADMAP.md`).
+- **Efficiency gut-check** — before scaling any resource (mesh density, compression, dependency weight), ask whether the specific technique in use actually benefits from more of it, or just gets heavier for no real gain (this is why compression isn't applied by default in Phase 1 — see Track A's roadmap).
 - **Reuse-across-phases check** — when a later phase seems to need new capability, check whether it's actually just a new interface onto something an earlier phase already built, before building it twice.

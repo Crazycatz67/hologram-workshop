@@ -8,8 +8,8 @@ description: Maintain and work through BUGS.md, this project's persistent bug tr
 `BUGS.md` is the durable task-clipboard for known issues — not a one-off
 report that goes stale. Treat it as a living document: read it, update it in
 place, never spawn a parallel tracking file. It's a companion to
-`ROADMAP.md`, not a replacement for it: `ROADMAP.md`'s Revision History is
-the narrative record of what changed and why; `BUGS.md` is the at-a-glance
+the track roadmaps (`plans/<track>/ROADMAP.md`), not a replacement for them:
+their Revision Histories are the narrative record of what changed and why; `BUGS.md` is the at-a-glance
 "what's currently open" list.
 
 ## Picking the next item to work
@@ -63,10 +63,15 @@ After investigating or fixing an item, edit its entry in place in `BUGS.md`:
 - One or two sentences of evidence: root cause with file:line, what was
   checked, and the commit hash once it's actually committed.
 - Keep entries terse — this is a checklist, not a narrative. Long
-  investigation detail belongs in the `ROADMAP.md` revision-history entry or
+  investigation detail belongs in the track roadmap's revision-history entry or
   the commit message, not here.
 
 ## Folding in new testing feedback
+
+New items get a track tag at the start of their heading — `[A]` Object
+Hologram, `[B]` Room Hologram, `[C]` Neurotech Bionic Arm. A bug in a shared
+root module that a new track exposed is still `[A]` (the module is Track
+A's), noting which track found it.
 
 When the user reports something broken (live-hands testing, a browser
 check, anything), don't leave it as a one-off note in conversation — add it

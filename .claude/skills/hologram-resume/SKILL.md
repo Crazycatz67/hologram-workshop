@@ -1,6 +1,6 @@
 ---
 name: hologram-resume
-description: Reconstruct exactly where the hologram-workshop project was left off — reads ROADMAP.md's Revision History and Next Concrete Action, CLAUDE.md's Revision History, project memory, and uncommitted git state. Use at the start of a session on this project, after a crash/interruption, or when the user asks "where did we leave off" / "catch me up" / "resume".
+description: Reconstruct exactly where the hologram-workshop project was left off — reads the root ROADMAP.md track index, the active track's plan (Revision History + Next Concrete Action), CLAUDE.md's Revision History, project memory, and uncommitted git state. Use at the start of a session on this project, after a crash/interruption, or when the user asks "where did we leave off" / "catch me up" / "resume".
 ---
 
 # hologram-workshop resume
@@ -11,15 +11,18 @@ Reconstruct state from durable sources — never assume anything from
 conversation memory alone, since a fresh session has none. Do all of the
 following, then synthesize one summary; don't just dump raw output.
 
-This project has no separate stage-plan-file convention the way some
-projects do — `ROADMAP.md`'s own "Next Concrete Action" section at the
-bottom already fills that role directly, so there's no extra pointer file to
-chase.
+**Tracks (since 2026-09-29):** the project has three tracks — A Object
+Hologram, B Room Hologram, C Neurotech Bionic Arm. The root `ROADMAP.md` is a
+short index + isolation rules; each track's plan lives at
+`plans/<track>/ROADMAP.md` with its own Revision History and "Next Concrete
+Action". If the user hasn't said which track, give a one-line status for each
+and ask which one to pick up — don't default to Track A.
 
 ## 1. Read the sources of truth, in this order
 
-1. `ROADMAP.md`'s **Revision History** (top of the file, most recent entries
-   first) and its **Next Concrete Action** section (bottom of the file) —
+1. The root `ROADMAP.md` (track table, isolation rules, cross-track notes),
+   then the active track's `plans/<track>/ROADMAP.md`: its **Revision
+   History** (top, newest first) and **Next Concrete Action** (bottom) —
    the direct record of what actually shipped and what's next.
 2. `CLAUDE.md`'s Revision History (also top-of-file, newest first) for any
    standing decisions, scope calls, or hard constraints that changed.
@@ -29,12 +32,12 @@ chase.
 
 ## 2. Cross-check against live repo state
 
-- `git log --oneline -15` — does the last commit match what `ROADMAP.md`'s
-  Revision History says was last shipped? If not, the docs are stale —
+- `git log --oneline -15` — does the last commit match what the track
+  roadmap's Revision History says was last shipped? If not, the docs are stale —
   trust git.
 - `git status` and `git diff --stat` — any uncommitted changes at all?
 - If there's an uncommitted diff: read it in full and identify which open
-  item from `ROADMAP.md`'s Next Concrete Action (or a recently-discussed
+  item from a track roadmap's Next Concrete Action (or a recently-discussed
   feature) it implements — don't just describe the diff mechanically, name
   *what it's for*. Read the diff to understand it, but never quote it
   verbatim back to the user — the final summary describes what it does in
@@ -50,7 +53,7 @@ One concise summary covering:
 - What was last shipped (commit + one line on what it did).
 - What's currently uncommitted, if anything, and whether it looks complete
   (would pass `hologram-verify`) or half-built.
-- What `ROADMAP.md`'s Next Concrete Action says is next.
+- Which track, and what that track's Next Concrete Action says is next.
 - Any standing open questions from `CLAUDE.md` (the "Ask the User, Don't
   Assume" section) still unresolved.
 

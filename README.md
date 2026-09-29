@@ -7,6 +7,18 @@ the webcam. Screen-based Tony-Stark-workshop aesthetic — not AR passthrough.
 What makes it different from the usual hand-tracking demo: every comparable project
 manipulates a *downloaded* model. This one manipulates a scan of an object you actually own.
 
+## Project tracks
+
+The repo now holds three tracks, planned separately so new work can't disrupt the live object hologram:
+
+| Track | Plan |
+| --- | --- |
+| **A — Object Hologram** (everything below, live) | [plans/object-hologram/ROADMAP.md](plans/object-hologram/ROADMAP.md) |
+| **B — Room Hologram**: scan a whole room and interact with every object in it | [plans/room-hologram/ROADMAP.md](plans/room-hologram/ROADMAP.md) |
+| **C — Neurotech Bionic Arm**: the Neurotechnology Exploration Club's arm, with hand-tracking and hologram tie-ins | [plans/neurotech-arm/ROADMAP.md](plans/neurotech-arm/ROADMAP.md) |
+
+The index and the isolation rules are in [ROADMAP.md](ROADMAP.md).
+
 ## Live
 
 No install, no server — every page runs entirely in the browser:
@@ -22,7 +34,7 @@ Both pages carry a **measurement panel**: real dimensions, detected key heights 
 Gesture pages need camera permission. On macOS you may have to allow it twice: once in the
 browser, and once in System Settings → Privacy & Security → Camera.
 
-## Status
+## Status (Track A)
 
 | Phase | State |
 | --- | --- |
@@ -33,7 +45,7 @@ browser, and once in System Settings → Privacy & Security → Camera.
 | 4 — Gesture-driven manipulation | All v1 gestures built and confirmed on a real webcam once; every rate limit and hysteresis check rewritten to be frame-rate independent after that first session |
 | 5 — Polish and stretch | Measurement tools built (dimensions, tape measure, fit check) |
 
-Full breakdown in [ROADMAP.md](ROADMAP.md); working conventions in [CLAUDE.md](CLAUDE.md).
+Full breakdown in [plans/object-hologram/ROADMAP.md](plans/object-hologram/ROADMAP.md); working conventions in [CLAUDE.md](CLAUDE.md).
 
 **Regression tests:** open [`test.html`](test.html) locally and read the page — 37 checks covering gesture isolation, tracking-noise robustness, and every measurement figure against the shipped chair scan. No framework, no build step; a run is opening the page.
 
@@ -72,9 +84,11 @@ Then open <http://localhost:8080>.
 | `smoothLandmarks.js` | Exponential smoothing on raw landmark positions, matched frame-to-frame by nearest wrist position |
 | `serve.py` | Static server that sends `no-store` |
 | `test.html`, `test.js` | Regression suite — open the page, read pass/fail. Synthetic hand geometry and the shipped chair scan; no build step, no framework |
-| `analyze_scan.py` | Suggests crop parameters for a new raw scan (see ROADMAP.md) |
+| `analyze_scan.py` | Suggests crop parameters for a new raw scan (see Track A roadmap) |
 | `clean_scan.py` | **Raw scan → clean object.** Detects and removes the ground plane (without deleting the object's base), rebuilds missing structure by mirroring, fills gaps, welds watertight, decimates for the web |
-| `repair_scan.py` | Lower-level mesh repair (PyMeshLab, no GUI) — see ROADMAP.md for what worked and what didn't |
+| `repair_scan.py` | Lower-level mesh repair (PyMeshLab, no GUI) — see Track A roadmap for what worked and what didn't |
+| `ROADMAP.md`, `plans/` | Track index + isolation rules; one roadmap per track under `plans/` |
+| `room/`, `neurotech/` *(not created yet)* | Where Track B and Track C code will live, kept apart from the Track A files above |
 
 No bundler and no dependencies to install for the site itself — Three.js and MediaPipe
 both load from a CDN via an import map. `analyze_scan.py` needs `numpy`; `clean_scan.py`
