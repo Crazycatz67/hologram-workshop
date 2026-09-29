@@ -99,7 +99,25 @@ Tier 4. Keep a small local index of CLIP embeddings over a licence-filtered furn
 ### B3 — Generative Spike (Mac first)
 Tier 5. Install SPAR3D (MPS / low-VRAM mode) and a Hunyuan3D-2mini Mac fork on the M5, run the chair through each, and write down time, peak memory and B0 error. Try SPAR3D's point-cloud conditioning with the scan's own points. If the M5 can't cope, run the same scripts on the 2070. **Record the honest outcome either way.**
 
-**Install findings (2026-09-29 research, nothing installed yet; verify each step when running it):**
+**B3 step 1 done (2026-09-29): TripoSR runs on the M5 Air.**
+- **Result:** image → mesh (84k faces, vertex colours) in **~13–14 s warm** on either CPU or MPS. Peak memory is **~4.4 GB**, which fits 16 GB comfortably.
+- **Why MPS gives no speedup:** mesh extraction (`torchmcubes`, the biggest stage at ~5.8 s) runs on the CPU either way. Model inference is only 3.3 s.
+- **Setup:**
+  - Isolated install in `.models/triposr/` (git-ignored, 1.4 GB). Weights are cached in `~/.cache/huggingface` (1.6 GB).
+  - Python 3.11 via `uv`; `brew install uv cmake`.
+  - Build fixes: unpinned `xatlas` (0.0.11), `torchmcubes` built with `--no-build-isolation` plus scikit-build-core/pybind11/ninja, and `onnxruntime` added for rembg.
+  - The copy-paste recipe is in `.models/triposr/NOTES.md`.
+- **Gotchas:**
+  - The first run downloads rembg's `u2net.onnx` (176 MB) from GitHub (slow), or pass `--no-remove-bg`.
+  - Higher marching-cubes resolution and `--bake-texture` are untested.
+- **Next:**
+  - Run TripoSR on a *photo of our own chair*.
+  - Scale and register the output to the scan (Open3D FPFH+ICP).
+  - Add it as a benchmark method, where it has to beat `complete` (98–100%) to earn a place.
+
+  **Honest expectation:** for slab furniture the geometric pipeline is already near the ceiling. Generation matters for objects with no slab or symmetry structure, and for regions *nothing* in the scan hints at.
+
+**Install findings (2026-09-29 research; SPAR3D and Hunyuan still unverified):**
 - **Order:** TripoSR first (MIT, weights not gated, safest environment check), then SPAR3D, then a Hunyuan fork. Use a **separate Python 3.11/3.12 environment per model** (`uv venv --python 3.12`). Their pinned dependencies (e.g. SPAR3D pins numpy 1.26.4 and transformers 4.42.3) would break the benchmark's 3.13 `.venv`.
 - **SPAR3D** ([repo](https://github.com/Stability-AI/stable-point-aware-3d)):
   - **Mac:** needs macOS 15.2+ and `PYTORCH_ENABLE_MPS_FALLBACK=1`. `--low-vram-mode` brings it to ~7 GB on CUDA; MPS memory is unconfirmed. The README says MPS "consumes more memory" and recommends CPU below 32 GB.
