@@ -72,7 +72,7 @@ export function buildLayout(ctx) {
     parts: it.parts.map((p) => ({ id: p.local, transform: xform(p.mesh), hidden: !p.mesh.visible }))
   }));
   return {
-    version: 1, createdAt: new Date().toISOString(), items,
+    version: 2, createdAt: new Date().toISOString(), items,
     edits: JSON.parse(JSON.stringify(ctx.edits)),
     camera: { position: ctx.camera.position.toArray().map((n) => round(n)), target: ctx.controls.target.toArray().map((n) => round(n)) }
   };
@@ -84,14 +84,28 @@ export function exportLayout(ctx) {
 }
 
 // Re-applies a layout onto the currently loaded items: match by sha256, else by name.
-// One undoable edit. Returns { applied, mismatches:[string] }.
+// Returns { applied, mismatches:[string], historyRestored }.
+//
+// History: a layout carries the full edit history (objectmode.js entries with before/after
+// states). When this session is unedited and the loaded objects sit exactly where that
+// history started, the history itself is adopted (ids remapped), so undo and replay keep
+// working across sessions. Otherwise the layout is applied as ONE undoable edit whose
+// before/after states are recorded like any other.
 export function importLayout(ctx, layout) {
   if (!layout || !Array.isArray(layout.items)) throw new Error('not a hologram layout file (no items[])');
+  const om = ctx.objectMode;
+  om.ensureLive?.();
   const loaded = ctx.items();
   const used = new Set();
+  const idMap = new Map(); // layout item id -> loaded item
   const mismatches = [];
-  const before = [];
-  const snap = (it) => before.push({ it, root: xform(it.root), rootVis: it.root.visible, parts: it.parts.map((p) => ({ p, t: xform(p.mesh), v: p.mesh.visible })) });
+  const changes = [];
+  const track = (it, part, obj, fn) => {
+    const before = om.snapshot(obj);
+    fn();
+    obj.updateMatrixWorld(true);
+    changes.push({ item: it.id, part: part ? part.id : null, before, after: om.snapshot(obj) });
+  };
   let applied = 0;
 
   for (const li of layout.items) {
@@ -100,15 +114,13 @@ export function importLayout(ctx, layout) {
     if (!it) { it = loaded.find((x) => !used.has(x.id) && x.name === li.name); how = 'name'; }
     if (!it) { mismatches.push(`no loaded item for "${li.name}"`); continue; }
     used.add(it.id);
+    idMap.set(String(li.id), it);
     if (how === 'name' && li.sha256 && it.sha256) mismatches.push(`"${li.name}" matched by name only (file contents differ)`);
-    snap(it);
-    applyXform(it.root, li.transform);
-    it.root.visible = !li.hidden;
+    track(it, null, it.root, () => { applyXform(it.root, li.transform); it.root.visible = !li.hidden; });
     for (const lp of li.parts ?? []) {
       const p = it.parts.find((x) => x.local === lp.id);
       if (!p) { mismatches.push(`"${li.name}" has no part #${lp.id}`); continue; }
-      applyXform(p.mesh, lp.transform);
-      p.mesh.visible = !lp.hidden;
+      track(it, p, p.mesh, () => { applyXform(p.mesh, lp.transform); p.mesh.visible = !lp.hidden; });
     }
     applied++;
   }
@@ -119,15 +131,68 @@ export function importLayout(ctx, layout) {
     ctx.controls.target.fromArray(layout.camera.target);
     ctx.controls.update();
   }
+  let historyRestored = 0;
   if (applied) {
-    ctx.objectMode.record({ op: 'importLayout', items: [...used] }, () => {
-      for (const b of before) {
-        applyXform(b.it.root, b.root); b.it.root.visible = b.rootVis;
-        for (const q of b.parts) { applyXform(q.p.mesh, q.t); q.p.mesh.visible = q.v; }
+    const history = remapHistory(layout.edits, idMap);
+    let adopted = false;
+    if (history?.length && om.adoptHistory) {
+      // Adoption checks the chain's first `before` states against the scene as loaded, so
+      // step back to that state first; the history's final `after` states (full precision)
+      // then replace the rounded layout transforms.
+      for (let i = changes.length - 1; i >= 0; i--) {
+        const c = changes[i];
+        const obj = om.resolve(c.item, c.part);
+        const s = c.before;
+        obj.position.fromArray(s.position); obj.quaternion.fromArray(s.quaternion); obj.scale.fromArray(s.scale);
+        obj.visible = s.visible; obj.updateMatrixWorld(true);
       }
-    });
+      adopted = om.adoptHistory(history);
+      if (adopted) historyRestored = history.length;
+      else for (const c of changes) { // put the layout back on
+        const obj = om.resolve(c.item, c.part);
+        const s = c.after;
+        obj.position.fromArray(s.position); obj.quaternion.fromArray(s.quaternion); obj.scale.fromArray(s.scale);
+        obj.visible = s.visible; obj.updateMatrixWorld(true);
+      }
+    }
+    if (!adopted) {
+      const moved = changes.filter((c) => JSON.stringify(c.before) !== JSON.stringify(c.after));
+      om.record({ op: 'importLayout', items: [...used], changes: moved.length ? moved : changes, importedEdits: layout.edits?.length ?? 0 });
+    }
   }
-  return { applied, mismatches };
+  return { applied, mismatches, historyRestored };
+}
+
+// Maps a layout's edit history onto the loaded items (layout item id -> loaded item id, part
+// '<old>.<local>' -> the loaded part with the same local number). Returns null if any entry
+// can't be mapped or predates replayable history (no before/after states).
+function remapHistory(list, idMap) {
+  if (!Array.isArray(list) || !list.length) return null;
+  const mapItem = (id) => idMap.get(String(id))?.id;
+  const mapPart = (item, part) => {
+    if (part == null) return null;
+    const it = idMap.get(String(item));
+    const local = Number(String(part).split('.').pop());
+    return it?.parts.find((p) => p.local === local)?.id;
+  };
+  const out = [];
+  for (const e of list) {
+    const ch = e.changes ?? (e.before && e.after ? [{ item: e.item, part: e.part ?? null, before: e.before, after: e.after }] : null);
+    if (!ch) return null;
+    const mapped = [];
+    for (const c of ch) {
+      const item = mapItem(c.item);
+      const part = mapPart(c.item, c.part);
+      if (item == null || part === undefined) return null;
+      mapped.push({ ...c, item, part });
+    }
+    const n = JSON.parse(JSON.stringify(e));
+    if (e.changes) n.changes = mapped;
+    else { n.item = mapped[0].item; n.part = mapped[0].part; }
+    if (Array.isArray(n.items)) n.items = n.items.map((x) => (typeof x === 'object' && x ? { ...x, item: mapItem(x.item) ?? x.item } : mapItem(x) ?? x));
+    out.push(n);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- Floor plan SVG

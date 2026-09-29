@@ -10,6 +10,7 @@ const { createLibrary } = await import('./library.js' + V);
 const exporter = await import('./export.js' + V);
 const { splitComponents } = await import('./segment.js' + V);
 const { createObjectMode } = await import('./objectmode.js' + V);
+const { createMeasurements } = await import('./measurements.js' + V);
 const { placeOnFloor, frameRoom, frameSingle, ROOM_THRESHOLD_M } = await import('./framing.js' + V);
 
 const $ = (id) => document.getElementById(id);
@@ -32,6 +33,8 @@ const hoverPlain = new THREE.MeshStandardMaterial({ color: 0x8fd3ff, emissive: 0
 const selectedPlain = new THREE.MeshStandardMaterial({ color: 0x8fd3ff, emissive: 0xb07020, roughness: 0.6 });
 
 const edits = [];
+let library = null; // created below; object-mode callbacks may run before it exists
+let measurements = null;
 // items: id -> library item. Shape (also what export.js reads):
 //   { id, name, sourceFile, fileSize, sha256, kind:'scan'|'photo', status, root:Group,
 //     parts:[{id:'<item>.<local>', local, mesh}], tris, points }
@@ -45,6 +48,7 @@ startRenderLoop({
   onTick: () => {
     look.update();
     objectMode.tick();
+    measurements?.tick();
   }
 });
 
@@ -91,20 +95,31 @@ const objectMode = createObjectMode({
     modeBtn.textContent = st.mode === 'object' ? 'Mode: OBJECT (Tab)' : 'Mode: SCENE (Tab)';
     modeBtn.classList.toggle('active', st.mode === 'object');
     partsEl.textContent = `${st.parts} selectable part${st.parts === 1 ? '' : 's'}`;
+    const selName = st.selection?.kind === 'item' ? `${items.get(Number(st.selection.id.slice(5)))?.name ?? st.selection.id} (whole)` : `#${st.selection?.id}`;
     selEl.textContent = st.selection
-      ? `selected #${st.selection.id}  ·  ${st.selection.size.map((n) => n.toFixed(2)).join(' × ')} m (W×D×H)`
+      ? `selected ${selName}  ·  ${st.selection.size.map((n) => n.toFixed(2)).join(' × ')} m (W×D×H)`
       : st.mode === 'object' ? 'nothing selected' : '';
     selEl.style.display = selEl.textContent ? '' : 'none';
     undoBtn.disabled = st.edits === 0;
     showAllBtn.disabled = st.hidden === 0;
     showAllBtn.textContent = st.hidden ? `Show all (${st.hidden} hidden)` : 'Show all';
+    syncLibraryVisibility();
+    measurements?.onState(st);
   }
 });
 window.hologram.objectMode = objectMode;
+// Per-part sizes, originals and the edit history (measurements.js).
+measurements = createMeasurements({ mount: $('measurements'), toggleBtn: $('measureBtn'), objectMode, getItems: readyItems });
+window.hologram.measurements = measurements;
 modeBtn.addEventListener('click', () => objectMode.toggleMode());
 undoBtn.addEventListener('click', () => { objectMode.undo(); syncLibrary(); });
 showAllBtn.addEventListener('click', () => objectMode.showAll());
 plainBtn.textContent = plain ? 'Hologram look' : 'Plain material';
+
+// The HUD wraps onto a second row in narrow windows; the side panels start below it.
+new ResizeObserver(() => {
+  document.documentElement.style.setProperty('--hud-bottom', `${Math.round($('hud').getBoundingClientRect().bottom + 8)}px`);
+}).observe($('hud'));
 
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg;
@@ -123,21 +138,25 @@ function frameAll() {
   frameBoxOf(box);
 }
 
-const library = createLibrary($('library'), {
+library = createLibrary($('library'), {
   onToggle(id) {
     const it = items.get(id);
     if (!it) return;
-    it.root.visible = !it.root.visible;
-    if (String(objectMode.selectedId ?? '').startsWith(`${id}.`)) objectMode.select(null);
+    // A recorded edit (hide/show of the whole item), so it is in the history and undoable.
+    objectMode.setVisible(objectMode.itemKey(id), !it.root.visible);
     syncLibrary();
-    objectMode.refresh();
   },
   onFocus(id) { const it = items.get(id); if (it) frameBoxOf(drawnBox(it.root)); },
   onRemove(id) { removeItem(id); }
 });
 function syncLibrary() {
-  for (const it of items.values()) library.update(it.id, { visible: it.root.visible });
+  syncLibraryVisibility();
   updateInfo();
+}
+// Undo / replay can flip an item's visibility; keep the Hide/Show buttons honest.
+function syncLibraryVisibility() {
+  if (!library) return;
+  for (const it of items.values()) if (it.status === 'ready') library.update(it.id, { visible: it.root.visible });
 }
 
 function updateInfo() {
@@ -150,6 +169,7 @@ function removeItem(id) {
   const it = items.get(id);
   if (!it) return;
   objectMode.removeItem(id);
+  measurements.removeItem(id);
   scene.remove(it.root);
   it.root.traverse((c) => {
     c.geometry?.dispose();
@@ -244,11 +264,13 @@ async function pump() {
       items.set(id, item);
       scene.add(item.root);
       objectMode.addParts(item.parts.map(({ id: pid, mesh }) => ({ id: pid, mesh })));
+      objectMode.addItem(id, item.root);
       applyMaterials();
       window.hologram.model ??= item.root;
       library.update(id, { status: 'ready', message: '', tris: built.tris, points: built.points, progress: 1 });
       frameAll();
       updateInfo();
+      measurements.addItem(item);
       window.hologram.stats = { name: group.name, tris: built.tris, points: built.points, parts: item.parts.length, components: built.components, splitMs: built.ms, parseMs: performance.now() - t0 };
     } catch (err) {
       console.warn('load failed', group.name, err);
@@ -290,6 +312,7 @@ window.loadScanUrl = loadUrl;
 function arrangeAll() {
   const list = readyItems();
   if (!list.length) return setStatus('nothing to arrange', true);
+  objectMode.ensureLive();
   const rows = list.map((it) => {
     const b = drawnBox(it.root);
     return { it, b, w: b.max.x - b.min.x, area: (b.max.x - b.min.x) * (b.max.z - b.min.z) };
@@ -303,11 +326,13 @@ function arrangeAll() {
     moves.push({ it: r.it, dx, dz, from: r.it.root.position.clone() });
     cursor += r.w + GAP;
   }
-  for (const m of moves) { m.it.root.position.x += m.dx; m.it.root.position.z += m.dz; m.it.root.updateMatrixWorld(true); }
-  objectMode.record(
-    { op: 'arrange', items: moves.map((m) => ({ item: m.it.id, dx: m.dx, dz: m.dz })) },
-    () => moves.forEach((m) => m.it.root.position.copy(m.from))
-  );
+  const changes = [];
+  for (const m of moves) {
+    const before = objectMode.snapshot(m.it.root);
+    m.it.root.position.x += m.dx; m.it.root.position.z += m.dz; m.it.root.updateMatrixWorld(true);
+    changes.push({ item: m.it.id, part: null, before, after: objectMode.snapshot(m.it.root) });
+  }
+  objectMode.record({ op: 'arrange', items: moves.map((m) => ({ item: m.it.id, dx: m.dx, dz: m.dz })), changes });
   frameAll();
   setStatus(`arranged ${moves.length} item${moves.length === 1 ? '' : 's'}`);
 }
@@ -388,7 +413,7 @@ $('folder').addEventListener('click', () => folderPicker.click());
 for (const p of [picker, folderPicker]) {
   p.addEventListener('change', () => { if (p.files.length) loadFiles([...p.files]); p.value = ''; });
 }
-$('sample').addEventListener('click', () => loadUrl('../assets/chair/chair_clean.obj'));
+$('sample').addEventListener('click', () => loadUrl('../assets/chair/chair_detail.ply'));
 
 window.addEventListener('keydown', (e) => {
   if (e.target.matches?.('input, textarea')) return;

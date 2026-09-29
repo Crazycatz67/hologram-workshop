@@ -59,7 +59,7 @@
     #exportMenu hr { border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 4px 0; }
 
     #library {
-      position: fixed; top: 56px; right: 12px; bottom: 12px; width: 290px; display: flex; flex-direction: column;
+      position: fixed; top: var(--hud-bottom, 56px); right: 12px; bottom: 12px; width: 290px; display: flex; flex-direction: column;
       background: rgba(8,14,22,0.82); border: 1px solid rgba(120,200,255,0.16); border-radius: 8px;
       backdrop-filter: blur(8px); overflow: hidden;
     }
@@ -77,6 +77,55 @@
     .libBar div { height: 100%; background: #4fd1ff; border-radius: 2px; }
     .libBtns { display: flex; gap: 4px; }
     .libBtns button { padding: 2px 7px; font-size: 11px; }
+
+    /* Measurements tab (measurements.js): a left drawer, calm and static (no animation). */
+    #measurements {
+      position: fixed; top: var(--hud-bottom, 56px); left: 12px; width: min(330px, calc(100vw - 24px)); max-height: calc(100% - var(--hud-bottom, 56px) - 12px);
+      display: flex; flex-direction: column; z-index: 4;
+      background: rgba(8,14,22,0.86); border: 1px solid rgba(120,200,255,0.16); border-radius: 8px;
+      backdrop-filter: blur(8px); overflow: hidden; font-size: 12px;
+    }
+    body.mt-open #guide { display: none; }
+    .mt-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    #measurements.collapsed .mt-head { border-bottom: 0; }
+    .mt-head button { border: 0; background: none; padding: 2px 4px; }
+    .mt-title { color: #c9dcec !important; font-weight: 600; flex: 1; text-align: left; }
+    .mt-unit { border: 1px solid rgba(79,209,255,0.4) !important; }
+    .mt-body { overflow-y: auto; padding: 4px 6px 8px; }
+    .mt-empty { color: #6b7d94; padding: 6px 4px; line-height: 1.5; }
+    .mt-sec { border-top: 1px solid rgba(255,255,255,0.06); }
+    .mt-sec:first-child { border-top: 0; }
+    .mt-sechead { display: flex; width: 100%; gap: 8px; align-items: baseline; border: 0; background: none; color: #c9dcec; padding: 7px 2px; text-align: left; }
+    .mt-itemname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    .mt-count, .mt-caret { color: #6b7d94; }
+    .mt-row { padding: 5px 7px; margin: 0 0 4px; border: 1px solid rgba(255,255,255,0.06); border-left: 2px solid transparent; border-radius: 4px; background: rgba(0,0,0,0.25); cursor: pointer; }
+    .mt-row.mt-whole { background: rgba(79,209,255,0.05); }
+    .mt-row.hovered { background: rgba(214,251,255,0.07); }
+    .mt-row.selected { border-left-color: #ffb040; }
+    .mt-row.is-hidden { opacity: 0.5; }
+    .mt-rowtop { display: flex; gap: 6px; align-items: baseline; }
+    .mt-name { color: #c9dcec; flex: 1; }
+    .mt-tags { color: #b69cff; font-size: 11px; }
+    .mt-dims { display: flex; flex-wrap: wrap; gap: 2px 10px; color: #9db4d0; margin-top: 2px; }
+    .mt-dim b { color: #6b7d94; font-weight: 400; }
+    .mt-dim.changed { color: #ffd166; }
+    .mt-dim .mt-was { color: #8a97a8; }
+    .mt-dim i { font-style: normal; }
+    .mt-extra { color: #7f93a8; font-size: 11px; margin-top: 2px; }
+    .mt-redesign { margin-top: 6px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.1); cursor: default; display: grid; gap: 5px; }
+    .mt-rdtitle { color: #8fb7cf; font-size: 11px; }
+    .mt-rdrow { display: flex; gap: 5px; align-items: center; }
+    .mt-redesign select, .mt-redesign input { font: inherit; color: #c9dcec; background: rgba(0,0,0,0.4); border: 1px solid rgba(120,200,255,0.25); border-radius: 3px; padding: 2px 4px; }
+    .mt-redesign input { width: 72px; }
+    .mt-redesign button { padding: 2px 7px; font-size: 11px; justify-self: start; }
+    .mt-rdunit { color: #6b7d94; }
+    .mt-rdmsg { color: #7f93a8; font-size: 11px; }
+    .mt-rdmsg:empty { display: none; }
+    .mt-hist { max-height: 220px; overflow-y: auto; padding-bottom: 4px; }
+    .mt-hrow { display: flex; gap: 8px; padding: 2px 4px; color: #9db4d0; border-radius: 3px; }
+    .mt-hrow.clickable { cursor: pointer; }
+    .mt-hrow.clickable:hover { background: rgba(79,209,255,0.08); }
+    .mt-htime { color: #6b7d94; }
 
     #drop {
       position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
@@ -112,6 +161,7 @@
     </div>
     <button id="sample">Load sample</button>
     <button id="mode">Mode: SCENE (Tab)</button>
+    <button id="measureBtn" title="per-part measurements and history">Measure</button>
     <button id="undo" disabled>Undo</button>
     <button id="showall" disabled>Show all</button>
     <button id="plain">Plain material</button>
@@ -125,7 +175,7 @@
   <div id="guide">
     <p><b>Capture:</b> Scaniverse <b>Object</b> mode for single items, <b>Area</b> mode for rooms. Export as <b>GLB</b> or <b>OBJ</b>.</p>
     <p>Rooms (over 2.5 m) open as a dollhouse view; smaller scans orbit like an object. Drag to orbit, scroll to zoom, R to auto-rotate.</p>
-    <p><b>Object mode</b> (Tab): hover highlights, click selects, drag moves along the floor, <b>Shift+scroll</b> rotates, <b>Del</b> hides, <b>H</b> shows all, <b>Esc</b> deselects, <b>Ctrl/Cmd+Z</b> undoes.</p>
+    <p><b>Object mode</b> (Tab): hover highlights, click selects, drag moves along the floor, <b>Shift+scroll</b> rotates, <b>Alt/Option+scroll</b> resizes, <b>Del</b> hides, <b>H</b> shows all, <b>Esc</b> deselects, <b>Ctrl/Cmd+Z</b> undoes.</p>
     <p>Files are read in your browser and never uploaded.</p>
   </div>
   <div id="library">
@@ -133,6 +183,7 @@
     <div id="libList"></div>
     <div id="libEmpty">Drop scans or photos anywhere. Include an OBJ's .mtl and textures, or a .gltf's .bin, in the same drop and they are matched up automatically. Photos become 2.5D holograms.</div>
   </div>
+  <div id="measurements" aria-label="Measurements"></div>
   <div id="drop">Drop scans or photos to add</div>
   <input id="picker" type="file" multiple hidden />
   <input id="folderPicker" type="file" webkitdirectory multiple hidden />
