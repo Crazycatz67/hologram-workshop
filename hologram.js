@@ -16,6 +16,7 @@ const { drawHands, sizeOverlayTo } = await import('./overlay.js' + V);
 const { createManipulator, MODE, CHANNELS } = await import('./manipulator.js' + V);
 const { default: HolographicMaterial } = await import('./HolographicMaterial.js' + V);
 const { createGhostHands } = await import('./ghostHands.js' + V);
+const { prepareHologram, enableSingleLayer } = await import('./hologramLook.js' + V);
 const { smoothHandLandmarks, resetLandmarkSmoothing } = await import('./smoothLandmarks.js' + V);
 const { createMeasurePanel } = await import('./measurePanel.js' + V);
 const { MODELS } = await import('./models.js' + V);
@@ -68,6 +69,9 @@ const hologramMaterial = new HolographicMaterial({
   enableBlinking: true,
   blinkFresnelOnly: true
 });
+
+// Photosafety (BUGS.md #14): one-layer rendering so stacked surfaces can't bloom to white.
+enableSingleLayer(scene, [hologramMaterial]);
 
 const ghostHands = createGhostHands(scene, HAND_CONNECTIONS);
 const isFist = (h) => h.fistLike;
@@ -134,6 +138,8 @@ async function loadModelById(id) {
   object.traverse((child) => {
     if (child.isMesh) child.material = hologramMaterial;
   });
+  // Smooth the shading normals on rough scans (stops rim sparkle; no vertex moves).
+  prepareHologram(object);
   scene.add(object);
   // Both of these must be reassigned together, synchronously: the render loop's onTick reads
   // window.hologram.model live every frame for ghost-hands, but reads the closed-over
@@ -209,7 +215,7 @@ function stopTracking() {
   video.srcObject = null;
   hands = [];
   resetLandmarkSmoothing();
-  hologramMaterial.uniforms.hologramBrightness.value = MODE_BRIGHTNESS.idle;
+  hologramMaterial.setBrightness(MODE_BRIGHTNESS.idle);
   overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
   ghostHands.update([], { camera, object: window.hologram.model ?? scene, aspect: 1 });
   setLive(false, 'camera off');
@@ -268,7 +274,8 @@ startRenderLoop({
       const mode = manipulator?.update(hands, aspect, now) ?? MODE.IDLE;
       modeEl.textContent = mode;
       modeEl.className = mode;
-      hologramMaterial.uniforms.hologramBrightness.value = MODE_BRIGHTNESS[mode] ?? 1.0;
+      // Eased, never a step: a brightness jump on every gesture start/stop is a flash.
+      hologramMaterial.setBrightness(MODE_BRIGHTNESS[mode] ?? 1.0);
       updateLive(mode);
     }
 

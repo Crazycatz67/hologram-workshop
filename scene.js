@@ -76,6 +76,9 @@ export function startRenderLoop({ renderer, scene, camera, controls, onTick, onF
     }
     resizeIfNeeded(renderer, camera);
     controls.update();
-    renderer.render(scene, camera);
+    // Opt-in (hologramLook.enableSingleLayer): a depth-only pass first, so the additive
+    // hologram only glows where it is the front-most surface. Off = exactly as before.
+    if (scene.userData.renderSingleLayer) scene.userData.renderSingleLayer(renderer, scene, camera);
+    else renderer.render(scene, camera);
   });
 }

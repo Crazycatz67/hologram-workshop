@@ -6,10 +6,32 @@
  * it isn't published to npm, and the repo itself is a private Vite demo whose only
  * reusable part is this one file. Call `.update()` once per frame to advance the
  * animated time uniform; nothing else here needs a build step.
+ *
+ * PHOTOSAFETY REWRITE (2026-09-29) -- deliberate deviations from the vendored shader,
+ * measured with safety-test.html (WCAG 2.3.1: at most 3 flashes in any 1 s):
+ *   - The "blink" was fract(cos(t) * 43758.5) -- a random hash whose input moves far enough
+ *     every frame to return a NEW random value every frame. With the v1 settings the rim
+ *     jumped between 0% and 100% brightness ~60 times a second: 27 flashes/s measured.
+ *     Replaced by a slow sine "breathing" (0.3 Hz) whose depth is capped at 15%.
+ *   - Scanlines were computed in screen UV at 60 x scanlineSize cycles per screen -- 2400
+ *     at v1's scanlineSize 40, far finer than a pixel, i.e. aliasing noise that re-rolls
+ *     as anything moves (shimmer). They are now drawn in PIXEL space with a period that
+ *     can't go below 4 px, plus a soft, slow sweep band instead of a hard-edged gate.
+ *   - The whole-object pulse swung brightness 25% -> 100%; now a gentle +-10%.
+ *   - All animation runs on an internal clock scaled by `motion` (0 = still), which
+ *     defaults to 0 when the OS asks for reduced motion.
+ *   - Brightness changes (v1 brightens on every gesture) ease over ~0.3 s via
+ *     setBrightness() instead of jumping.
+ *   - `realism` blends the object's real colour (texture map or vertex colours) back in,
+ *     so scan and photo detail isn't lost when you want it.
+ * The additive "bloom" stacking and rough-scan sparkle are geometry-side problems and are
+ * fixed in hologramLook.js (single-layer depth pre-pass, shading-normal smoothing).
  */
 import { ShaderMaterial, Clock, Uniform, Color, NormalBlending, AdditiveBlending, FrontSide, BackSide, DoubleSide } from 'three';
 
 class HolographicMaterial extends ShaderMaterial {
+
+  static BRIGHTNESS_EASE_SECONDS = 0.3;
 
   /**
    * Create a HolographicMaterial.
@@ -45,6 +67,7 @@ class HolographicMaterial extends ShaderMaterial {
       varying vec4 vPos;
       varying vec3 vNormalW;
       varying vec3 vPositionW;
+      varying vec3 vColorH;
 
       #include <common>
       #include <uv_pars_vertex>
@@ -83,14 +106,20 @@ class HolographicMaterial extends ShaderMaterial {
         #include <envmap_vertex>
         #include <fog_vertex>
 
-        mat4 modelViewProjectionMatrix = projectionMatrix * modelViewMatrix;
-
         vUv = uv;
-        vPos = projectionMatrix * modelViewMatrix * vec4( transformed, 1.0 );
+        #ifdef USE_COLOR
+          vColorH = color;
+        #else
+          vColorH = vec3(1.0);
+        #endif
+        // gl_Position comes from <project_vertex> above, exactly as three's own materials
+        // compute it. The vendored shader overwrote it with (projection * modelView) * p --
+        // same maths, different rounding -- which z-fought hologramLook's depth pre-pass
+        // (measured: 17 flashes/s from that alone). vPos reuses it for the same reason.
+        vPos = gl_Position;
         vPositionW = vec3( vec4( transformed, 1.0 ) * modelMatrix);
         vNormalW = normalize( vec3( vec4( normal, 0.0 ) * modelMatrix ) );
-        
-        gl_Position = modelViewProjectionMatrix * vec4( transformed, 1.0 );
+
 
       }`
 
@@ -100,8 +129,9 @@ class HolographicMaterial extends ShaderMaterial {
       varying vec3 vPositionW;
       varying vec4 vPos;
       varying vec3 vNormalW;
+      varying vec3 vColorH;
       
-      uniform float time;
+      uniform float time;              // animated time: already scaled by motion (see update)
       uniform float fresnelOpacity;
       uniform float scanlineSize;
       uniform float fresnelAmount;
@@ -109,57 +139,54 @@ class HolographicMaterial extends ShaderMaterial {
       uniform float hologramBrightness;
       uniform float hologramOpacity;
       uniform bool blinkFresnelOnly;
-      uniform bool enableBlinking;
+      uniform float blinkAmount;       // 0..0.15: depth of the slow breathing (was a strobe)
+      uniform float scanlinePeriod;    // pixels per scanline, never below 4 (no aliasing)
       uniform vec3 hologramColor;
+      uniform float realism;           // 0 = pure hologram, 1 = the object's real colours
+      uniform bool useMap;
+      uniform sampler2D baseMap;
 
-      float flicker( float amt, float time ) {return clamp( fract( cos( time ) * 43758.5453123 ), amt, 1.0 );}
       float random(in float a, in float b) { return fract((cos(dot(vec2(a,b) ,vec2(12.9898,78.233))) * 43758.5453)); }
 
       void main() {
-        vec2 vCoords = vPos.xy;
-        vCoords /= vPos.w;
-        vCoords = vCoords * 0.5 + 0.5;
-        vec2 myUV = fract( vCoords );
+        vec2 vCoords = vPos.xy / vPos.w * 0.5 + 0.5;
 
-        // Defines hologram main color
-        vec4 hologramColor = vec4(hologramColor, mix(hologramBrightness, vUv.y, 0.5));
+        // Body colour (unchanged from the vendored shader)
+        float bodyAlpha = mix(hologramBrightness, vUv.y, 0.5);
+        vec3 body = hologramColor * bodyAlpha;
 
-        // Add scanlines
-        float scanlines = 10.;
-        scanlines += 20. * sin(time *signalSpeed * 20.8 - myUV.y * 60. * scanlineSize);
-        scanlines *= smoothstep(1.3 * cos(time *signalSpeed + myUV.y * scanlineSize), 0.78, 0.9);
-        scanlines *= max(0.25, sin(time *signalSpeed) * 1.0);        
-        
-        // Scanlines offsets
-        float r = random(vUv.x, vUv.y);
-        float g = random(vUv.y * 20.2, 	vUv.y * .2);
-        float b = random(vUv.y * .9, 	vUv.y * .2);
+        // Scanlines in pixel space: fine lines that can't alias, drifting slowly
+        float period = max(scanlinePeriod, 4.0);
+        float lines = 0.5 + 0.5 * sin(gl_FragCoord.y * 6.2831853 / period - time * signalSpeed * 3.0);
+        // One soft, wide band sweeping down the screen (~20 s per pass at v1 speed)
+        float sweepPos = fract(vCoords.y * 0.5 + time * signalSpeed * 0.08);
+        float sweep = exp(-pow((sweepPos - 0.5) * 7.0, 2.0));
+        float grain = random(vUv.x, vUv.y);
+        float pulse = 0.9 + 0.1 * sin(time * signalSpeed);
+        vec3 scan = hologramColor * (0.10 * lines + 0.12 * sweep) * (0.6 + 0.4 * grain);
+        vec3 holoBody = (body + scan) * pulse;
 
-        // Scanline composition
-        hologramColor += vec4(r*scanlines, b*scanlines, r, 1.0) / 84.;
-        vec4 scanlineMix = mix(vec4(0.0), hologramColor, hologramColor.a);
-
-        // Calculates fresnel
+        // Fresnel rim (unchanged formula)
         vec3 viewDirectionW = normalize(cameraPosition - vPositionW);
-        float fresnelEffect = dot(viewDirectionW, vNormalW) * (1.6 - fresnelOpacity/2.);
+        vec3 N = normalize(vNormalW);
+        float fresnelEffect = dot(viewDirectionW, N) * (1.6 - fresnelOpacity/2.);
         fresnelEffect = clamp(fresnelAmount - fresnelEffect, 0., fresnelOpacity);
 
-        // Blinkin effect
-        //Suggested by Octano - https://x.com/OtanoDesign?s=20
-        float blinkValue = enableBlinking ? 0.6 - signalSpeed : 1.0;
-        float blink = flicker(blinkValue, time * signalSpeed * .02);
-    
-        // Final shader composition
-        vec3 finalColor;
+        // Slow breathing instead of the per-frame random blink (0.3 Hz, depth capped)
+        float breathe = 1.0 - clamp(blinkAmount, 0.0, 0.15) * (0.5 + 0.5 * sin(time * 1.885));
 
-        if(blinkFresnelOnly){
-          finalColor = scanlineMix.rgb + fresnelEffect * blink;
-        }else{
-          finalColor = scanlineMix.rgb * blink + fresnelEffect;
-        }
+        vec3 holo = blinkFresnelOnly
+          ? holoBody + fresnelEffect * breathe
+          : holoBody * breathe + fresnelEffect;
 
-        gl_FragColor = vec4( finalColor, hologramOpacity);
+        // Realism: the object's own colour, head-lit, with a faint hologram rim kept on
+        vec3 base = vec3(0.8);
+        if (useMap) base = texture2D(baseMap, vUv).rgb;
+        base *= vColorH;
+        float facing = abs(dot(viewDirectionW, N));
+        vec3 real = pow(base * (0.35 + 0.65 * facing), vec3(1.0 / 2.2)) + hologramColor * fresnelEffect * 0.35;
 
+        gl_FragColor = vec4(mix(holo, real, realism), mix(hologramOpacity, 1.0, realism));
       }`
 
       // Set default values or modify existing properties if needed
@@ -233,9 +260,21 @@ class HolographicMaterial extends ShaderMaterial {
          * @default 1.0
          */
         hologramOpacity: new Uniform(parameters.hologramOpacity !== undefined ? parameters.hologramOpacity : 1.0),
+
+        // Photosafety rewrite -- see the header. enableBlinking stays for API compatibility
+        // and now just chooses between a gentle breathing depth and none.
+        blinkAmount: new Uniform(Math.min(0.15, parameters.blinkAmount !== undefined
+          ? parameters.blinkAmount : (parameters.enableBlinking === false ? 0 : 0.08))),
+        scanlinePeriod: new Uniform(parameters.scanlinePeriod !== undefined ? parameters.scanlinePeriod : 6.0),
+        realism: new Uniform(parameters.realism !== undefined ? parameters.realism : 0.0),
+        useMap: new Uniform(false),
+        baseMap: new Uniform(null),
       };
   
       this.clock = new Clock()
+      // 1 = normal, 0 = still. Defaults to still when the OS asks for reduced motion.
+      const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      this.motion = parameters.motion !== undefined ? parameters.motion : (reduce ? 0 : 1);
       // Deviation from the vendored source (2026-09-05): the original called
       // this.setValues(parameters) here, passing through the whole parameters object.
       // Every genuine THREE.Material property it could set (depthTest, blending,
@@ -250,9 +289,45 @@ class HolographicMaterial extends ShaderMaterial {
 
   }
 
+  /**
+   * Advance the animation. Pass `nowSeconds` for deterministic rendering (safety-test.html);
+   * otherwise the material's own clock is used. The shader's time is an internal clock
+   * scaled by `motion`, so changing motion never makes the animation jump.
+   */
+  update(nowSeconds) {
+    const now = nowSeconds ?? this.clock.getElapsedTime();
+    const dt = Math.min(0.1, Math.max(0, now - (this._lastNow ?? now)));
+    this._lastNow = now;
+    this._animTime = (this._animTime ?? 0) + dt * this.motion;
+    this.uniforms.time.value = this._animTime;
 
-  update() {
-    this.uniforms.time.value = this.clock.getElapsedTime();
+    const b = this.uniforms.hologramBrightness;
+    if (this._brightnessTarget !== undefined && b.value !== this._brightnessTarget) {
+      const k = 1 - Math.exp(-dt / HolographicMaterial.BRIGHTNESS_EASE_SECONDS);
+      b.value += (this._brightnessTarget - b.value) * k;
+      if (Math.abs(b.value - this._brightnessTarget) < 1e-3) b.value = this._brightnessTarget;
+    }
+  }
+
+  /** Change brightness smoothly (a step change is a flash). `instant` for resets. */
+  setBrightness(value, { instant = false } = {}) {
+    this._brightnessTarget = value;
+    if (instant) this.uniforms.hologramBrightness.value = value;
+  }
+
+  /**
+   * A copy for one mesh that needs its own colour source (a scan texture or vertex
+   * colours) while sharing every animated/look uniform with this material by reference --
+   * so one update() call and one slider still drive every mesh.
+   */
+  variant({ map = null, vertexColors = false } = {}) {
+    const m = new HolographicMaterial();
+    m.uniforms = { ...this.uniforms, useMap: new Uniform(!!map), baseMap: new Uniform(map) };
+    m.vertexColors = vertexColors;
+    for (const k of ['depthTest', 'depthWrite', 'depthFunc', 'blending', 'transparent', 'side']) m[k] = this[k];
+    m.update = () => {};          // the parent drives the shared uniforms
+    m.setBrightness = (...a) => this.setBrightness(...a);
+    return m;
   }
 
 }

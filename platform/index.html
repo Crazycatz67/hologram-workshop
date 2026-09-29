@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Hologram Platform — P1: Universal Controls</title>
+  <title>Hologram Platform — Library</title>
   <style>
     html, body { margin: 0; height: 100%; background: #0b0d10; overflow: hidden; }
     canvas { display: block; width: 100%; height: 100%; }
@@ -42,6 +42,35 @@
     #guide p { margin: 0 0 6px; }
     #guide p:last-child { margin: 0; color: #6b7d94; }
 
+    #hud > #exportwrap { position: relative; padding: 0; border: 0; background: none; }
+    #exportMenu {
+      position: absolute; top: 100%; left: 0; margin-top: 4px; min-width: 190px; z-index: 5;
+      background: rgba(8,14,22,0.95); border: 1px solid rgba(120,200,255,0.25); border-radius: 6px; padding: 4px;
+    }
+    #exportMenu[hidden] { display: none; }
+    #exportMenu button { display: block; width: 100%; text-align: left; border: 0; background: none; }
+    #exportMenu hr { border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 4px 0; }
+
+    #library {
+      position: fixed; top: 56px; right: 12px; bottom: 12px; width: 290px; display: flex; flex-direction: column;
+      background: rgba(8,14,22,0.82); border: 1px solid rgba(120,200,255,0.16); border-radius: 8px;
+      backdrop-filter: blur(8px); overflow: hidden;
+    }
+    #library h2 { margin: 0; padding: 9px 12px; font-size: 12px; font-weight: 600; color: #c9dcec; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    #libCount { color: #6b7d94; font-weight: 400; }
+    #libList { overflow-y: auto; flex: 1; padding: 6px; }
+    #libEmpty { padding: 12px; color: #6b7d94; font-size: 12px; line-height: 1.5; }
+    .libRow { padding: 7px 8px; margin-bottom: 5px; border: 1px solid rgba(255,255,255,0.07); border-radius: 5px; background: rgba(0,0,0,0.3); }
+    .libRow[data-status="error"] { border-color: rgba(255,92,92,0.5); }
+    .libName { color: #c9dcec; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .libMeta { color: #6b7d94; font-size: 11px; margin: 2px 0 4px; word-break: break-word; }
+    .libRow[data-status="error"] .libMeta { color: #ff8a8a; }
+    .libRow[data-status="ready"] .libMeta { color: #7fb69a; }
+    .libBar { height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; margin-bottom: 5px; }
+    .libBar div { height: 100%; background: #4fd1ff; border-radius: 2px; }
+    .libBtns { display: flex; gap: 4px; }
+    .libBtns button { padding: 2px 7px; font-size: 11px; }
+
     #drop {
       position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
       background: rgba(11,13,16,0.7); border: 3px dashed #4fd1ff; box-sizing: border-box;
@@ -60,13 +89,26 @@
 </head>
 <body>
   <div id="hud">
-    <button id="pick">Choose file…</button>
+    <button id="pick">Add files…</button>
+    <button id="folder">Add folder…</button>
+    <button id="arrange">Arrange all</button>
+    <div id="exportwrap">
+      <button id="exportBtn">Export ▾</button>
+      <div id="exportMenu" hidden>
+        <button data-act="glb">Scene as GLB</button>
+        <button data-act="layout">Layout JSON</button>
+        <button data-act="import">Import layout…</button>
+        <hr />
+        <button data-act="plan">Floor plan SVG</button>
+        <button data-act="png">Screenshot PNG</button>
+      </div>
+    </div>
     <button id="sample">Load sample</button>
     <button id="mode">Mode: SCENE (Tab)</button>
     <button id="undo" disabled>Undo</button>
     <button id="showall" disabled>Show all</button>
     <button id="plain">Plain material</button>
-    <span id="status">drop a .glb / .obj / .ply anywhere</span>
+    <span id="status">drop scans (.glb .gltf .obj .ply) or photos anywhere</span>
     <span id="info"></span>
     <span id="parts"></span>
     <span id="sel"></span>
@@ -78,8 +120,15 @@
     <p><b>Object mode</b> (Tab): hover highlights, click selects, drag moves along the floor, <b>Shift+scroll</b> rotates, <b>Del</b> hides, <b>H</b> shows all, <b>Esc</b> deselects, <b>Ctrl/Cmd+Z</b> undoes.</p>
     <p>Files are read in your browser and never uploaded.</p>
   </div>
-  <div id="drop">Drop scan to load</div>
-  <input id="picker" type="file" accept=".glb,.gltf,.obj,.mtl,.ply" multiple hidden />
+  <div id="library">
+    <h2>Library <span id="libCount"></span></h2>
+    <div id="libList"></div>
+    <div id="libEmpty">Drop scans or photos anywhere. Include an OBJ's .mtl and textures, or a .gltf's .bin, in the same drop and they are matched up automatically. Photos become 2.5D holograms.</div>
+  </div>
+  <div id="drop">Drop scans or photos to add</div>
+  <input id="picker" type="file" multiple hidden />
+  <input id="folderPicker" type="file" webkitdirectory multiple hidden />
+  <input id="layoutPicker" type="file" accept=".json,application/json" hidden />
 
   <script type="module">
     import(`./main.js?v=${Date.now()}`);

@@ -30,7 +30,9 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
   const ndc = new THREE.Vector2();
 
   const byId = (id) => parts.find((p) => p.id === id)?.mesh ?? null;
-  const visibleMeshes = () => parts.filter((p) => p.mesh.visible).map((p) => p.mesh);
+  // Visible means the part AND every ancestor (a hidden library item hides all its parts).
+  const shown = (m) => { for (let o = m; o; o = o.parent) if (!o.visible) return false; return true; };
+  const visibleMeshes = () => parts.filter((p) => shown(p.mesh)).map((p) => p.mesh);
   const hiddenCount = () => parts.filter((p) => !p.mesh.visible).length;
 
   function paint() {
@@ -46,6 +48,8 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
   }
 
   function record(edit, undo) {
+    // Multi-model: every part edit carries the id of the library item it belongs to.
+    if (edit.part != null && edit.item == null) edit.item = byId(edit.part)?.userData.itemId ?? null;
     edits.push(edit);
     undoStack.push(undo);
     notify();
@@ -74,6 +78,21 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
       notify();
     },
 
+    // Multi-model support: parts are added/removed per library item without clearing the log.
+    addParts(list) { parts = parts.concat(list); notify(); },
+    removeItem(itemId) {
+      const gone = new Set(parts.filter((p) => p.mesh.userData.itemId === itemId).map((p) => p.id));
+      parts = parts.filter((p) => !gone.has(p.id));
+      for (let i = edits.length - 1; i >= 0; i--) {
+        if (edits[i].item === itemId) { edits.splice(i, 1); undoStack.splice(i, 1); }
+      }
+      if (gone.has(hoverId)) hoverId = null;
+      if (gone.has(selectedId)) selectedId = null;
+      lastRotate = null;
+      notify();
+    },
+    record(edit, undo) { lastRotate = null; record(edit, undo); },
+
     setMode(m) {
       if (m === mode) return;
       mode = m;
@@ -85,7 +104,7 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
 
     hover(id) { if (id !== hoverId) { hoverId = id; notify(); } },
     select(id) {
-      if (id != null && !byId(id)?.visible) id = null;
+      if (id != null && !shown(byId(id) ?? { visible: false })) id = null;
       if (id !== selectedId) { selectedId = id; lastRotate = null; notify(); }
     },
     pick,

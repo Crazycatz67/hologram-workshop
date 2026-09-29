@@ -7,6 +7,7 @@ const { createScene, startRenderLoop } = await import('./scene.js' + V);
 const { loadModel, frameObject } = await import('./loadModel.js' + V);
 const { default: HolographicMaterial } = await import('./HolographicMaterial.js' + V);
 const { createMeasurePanel } = await import('./measurePanel.js' + V);
+const { prepareHologram, enableSingleLayer } = await import('./hologramLook.js' + V);
 
 const statusEl = document.getElementById('status');
 const fpsEl = document.getElementById('fps');
@@ -65,6 +66,9 @@ loadModel({ objPath })
     object.traverse((child) => {
       if (child.isMesh) child.material = surface;
     });
+    // Photosafety (BUGS.md #14): smooth rough-scan shading, one-layer rendering.
+    prepareHologram(object);
+    if (!plain) enableSingleLayer(scene, [hologramMaterial]);
     scene.add(object);
     window.hologram.model = object;
     const { size } = frameObject(object, camera, controls);

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>photo.js test</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0f14;color:#cfe;font:13px ui-monospace,monospace}
+  #hud{position:fixed;top:8px;left:8px;background:#0008;padding:8px 10px;border-radius:6px;max-width:420px;z-index:2}
+  pre{margin:6px 0 0;white-space:pre-wrap}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/" } }
+</script></head>
+<body>
+<div id="hud"><input type="file" id="f" accept="image/*"><pre id="log">pick a photo</pre></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { photoToMesh } from './photo.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio); renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b0f14);
+const cam = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.01, 50);
+cam.position.set(0.4, 0.7, 2.2);
+const ctl = new OrbitControls(cam, renderer.domElement); ctl.target.set(0, 0.5, 0.15); ctl.update();
+scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.5); sun.position.set(1, 2, 3); scene.add(sun);
+addEventListener('resize', () => { cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+renderer.setAnimationLoop(() => renderer.render(scene, cam));
+
+const log = document.getElementById('log');
+let cur = null;
+async function run(file) {
+  const lines = [];
+  const p = (s) => { lines.push(s); log.textContent = lines.join('\n'); };
+  const stage = {};
+  try {
+    const mesh = await photoToMesh(file, { onProgress: (e) => { stage[e.stage] = e.message; log.textContent = lines.concat(Object.values(stage)).join('\n'); } });
+    if (cur) { scene.remove(cur); cur.geometry.dispose(); }
+    cur = mesh; scene.add(mesh);
+    const t = mesh.userData.timings, g = mesh.geometry;
+    const bb = g.boundingBox.getSize(new THREE.Vector3());
+    window.__mesh = mesh;
+    p(`device: ${mesh.userData.device}`);
+    p(`model load: ${t.modelMs.toFixed(0)} ms (0 if cached in-page)`);
+    p(`depth: ${t.depthMs.toFixed(0)} ms`);
+    p(`mesh: ${t.meshMs.toFixed(0)} ms`);
+    p(`triangles: ${g.index.count / 3}  vertices: ${g.attributes.position.count}`);
+    p(`size m: ${bb.x.toFixed(2)} x ${bb.y.toFixed(2)} x ${bb.z.toFixed(2)}  minY ${g.boundingBox.min.y.toFixed(3)}`);
+    p(mesh.userData.sizeNote);
+  } catch (e) { p('ERROR: ' + e.message); console.error(e); }
+}
+window.runPhoto = run;
+document.getElementById('f').addEventListener('change', (e) => e.target.files[0] && run(e.target.files[0]));
+</script></body></html>

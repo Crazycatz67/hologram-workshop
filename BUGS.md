@@ -193,3 +193,30 @@ Also fixed in this pass: analyze_scan.py told users to paste a `CHAIR_TRIM` into
 `trimByCylinder`, which no page calls any more. It now prints clean_scan.py's
 `--crop-center-x/--crop-center-z/--crop-radius` flags. The printed values were verified with a
 `clean_scan.py --dry-run`.
+
+## 14. [A-v1] Hologram strobed ~27 times a second — photosensitivity hazard
+
+**Status: FIXED (verified offline)** (2026-09-29). Reported by the owner as "blooming and
+flashing … people who can't handle the flashing". Measured with the new
+`safety-test.html` (WCAG 2.3.1: max 3 flashes in any 1 s): the v1 look produced
+**27 flashes/s**. Root causes in the vendored `HolographicMaterial.js`:
+- **Strobe:** `blink = fract(cos(t) * 43758.5)`, a random hash whose input moves far
+  enough per frame to return a new random value every frame. The rim jumped 0 ↔ 100%
+  about 60×/s. Replaced with a 0.3 Hz sine "breathing" capped at 15% depth.
+- **Aliasing shimmer:** scanlines at 60 × scanlineSize cycles per screen (2400 at v1's
+  40), which is sub-pixel noise. Now drawn in pixel space with a period of at least 4 px, plus a
+  soft slow sweep. The whole-object pulse went from 25 → 100% swings to ±10%.
+- **Step brightness on every gesture.** Now eased via `setBrightness()` (0.3 s).
+- **Additive "bloom" stacking:** every surface behind the front one added its brightness.
+  Now a scene-level depth pre-pass (`hologramLook.js`, opt-in via `scene.js`). On the
+  multi-layer chess scan, blown-out pixels went 2.69% → 0.81%.
+- **Rim sparkle on rough/faceted scans.** Shading normals are now smoothed over ~1.2 cm
+  (no vertex moves, so measurements are unchanged; chair surface noise measured 0.098).
+- **Found while fixing it:** the pre-pass first *added* flicker (17 flashes/s). The
+  vendored vertex shader recomputed gl_Position with a different matrix order than three's,
+  so the two draws z-fought. Fixed with the shared projection path plus polygon offset.
+- The OS "reduce motion" setting now stills all animation (`motion` = 0).
+
+Result: every configuration now measures **0–1 flashes/s** (chair and chess), and test.html
+still reports 72/0. Not yet confirmed by a person sensitive to flicker; `safety-test.html` is
+the regression check and belongs in `hologram-verify`.
