@@ -3,136 +3,231 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Hologram Platform — Library</title>
+  <title>Hologram Workshop</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #0b0d10; overflow: hidden; }
-    canvas { display: block; width: 100%; height: 100%; }
-    #look { position: fixed; right: 12px; bottom: 12px; z-index: 20; padding: 10px 12px; background: rgba(12,18,24,.85);
-            border: 1px solid #1f3444; border-radius: 8px; display: grid; gap: 6px; min-width: 250px; }
-    #look .look-row { display: flex; align-items: center; gap: 8px; }
-    #look label { min-width: 62px; }
-    #look input[type=range] { flex: 1; }
-    #look span { min-width: 40px; text-align: right; color: #8fb7cf; }
-    #look button { margin-left: auto; }
-    body { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #c9dcec; }
+    /* One design system for the whole page (2026-09-29 UI overhaul): every panel, button and
+       label draws from these tokens, and the 3D view owns its own grid cell -- panels sit
+       beside it, never on top of it (except as drawers on narrow screens). Calm by design:
+       no animation beyond short opacity/transform transitions, and none at all when the OS
+       asks for reduced motion. */
+    :root {
+      --bg: #0a0d11;
+      --panel: #10161d;
+      --panel-2: #0c1117;
+      --line: #1d2935;
+      --line-2: #2a3a4a;
+      --text: #d6e4ef;
+      --muted: #8196a8;
+      --faint: #56687a;
+      --accent: #4fd1ff;
+      --accent-soft: rgba(79, 209, 255, 0.12);
+      --select: #ffb040;
+      --ok: #7fd6a1;
+      --err: #ff7a7a;
+      --radius: 6px;
+      --gap: 8px;
+      --bar-h: 48px;
+      --status-h: 28px;
+      --side-w: 300px;
+      --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }   /* id-level display rules must never beat hidden */
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+    body { font: 13px/1.45 var(--sans); }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
-    #hud {
-      position: fixed; top: 12px; left: 12px; right: 12px;
-      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    /* ---- shell ---------------------------------------------------------------- */
+    #app {
+      height: 100%; display: grid;
+      grid-template-rows: var(--bar-h) 1fr var(--status-h);
+      grid-template-columns: var(--left-w, var(--side-w)) 1fr var(--right-w, var(--side-w));
+      grid-template-areas: "top top top" "left stage right" "status status status";
     }
-    #hud > * {
-      background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.08);
-      padding: 5px 9px; border-radius: 4px;
-    }
-    #status { color: #7fe3a1; }
-    #status.error { color: #ff5c5c; }
-    #fps { color: #9db4d0; }
-    #info { color: #c9dcec; }
-    #info:empty { display: none; }
+    body.left-closed  #app { --left-w: 0px; }
+    body.right-closed #app { --right-w: 0px; }
+    #topbar { grid-area: top; }
+    #left   { grid-area: left; }
+    #stage  { grid-area: stage; position: relative; min-width: 0; min-height: 0; }
+    #right  { grid-area: right; }
+    #statusbar { grid-area: status; }
+    #stage canvas { display: block; width: 100%; height: 100%; }
+    body.left-closed #left, body.right-closed #right { display: none; }
+
+    /* ---- controls ------------------------------------------------------------- */
+    button, select, input { font: inherit; color: inherit; }
     button {
-      font: inherit; color: #4fd1ff; cursor: pointer;
-      background: rgba(0,0,0,0.55); border: 1px solid rgba(79,209,255,0.4);
-      padding: 5px 9px; border-radius: 4px;
+      display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+      color: var(--text); background: var(--panel-2); border: 1px solid var(--line-2);
+      border-radius: var(--radius); cursor: pointer; white-space: nowrap;
+      transition: background .12s, border-color .12s;
     }
-    button.active { color: #ffb040; border-color: rgba(255,176,64,0.6); }
-    button:disabled { opacity: 0.4; cursor: default; }
-    #sel { color: #ffb040; }
-    button:hover { background: rgba(79,209,255,0.12); }
+    button:hover:not(:disabled) { background: var(--accent-soft); border-color: rgba(79,209,255,.45); }
+    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    button:disabled { opacity: .4; cursor: default; }
+    button.primary { color: #06131a; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+    button.primary:hover:not(:disabled) { background: #7fdfff; }
+    button.active { color: var(--select); border-color: rgba(255,176,64,.6); background: rgba(255,176,64,.08); }
+    button.ghost { background: none; border-color: transparent; color: var(--muted); }
+    button.ghost:hover:not(:disabled) { color: var(--text); }
+    .sep { width: 1px; height: 22px; background: var(--line); margin: 0 2px; }
 
-    #guide {
-      position: fixed; bottom: 12px; left: 12px; max-width: 360px;
-      background: rgba(8,14,22,0.82); border: 1px solid rgba(120,200,255,0.16);
-      border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.5;
-      color: #9db4d0; backdrop-filter: blur(8px);
+    /* ---- top bar -------------------------------------------------------------- */
+    #topbar {
+      display: flex; align-items: center; gap: var(--gap); padding: 0 12px;
+      background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; overflow-x: auto;
     }
-    #guide b { color: #c9dcec; }
-    #guide p { margin: 0 0 6px; }
-    #guide p:last-child { margin: 0; color: #6b7d94; }
-
-    #hud > #exportwrap { position: relative; padding: 0; border: 0; background: none; }
+    .brand { font-weight: 700; letter-spacing: .02em; margin-right: 6px; white-space: nowrap; }
+    .brand span { color: var(--accent); }
+    .spacer { flex: 1; }
+    #exportwrap { position: relative; }
     #exportMenu {
-      position: absolute; top: 100%; left: 0; margin-top: 4px; min-width: 190px; z-index: 5;
-      background: rgba(8,14,22,0.95); border: 1px solid rgba(120,200,255,0.25); border-radius: 6px; padding: 4px;
+      position: fixed; min-width: 200px; z-index: 30; padding: 4px;
+      background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--radius);
+      box-shadow: 0 10px 30px rgba(0,0,0,.45);
     }
     #exportMenu[hidden] { display: none; }
-    #exportMenu button { display: block; width: 100%; text-align: left; border: 0; background: none; }
-    #exportMenu hr { border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 4px 0; }
+    #exportMenu button { display: flex; width: 100%; border: 0; background: none; height: 32px; }
+    #exportMenu button:hover { background: var(--accent-soft); }
+    #exportMenu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
 
-    #library {
-      position: fixed; top: var(--hud-bottom, 56px); right: 12px; bottom: 12px; width: 290px; display: flex; flex-direction: column;
-      background: rgba(8,14,22,0.82); border: 1px solid rgba(120,200,255,0.16); border-radius: 8px;
-      backdrop-filter: blur(8px); overflow: hidden;
+    /* ---- side panels ---------------------------------------------------------- */
+    .side { display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
+    #left { border-right: 1px solid var(--line); }
+    #right { border-left: 1px solid var(--line); }
+    .side h2 {
+      margin: 0; padding: 12px 14px 10px; font-size: 11px; font-weight: 600; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 6px;
     }
-    #library h2 { margin: 0; padding: 9px 12px; font-size: 12px; font-weight: 600; color: #c9dcec; border-bottom: 1px solid rgba(255,255,255,0.08); }
-    #libCount { color: #6b7d94; font-weight: 400; }
-    #libList { overflow-y: auto; flex: 1; padding: 6px; }
-    #libEmpty { padding: 12px; color: #6b7d94; font-size: 12px; line-height: 1.5; }
-    .libRow { padding: 7px 8px; margin-bottom: 5px; border: 1px solid rgba(255,255,255,0.07); border-radius: 5px; background: rgba(0,0,0,0.3); }
-    .libRow[data-status="error"] { border-color: rgba(255,92,92,0.5); }
-    .libName { color: #c9dcec; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .libMeta { color: #6b7d94; font-size: 11px; margin: 2px 0 4px; word-break: break-word; }
-    .libRow[data-status="error"] .libMeta { color: #ff8a8a; }
-    .libRow[data-status="ready"] .libMeta { color: #7fb69a; }
-    .libBar { height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; margin-bottom: 5px; }
-    .libBar div { height: 100%; background: #4fd1ff; border-radius: 2px; }
-    .libBtns { display: flex; gap: 4px; }
-    .libBtns button { padding: 2px 7px; font-size: 11px; }
+    #libCount { color: var(--faint); font-weight: 400; letter-spacing: 0; text-transform: none; }
+    #libList { overflow-y: auto; flex: 1; padding: 0 10px 10px; }
+    #libEmpty { margin: 4px 14px 14px; padding: 16px; color: var(--muted); border: 1px dashed var(--line-2); border-radius: var(--radius); line-height: 1.6; }
+    .libRow { padding: 10px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
+    .libRow[data-status="error"] { border-color: rgba(255,122,122,.5); }
+    .libName { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .libMeta { color: var(--muted); font-size: 12px; margin: 2px 0 8px; word-break: break-word; font-family: var(--mono); }
+    .libRow[data-status="error"] .libMeta { color: var(--err); }
+    .libRow[data-status="ready"] .libMeta { color: var(--ok); }
+    .libBar { height: 3px; background: var(--line); border-radius: 2px; margin-bottom: 8px; }
+    .libBar div { height: 100%; background: var(--accent); border-radius: 2px; }
+    .libBtns { display: flex; gap: 6px; }
+    .libBtns button { height: 26px; padding: 0 8px; font-size: 12px; }
 
-    /* Measurements tab (measurements.js): a left drawer, calm and static (no animation). */
-    #measurements {
-      position: fixed; top: var(--hud-bottom, 56px); left: 12px; width: min(330px, calc(100vw - 24px)); max-height: calc(100% - var(--hud-bottom, 56px) - 12px);
-      display: flex; flex-direction: column; z-index: 4;
-      background: rgba(8,14,22,0.86); border: 1px solid rgba(120,200,255,0.16); border-radius: 8px;
-      backdrop-filter: blur(8px); overflow: hidden; font-size: 12px;
-    }
-    body.mt-open #guide { display: none; }
-    .mt-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
-    #measurements.collapsed .mt-head { border-bottom: 0; }
-    .mt-head button { border: 0; background: none; padding: 2px 4px; }
-    .mt-title { color: #c9dcec !important; font-weight: 600; flex: 1; text-align: left; }
-    .mt-unit { border: 1px solid rgba(79,209,255,0.4) !important; }
-    .mt-body { overflow-y: auto; padding: 4px 6px 8px; }
-    .mt-empty { color: #6b7d94; padding: 6px 4px; line-height: 1.5; }
-    .mt-sec { border-top: 1px solid rgba(255,255,255,0.06); }
+    /* Inspector tabs */
+    .tabs { display: flex; gap: 2px; padding: 8px 10px 0; border-bottom: 1px solid var(--line); }
+    .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); height: 34px; }
+    .tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+    .tabs button:hover:not(:disabled) { background: none; color: var(--text); }
+    .tabpanel { flex: 1; min-height: 0; overflow-y: auto; }
+    .tabpanel[hidden] { display: none; }
+
+    /* Measurements (measurements.js) -- restyled to the tokens, inside the Measure tab */
+    #measurements { display: flex; flex-direction: column; font-size: 12px; }
+    .mt-head { display: flex; align-items: center; gap: 6px; padding: 10px 12px; }
+    .mt-head button { height: 26px; }
+    .mt-title { flex: 1; justify-content: flex-start; border: 0 !important; background: none !important; color: var(--muted) !important; pointer-events: none; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .mt-body { padding: 0 10px 12px; }
+    .mt-empty { color: var(--muted); padding: 12px 4px; line-height: 1.6; }
+    .mt-sec { border-top: 1px solid var(--line); }
     .mt-sec:first-child { border-top: 0; }
-    .mt-sechead { display: flex; width: 100%; gap: 8px; align-items: baseline; border: 0; background: none; color: #c9dcec; padding: 7px 2px; text-align: left; }
+    .mt-sechead { display: flex; width: 100%; height: auto; gap: 8px; align-items: baseline; border: 0; background: none; padding: 10px 2px; text-align: left; }
     .mt-itemname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-    .mt-count, .mt-caret { color: #6b7d94; }
-    .mt-row { padding: 5px 7px; margin: 0 0 4px; border: 1px solid rgba(255,255,255,0.06); border-left: 2px solid transparent; border-radius: 4px; background: rgba(0,0,0,0.25); cursor: pointer; }
-    .mt-row.mt-whole { background: rgba(79,209,255,0.05); }
-    .mt-row.hovered { background: rgba(214,251,255,0.07); }
-    .mt-row.selected { border-left-color: #ffb040; }
-    .mt-row.is-hidden { opacity: 0.5; }
+    .mt-count, .mt-caret { color: var(--faint); }
+    .mt-row { padding: 8px 10px; margin: 0 0 6px; border: 1px solid var(--line); border-left: 3px solid transparent; border-radius: var(--radius); background: var(--panel-2); cursor: pointer; }
+    .mt-row.mt-whole { background: rgba(79,209,255,.05); }
+    .mt-row.hovered { border-color: var(--line-2); background: rgba(214,251,255,.05); }
+    .mt-row.selected { border-left-color: var(--select); }
+    .mt-row.is-hidden { opacity: .5; }
     .mt-rowtop { display: flex; gap: 6px; align-items: baseline; }
-    .mt-name { color: #c9dcec; flex: 1; }
-    .mt-tags { color: #b69cff; font-size: 11px; }
-    .mt-dims { display: flex; flex-wrap: wrap; gap: 2px 10px; color: #9db4d0; margin-top: 2px; }
-    .mt-dim b { color: #6b7d94; font-weight: 400; }
+    .mt-name { flex: 1; font-weight: 600; }
+    .mt-tags { color: #b9a4ff; font-size: 11px; }
+    .mt-dims { display: flex; flex-wrap: wrap; gap: 2px 12px; color: var(--text); margin-top: 4px; font-family: var(--mono); }
+    .mt-dim b { color: var(--faint); font-weight: 400; }
     .mt-dim.changed { color: #ffd166; }
-    .mt-dim .mt-was { color: #8a97a8; }
+    .mt-dim .mt-was { color: var(--faint); }
     .mt-dim i { font-style: normal; }
-    .mt-extra { color: #7f93a8; font-size: 11px; margin-top: 2px; }
-    .mt-redesign { margin-top: 6px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.1); cursor: default; display: grid; gap: 5px; }
-    .mt-rdtitle { color: #8fb7cf; font-size: 11px; }
-    .mt-rdrow { display: flex; gap: 5px; align-items: center; }
-    .mt-redesign select, .mt-redesign input { font: inherit; color: #c9dcec; background: rgba(0,0,0,0.4); border: 1px solid rgba(120,200,255,0.25); border-radius: 3px; padding: 2px 4px; }
-    .mt-redesign input { width: 72px; }
-    .mt-redesign button { padding: 2px 7px; font-size: 11px; justify-self: start; }
-    .mt-rdunit { color: #6b7d94; }
-    .mt-rdmsg { color: #7f93a8; font-size: 11px; }
+    .mt-extra { color: var(--muted); font-size: 11px; margin-top: 3px; font-family: var(--mono); }
+    .mt-redesign { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line-2); cursor: default; display: grid; gap: 6px; }
+    .mt-rdtitle { color: var(--muted); font-size: 11px; }
+    .mt-rdrow { display: flex; gap: 6px; align-items: center; }
+    .mt-redesign select, .mt-redesign input { height: 26px; background: var(--bg); border: 1px solid var(--line-2); border-radius: 4px; padding: 0 6px; }
+    .mt-redesign input { width: 76px; font-family: var(--mono); }
+    .mt-redesign button { height: 26px; font-size: 12px; justify-self: start; }
+    .mt-rdunit { color: var(--faint); }
+    .mt-rdmsg { color: var(--muted); font-size: 11px; }
     .mt-rdmsg:empty { display: none; }
-    .mt-hist { max-height: 220px; overflow-y: auto; padding-bottom: 4px; }
-    .mt-hrow { display: flex; gap: 8px; padding: 2px 4px; color: #9db4d0; border-radius: 3px; }
+    .mt-hist { max-height: 260px; overflow-y: auto; padding-bottom: 6px; }
+    .mt-hrow { display: flex; gap: 8px; padding: 4px 6px; color: var(--text); border-radius: 4px; font-family: var(--mono); font-size: 11px; }
     .mt-hrow.clickable { cursor: pointer; }
-    .mt-hrow.clickable:hover { background: rgba(79,209,255,0.08); }
-    .mt-htime { color: #6b7d94; }
+    .mt-hrow.clickable:hover { background: var(--accent-soft); }
+    .mt-htime { color: var(--faint); }
 
+    /* Look (look.js) */
+    #lookPanel { padding: 12px 14px; display: grid; gap: 14px; align-content: start; }
+    #look { display: grid; gap: 12px; }
+    #look .look-row { display: flex; align-items: center; gap: 10px; }
+    #look label { min-width: 64px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+    #look input[type=range] { flex: 1; accent-color: var(--accent); }
+    #look input[type=checkbox] { accent-color: var(--accent); }
+    #look span { min-width: 44px; text-align: right; color: var(--text); font-family: var(--mono); }
+    #look button { margin-left: auto; height: 26px; }
+    .note { color: var(--faint); font-size: 12px; line-height: 1.55; margin: 0; }
+
+    /* ---- status bar ----------------------------------------------------------- */
+    #statusbar {
+      display: flex; align-items: center; gap: 14px; padding: 0 12px; min-width: 0;
+      background: var(--panel); border-top: 1px solid var(--line);
+      font: 12px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden;
+    }
+    #statusbar > span { overflow: hidden; text-overflow: ellipsis; }
+    #statusbar > span:empty { display: none; }
+    #status { color: var(--ok); }
+    #status.error { color: var(--err); }
+    #sel { color: var(--select); }
+    #fps { margin-left: auto; color: var(--faint); }
+
+    /* ---- stage overlays ------------------------------------------------------- */
+    #empty {
+      position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
+    }
+    #empty[hidden] { display: none; }
+    #empty .card {
+      pointer-events: auto; max-width: 420px; text-align: center; padding: 28px;
+      border: 1px dashed var(--line-2); border-radius: 12px; background: rgba(12,17,23,.7);
+    }
+    #empty h1 { font-size: 18px; margin: 0 0 6px; }
+    #empty p { color: var(--muted); margin: 0 0 16px; line-height: 1.6; }
+    #empty .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
     #drop {
       position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
-      background: rgba(11,13,16,0.7); border: 3px dashed #4fd1ff; box-sizing: border-box;
-      font-size: 20px; color: #4fd1ff; pointer-events: none; z-index: 10;
+      background: rgba(10,13,17,.75); border: 2px dashed var(--accent); font-size: 18px; color: var(--accent);
+      pointer-events: none; z-index: 40;
     }
     #drop.on { display: flex; }
+
+    /* Help popover */
+    #guide {
+      position: fixed; top: calc(var(--bar-h) + 8px); right: 12px; width: min(380px, calc(100vw - 24px)); z-index: 35;
+      padding: 14px 16px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px;
+      box-shadow: 0 16px 40px rgba(0,0,0,.5); color: var(--muted); line-height: 1.6;
+    }
+    #guide[hidden] { display: none; }
+    #guide h3 { margin: 0 0 8px; font-size: 13px; color: var(--text); }
+    #guide p { margin: 0 0 8px; }
+    #guide kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line-2); border-radius: 4px; color: var(--text); }
+
+    /* ---- narrow screens: side panels become drawers over the view -------------- */
+    @media (max-width: 960px) {
+      #app { grid-template-columns: 0 1fr 0; }
+      #left, #right {
+        position: fixed; top: var(--bar-h); bottom: var(--status-h); width: min(320px, 88vw); z-index: 25;
+        box-shadow: 0 0 40px rgba(0,0,0,.55);
+      }
+      #left { left: 0; } #right { right: 0; }
+      body:not(.left-open) #left, body:not(.right-open) #right { display: none; }
+      .wide-only { display: none; }
+    }
   </style>
   <script type="importmap">
     {
@@ -144,46 +239,86 @@
   </script>
 </head>
 <body>
-  <div id="hud">
-    <button id="pick">Add files…</button>
-    <button id="folder">Add folder…</button>
-    <button id="arrange">Arrange all</button>
-    <div id="exportwrap">
-      <button id="exportBtn">Export ▾</button>
-      <div id="exportMenu" hidden>
-        <button data-act="glb">Scene as GLB</button>
-        <button data-act="layout">Layout JSON</button>
-        <button data-act="import">Import layout…</button>
-        <hr />
-        <button data-act="plan">Floor plan SVG</button>
-        <button data-act="png">Screenshot PNG</button>
+  <div id="app">
+    <header id="topbar">
+      <button id="toggleLeft" class="ghost" title="Show / hide the library" aria-controls="left">☰ Library</button>
+      <div class="brand">Hologram <span>Workshop</span></div>
+      <div class="sep"></div>
+      <button id="pick" class="primary">Add files…</button>
+      <button id="folder">Add folder…</button>
+      <button id="sample" class="wide-only">Sample</button>
+      <div class="sep"></div>
+      <button id="arrange">Arrange all</button>
+      <div id="exportwrap">
+        <button id="exportBtn" aria-haspopup="menu">Export ▾</button>
+        <div id="exportMenu" role="menu" hidden>
+          <button data-act="glb">Scene as GLB</button>
+          <button data-act="layout">Layout + history (JSON)</button>
+          <button data-act="import">Import layout…</button>
+          <hr />
+          <button data-act="plan">Floor plan (SVG)</button>
+          <button data-act="png">Screenshot (PNG)</button>
+        </div>
       </div>
-    </div>
-    <button id="sample">Load sample</button>
-    <button id="mode">Mode: SCENE (Tab)</button>
-    <button id="measureBtn" title="per-part measurements and history">Measure</button>
-    <button id="undo" disabled>Undo</button>
-    <button id="showall" disabled>Show all</button>
-    <button id="plain">Plain material</button>
-    <span id="status">drop scans (.glb .gltf .obj .ply) or photos anywhere</span>
-    <span id="info"></span>
-    <span id="parts"></span>
-    <span id="sel"></span>
-    <span id="fps">— fps</span>
+      <div class="spacer"></div>
+      <button id="mode" title="Tab: switch between moving the camera and editing objects">Scene mode</button>
+      <button id="undo" disabled title="Undo (Ctrl/Cmd+Z)">Undo</button>
+      <button id="showall" disabled>Show all</button>
+      <div class="sep"></div>
+      <button id="help" class="ghost" title="Controls and tips (?)" aria-controls="guide">?</button>
+      <button id="toggleRight" class="ghost" title="Show / hide the inspector" aria-controls="right">Inspector ☰</button>
+    </header>
+
+    <aside id="left" class="side" aria-label="Library">
+      <div id="library" style="display:contents">
+        <h2>Library <span id="libCount"></span></h2>
+        <div id="libEmpty">Drop scans or photos anywhere on the page. Include an OBJ's .mtl and textures, or a .gltf's .bin, in the same drop and they're matched automatically. Photos become 2.5D holograms.</div>
+        <div id="libList"></div>
+      </div>
+    </aside>
+
+    <main id="stage" aria-label="3D view">
+      <div id="empty">
+        <div class="card">
+          <h1>Drop a scan or photo to begin</h1>
+          <p>GLB, glTF, OBJ (with its .mtl and textures) or PLY scans, or JPG/PNG photos. Everything stays in this browser tab.</p>
+          <div class="row">
+            <button class="primary" data-proxy="pick">Add files…</button>
+            <button data-proxy="sample">Open the sample chair</button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <aside id="right" class="side" aria-label="Inspector">
+      <div class="tabs" role="tablist">
+        <button id="measureBtn" role="tab" aria-selected="true" aria-controls="measurements">Measure</button>
+        <button id="lookTab" role="tab" aria-selected="false" aria-controls="lookPanel">Look</button>
+      </div>
+      <div id="measurements" class="tabpanel" role="tabpanel" aria-label="Measurements"></div>
+      <div id="lookPanel" class="tabpanel" role="tabpanel" aria-label="Hologram look" hidden>
+        <div id="look"></div>
+        <button id="plain">Plain material</button>
+        <p class="note">Realism blends the scan's real texture or photo colours back in. The hologram is photosafe at every setting (under the WCAG flash limit), and "Calm" makes it completely still.</p>
+      </div>
+    </aside>
+
+    <footer id="statusbar">
+      <span id="status">drop scans or photos anywhere</span>
+      <span id="info"></span>
+      <span id="parts"></span>
+      <span id="sel"></span>
+      <span id="fps">— fps</span>
+    </footer>
   </div>
-  <div id="look" aria-label="Hologram look"></div>
-  <div id="guide">
-    <p><b>Capture:</b> Scaniverse <b>Object</b> mode for single items, <b>Area</b> mode for rooms. Export as <b>GLB</b> or <b>OBJ</b>.</p>
-    <p>Rooms (over 2.5 m) open as a dollhouse view; smaller scans orbit like an object. Drag to orbit, scroll to zoom, R to auto-rotate.</p>
-    <p><b>Object mode</b> (Tab): hover highlights, click selects, drag moves along the floor, <b>Shift+scroll</b> rotates, <b>Alt/Option+scroll</b> resizes, <b>Del</b> hides, <b>H</b> shows all, <b>Esc</b> deselects, <b>Ctrl/Cmd+Z</b> undoes.</p>
+
+  <div id="guide" role="dialog" aria-label="Controls" hidden>
+    <h3>Controls</h3>
+    <p><b>Scene mode</b>: drag to orbit, scroll to zoom, right-drag to pan, <kbd>R</kbd> auto-rotate.</p>
+    <p><b>Object mode</b> (<kbd>Tab</kbd>): hover highlights, click selects, drag moves along the floor, <kbd>Shift</kbd>+scroll rotates, <kbd>Alt/⌥</kbd>+scroll resizes (a redesign), <kbd>Del</kbd> hides, <kbd>H</kbd> shows all, <kbd>Esc</kbd> deselects, <kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd> undoes.</p>
+    <p><b>Capturing</b>: Scaniverse <b>Object</b> mode for single items, <b>Area</b> mode for rooms; export GLB or OBJ.</p>
     <p>Files are read in your browser and never uploaded.</p>
   </div>
-  <div id="library">
-    <h2>Library <span id="libCount"></span></h2>
-    <div id="libList"></div>
-    <div id="libEmpty">Drop scans or photos anywhere. Include an OBJ's .mtl and textures, or a .gltf's .bin, in the same drop and they are matched up automatically. Photos become 2.5D holograms.</div>
-  </div>
-  <div id="measurements" aria-label="Measurements"></div>
   <div id="drop">Drop scans or photos to add</div>
   <input id="picker" type="file" multiple hidden />
   <input id="folderPicker" type="file" webkitdirectory multiple hidden />

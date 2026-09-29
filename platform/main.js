@@ -11,6 +11,7 @@ const exporter = await import('./export.js' + V);
 const { splitComponents } = await import('./segment.js' + V);
 const { createObjectMode } = await import('./objectmode.js' + V);
 const { createMeasurements } = await import('./measurements.js' + V);
+const { createShell } = await import('./shell.js' + V);
 const { placeOnFloor, frameRoom, frameSingle, ROOM_THRESHOLD_M } = await import('./framing.js' + V);
 
 const $ = (id) => document.getElementById(id);
@@ -18,7 +19,9 @@ const statusEl = $('status');
 const fpsEl = $('fps');
 const infoEl = $('info');
 
-const { scene, camera, renderer, controls } = createScene();
+// The 3D view lives in its own grid cell (#stage) -- panels sit beside it, not on top.
+const { scene, camera, renderer, controls } = createScene($('stage'));
+createShell();
 
 // Every hologram material comes from look.js: photosafe (WCAG flash limit, no additive
 // bloom, smoothed shading on rough scans), with the Realism / Motion controls.
@@ -92,7 +95,7 @@ const partsEl = $('parts'), selEl = $('sel');
 const objectMode = createObjectMode({
   camera, canvas: renderer.domElement, controls, materialFor, edits,
   onChange: (st) => {
-    modeBtn.textContent = st.mode === 'object' ? 'Mode: OBJECT (Tab)' : 'Mode: SCENE (Tab)';
+    modeBtn.textContent = st.mode === 'object' ? 'Object mode' : 'Scene mode';
     modeBtn.classList.toggle('active', st.mode === 'object');
     partsEl.textContent = `${st.parts} selectable part${st.parts === 1 ? '' : 's'}`;
     const selName = st.selection?.kind === 'item' ? `${items.get(Number(st.selection.id.slice(5)))?.name ?? st.selection.id} (whole)` : `#${st.selection?.id}`;
@@ -109,17 +112,14 @@ const objectMode = createObjectMode({
 });
 window.hologram.objectMode = objectMode;
 // Per-part sizes, originals and the edit history (measurements.js).
-measurements = createMeasurements({ mount: $('measurements'), toggleBtn: $('measureBtn'), objectMode, getItems: readyItems });
+// Visibility is the inspector tab's job (shell.js), so no toggle button is passed.
+measurements = createMeasurements({ mount: $('measurements'), toggleBtn: null, objectMode, getItems: readyItems });
 window.hologram.measurements = measurements;
 modeBtn.addEventListener('click', () => objectMode.toggleMode());
 undoBtn.addEventListener('click', () => { objectMode.undo(); syncLibrary(); });
 showAllBtn.addEventListener('click', () => objectMode.showAll());
 plainBtn.textContent = plain ? 'Hologram look' : 'Plain material';
 
-// The HUD wraps onto a second row in narrow windows; the side panels start below it.
-new ResizeObserver(() => {
-  document.documentElement.style.setProperty('--hud-bottom', `${Math.round($('hud').getBoundingClientRect().bottom + 8)}px`);
-}).observe($('hud'));
 
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg;
