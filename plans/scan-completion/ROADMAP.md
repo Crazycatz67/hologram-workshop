@@ -8,6 +8,19 @@ The research behind every choice here is in [`RESEARCH.md`](RESEARCH.md).
 
 ## Revision History
 
+- **2026-09-29 (3):** **B1 first method: `thickness_fill` closes the underside gap** (`completion/fill.py`, which now holds all methods; the benchmark imports it).
+  - **The idea:** panels are slabs. For each upward face with nothing scanned below it (probed straight down to 8 cm), take the drop to the nearest open scan boundary in plan view as the local thickness, and copy the face down by that amount. Then apply the merge rule. It uses measured geometry moved by a measured distance, with no model involved.
+  - **Result:** the chain `mirror_gaps → thickness_fill → poisson` takes the **underside from 75% → 99% coverage @2 cm, with 99% of added surface real (up from 63%)**. Wall and holes rows are unchanged (89% / 100%). Runtime is 4.5 s and peak memory 0.37 GB on the M5 Air.
+  - **Robustness check:** the benchmark hides faces with n.y < −0.35, the mirror of the method's own "upward" test, which could flatter it. Re-run with other cuts:
+
+    | Cut | Plain Poisson (coverage / real) | New chain (coverage / real) |
+    | --- | --- | --- |
+    | n.y < −0.10 (47% hidden) | 64% / 42% | 82% / 70% |
+    | n.y < −0.60 | 72% / 62% | 100% / 100% |
+    | Ragged ±0.25 per face | 79% / 63% | 100% / 99% |
+
+    It holds up. Its weak spot is when very large regions are hidden.
+  - **Caveats:** one object (a sled chair with slab parts). The ground truth is itself a cleaned mesh. It needs a room case and a non-slab object (e.g. a round stool or a sofa) before calling B1 done.
 - **2026-09-29 (2):** **B0 benchmark built and baselined** (`completion/benchmark.py`, run with `.venv/bin/python completion/benchmark.py`).
   - **Setup:** hides the chair's underside, the side against a wall (4 walls, averaged) and 10 random 5 cm holes, then scores each method.
   - **Scores:** *coverage* is the share of hidden surface recovered within 1/2 cm. *Added real* is the share of invented surface that lies within 2 cm of real geometry, which catches methods that "fill" by wrapping the object in a blob.
@@ -103,5 +116,5 @@ Run the cascade per object after the Platform's segmentation (P2) has split a ro
 
 ## Next Concrete Action
 
-1. **B1, aimed at the underside:** a *thickness prior* (panels like a seat are slabs: where the top is scanned and the bottom isn't, offset the top by the thickness measured at the panel's scanned edges) and *plane extension* (extend fitted planes to their intersections). Beat 75% coverage / 63% real on the underside row without losing the other rows.
+1. **B1 next:** validate `mirror → thickness → poisson` on a second, non-slab object and on a room once one is scanned; then add *plane extension* for wall-side gaps (the wall row is still 89% / 79% real). *(Done: thickness prior for undersides, see revision 3.)* Original target: a *thickness prior* (panels like a seat are slabs: where the top is scanned and the bottom isn't, offset the top by the thickness measured at the panel's scanned edges) and *plane extension* (extend fitted planes to their intersections). Beat 75% coverage / 63% real on the underside row without losing the other rows.
 2. **B3 spike** (can run in parallel since it's just installs + one run): SPAR3D + Hunyuan3D-2mini on the M5, recording time and peak memory.

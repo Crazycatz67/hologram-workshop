@@ -19,6 +19,13 @@ Nobody offers free, in-browser, gesture-controlled interaction with *your own se
 
 ## Revision History
 
+- **2026-09-29 (3):** **P1 first slice built (mouse and keyboard; gestures next).**
+  - **Splitting:** `platform/segment.js` `splitComponents` welds vertices at 1 mm, runs union-find over triangles, and makes each connected component above 2% of the scan's diagonal its own selectable part. It's a placeholder until P2's plane-peel segmentation.
+  - **Object mode:** `platform/objectmode.js`. Toggle with Tab or the button. Hover highlights before commit, click selects, drag moves on the floor plane with the camera locked while dragging, Shift+wheel rotates about the part's own centre, Delete hides, H shows all, Esc deselects, Cmd/Ctrl+Z undoes.
+  - **Edit log:** every edit goes to a JSON log (`window.hologram.edits`), the SceneScript-style list from the roadmap. Undo restores exact transforms.
+  - **Action API for gestures:** `beginMove`/`moveBy`/`endMove`, `rotateSelected`, `hideSelected`, `showAll`, `undo`. Gestures must call these rather than touch the log.
+  - **Verified in Chrome** on a synthetic multi-part scene (5 components → 4 parts, 7 ms). The chair and the raw chess scan are each **one** connected blob (the pieces touch the board), so connectivity alone can't split real scans. That confirms P2's plane-peel is needed.
+  - **Caveats:** splitting takes ~0.6 s synchronously at 76k–233k tris, so large rooms need a Worker. Shift+wheel steps are coarse (~0.5 rad per notch). A real Tab keypress from the automation tool didn't toggle mode; dispatched events and the button did, and the key still needs a hands-on check.
 - **2026-09-29 (2):** **P0 built** in `platform/` (`index.html`, `main.js`, `upload.js`, `framing.js`).
   - **What it does:** drag-drop or pick GLB/GLTF/OBJ(+MTL)/PLY, parsed in the browser. `detectFloorY` finds the lowest large up-facing surface: a histogram of vertices with upward normals, trusted only in the bottom 15% of the height, otherwise it falls back to the 1st percentile of height, so a floorless chair's seat is never taken for the floor. Every scan is placed with its floor at y=0, and scans wider than 2.5 m get the dollhouse framing. It shows a stats readout, a plain-material toggle and a "Load sample" button.
   - **Deviation from v1:** framing never moves the scan (v1's `frameObject` re-centres it). The Platform needs one consistent floor for snapping, and pivots belong to the selected object.

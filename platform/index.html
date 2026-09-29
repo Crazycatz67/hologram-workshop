@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Hologram Platform — P0: Upload Any Scan</title>
+  <title>Hologram Platform — P1: Universal Controls</title>
   <style>
     html, body { margin: 0; height: 100%; background: #0b0d10; overflow: hidden; }
     canvas { display: block; width: 100%; height: 100%; }
@@ -27,6 +27,9 @@
       background: rgba(0,0,0,0.55); border: 1px solid rgba(79,209,255,0.4);
       padding: 5px 9px; border-radius: 4px;
     }
+    button.active { color: #ffb040; border-color: rgba(255,176,64,0.6); }
+    button:disabled { opacity: 0.4; cursor: default; }
+    #sel { color: #ffb040; }
     button:hover { background: rgba(79,209,255,0.12); }
 
     #guide {
@@ -59,14 +62,20 @@
   <div id="hud">
     <button id="pick">Choose file…</button>
     <button id="sample">Load sample</button>
+    <button id="mode">Mode: SCENE (Tab)</button>
+    <button id="undo" disabled>Undo</button>
+    <button id="showall" disabled>Show all</button>
     <button id="plain">Plain material</button>
     <span id="status">drop a .glb / .obj / .ply anywhere</span>
     <span id="info"></span>
+    <span id="parts"></span>
+    <span id="sel"></span>
     <span id="fps">— fps</span>
   </div>
   <div id="guide">
     <p><b>Capture:</b> Scaniverse <b>Object</b> mode for single items, <b>Area</b> mode for rooms. Export as <b>GLB</b> or <b>OBJ</b>.</p>
     <p>Rooms (over 2.5 m) open as a dollhouse view; smaller scans orbit like an object. Drag to orbit, scroll to zoom, R to auto-rotate.</p>
+    <p><b>Object mode</b> (Tab): hover highlights, click selects, drag moves along the floor, <b>Shift+scroll</b> rotates, <b>Del</b> hides, <b>H</b> shows all, <b>Esc</b> deselects, <b>Ctrl/Cmd+Z</b> undoes.</p>
     <p>Files are read in your browser and never uploaded.</p>
   </div>
   <div id="drop">Drop scan to load</div>

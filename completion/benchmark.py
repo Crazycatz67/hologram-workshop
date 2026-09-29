@@ -61,7 +61,9 @@ from scipy.spatial import cKDTree
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
-import clean_scan  # noqa: E402  -- reuse the shipped symmetry search, never fork it
+sys.path.insert(0, str(REPO / "completion"))
+import clean_scan  # noqa: E402  -- the v1 full-copy mirror, kept as a baseline
+import fill  # noqa: E402
 
 OUT = REPO / "completion" / "out"
 
@@ -78,49 +80,14 @@ HOLE_RADIUS = 0.05         # metres
 
 
 # ---------------------------------------------------------------- mesh helpers
+# Shared with the methods themselves: one implementation, in fill.py.
+
+from fill import face_geometry, sample_surface, submesh  # noqa: E402
+
 
 def load_vf(path):
     ms = pymeshlab.MeshSet()
     ms.load_new_mesh(str(path))
-    m = ms.current_mesh()
-    return m.vertex_matrix().astype(np.float64), m.face_matrix().astype(np.int64)
-
-
-def face_geometry(v, f):
-    a, b, c = v[f[:, 0]], v[f[:, 1]], v[f[:, 2]]
-    cross = np.cross(b - a, c - a)
-    area2 = np.linalg.norm(cross, axis=1)
-    normals = cross / np.maximum(area2, 1e-12)[:, None]
-    return (a + b + c) / 3.0, normals, area2 / 2.0
-
-
-def sample_surface(v, f, n, rng):
-    """Area-weighted uniform points on a triangle mesh."""
-    if len(f) == 0:
-        return np.empty((0, 3))
-    _, _, area = face_geometry(v, f)
-    idx = rng.choice(len(f), n, p=area / area.sum())
-    r1, r2 = rng.random(n), rng.random(n)
-    s = np.sqrt(r1)
-    a, b, c = v[f[idx, 0]], v[f[idx, 1]], v[f[idx, 2]]
-    return (1 - s)[:, None] * a + (s * (1 - r2))[:, None] * b + (s * r2)[:, None] * c
-
-
-def submesh(v, f, keep):
-    """Faces where keep is True, with unreferenced vertices dropped and reindexed."""
-    f = f[keep]
-    used, inverse = np.unique(f, return_inverse=True)
-    return v[used], inverse.reshape(f.shape)
-
-
-def to_meshset(v, f):
-    ms = pymeshlab.MeshSet()
-    ms.add_mesh(pymeshlab.Mesh(vertex_matrix=v, face_matrix=f.astype(np.int32)), "input")
-    ms.compute_normal_per_vertex()
-    return ms
-
-
-def from_meshset(ms):
     m = ms.current_mesh()
     return m.vertex_matrix().astype(np.float64), m.face_matrix().astype(np.int64)
 
@@ -166,83 +133,36 @@ def scenario_group(name):
 
 
 # ---------------------------------------------------------------- methods
-# Each takes the partial mesh and returns a completed one. Parameters mirror
-# clean_scan.py's shipped defaults so the baseline is "what the pipeline does today".
-
-def m_none(v, f):
-    return v, f
-
-
-def m_close_holes(v, f):
-    ms = to_meshset(v, f)
-    ms.meshing_repair_non_manifold_edges()
-    ms.meshing_close_holes(maxholesize=100_000, selfintersection=False)
-    return from_meshset(ms)
-
-
-def _poisson(ms):
-    before = ms.current_mesh_id()
-    # threads=1: multi-threaded Poisson aborts at random -- see clean_scan.POISSON_THREADS_NOTE
-    ms.generate_surface_reconstruction_screened_poisson(depth=9, samplespernode=1.5, pointweight=4.0, threads=1)
-    if ms.current_mesh_id() == before:
-        raise RuntimeError("Poisson produced no mesh")
-    ms.meshing_remove_connected_component_by_diameter(
-        mincomponentdiag=pymeshlab.PercentageValue(5.0)
-    )
-    return from_meshset(ms)
-
-
-def m_poisson(v, f):
-    return _poisson(to_meshset(v, f))
-
+# Each takes the partial mesh and returns a completed one. The building blocks live in
+# fill.py; these are the combinations being compared.
 
 def m_symmetry_poisson(v, f):
     """clean_scan.py's shipped COMPLETE stage: merge a FULL mirrored copy, then Poisson.
-    Kept as the baseline because it is what the pipeline does today -- but on an object
-    that is already close to symmetric the copy lands almost exactly on the original, and
-    Poisson can crash natively on the coincident surfaces (seen on chair_clean.obj:
-    "Failed to close loop"). m_mirror_gaps is the fix."""
-    ms = to_meshset(v, f)
+    Kept as the baseline because it is what the v1 pipeline does today."""
+    ms = fill.to_meshset(v, f)
     normal, offset, overlap = clean_scan.find_symmetry_plane(v, np.random.default_rng(0))
     if overlap >= clean_scan.SYMMETRY_MIN_OVERLAP:
         clean_scan.symmetrize(ms, normal, offset)
-    return _poisson(ms)
+    return fill.poisson(*fill.from_meshset(ms))
 
 
-MIRROR_GAP = 0.01  # metres; a mirrored face farther than this from the scan fills a real gap
-
-
-def mirror_gaps(v, f):
-    """Mirror the object across its symmetry plane, but keep ONLY the mirrored faces that
-    land where the scan has no surface. Everything the scanner did see stays exactly as
-    measured; the mirror contributes geometry only to the gaps. Returns the partial mesh
-    with those faces appended, or the input unchanged if the object isn't symmetric."""
-    normal, offset, overlap = clean_scan.find_symmetry_plane(v, np.random.default_rng(0))
-    if overlap < clean_scan.SYMMETRY_MIN_OVERLAP:
+def chain(*steps):
+    def run(v, f):
+        for step in steps:
+            v, f = step(v, f)
         return v, f
-    mv = v - 2.0 * ((v @ normal) - offset)[:, None] * normal[None, :]
-    mf = f[:, ::-1]  # mirroring flips winding; flip back so normals stay outward
-    centroids, _, _ = face_geometry(mv, mf)
-    dist, _ = cKDTree(sample_surface(v, f, OUTPUT_SAMPLES, np.random.default_rng(0))).query(centroids)
-    gv, gf = submesh(mv, mf, dist > MIRROR_GAP)
-    return np.vstack([v, gv]), np.vstack([f, gf + len(v)])
-
-
-def m_mirror_gaps(v, f):
-    return mirror_gaps(v, f)
-
-
-def m_mirror_gaps_poisson(v, f):
-    return _poisson(to_meshset(*mirror_gaps(v, f)))
+    return run
 
 
 METHODS = {
-    "none": m_none,
-    "close_holes": m_close_holes,
-    "poisson": m_poisson,
+    "none": lambda v, f: (v, f),
+    "close_holes": fill.close_holes,
+    "poisson": fill.poisson,
     "symmetry+poisson": m_symmetry_poisson,
-    "mirror_gaps": m_mirror_gaps,
-    "mirror_gaps+poisson": m_mirror_gaps_poisson,
+    "mirror_gaps": fill.mirror_gaps,
+    "mirror_gaps+poisson": chain(fill.mirror_gaps, fill.poisson),
+    "thickness": fill.thickness_fill,
+    "mirror+thickness+poisson": chain(fill.mirror_gaps, fill.thickness_fill, fill.poisson),
 }
 
 METHOD_TIMEOUT = 600  # seconds; a native hang must become a FAILED row, not a stuck run

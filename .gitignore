@@ -11,3 +11,5 @@ Thumbs.db
 .venv/
 # Benchmark outputs (regenerable)
 completion/out/
+# Local AI model checkouts + weights for the B3 spike (multi-GB, never commit)
+.models/
