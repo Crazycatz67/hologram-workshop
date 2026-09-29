@@ -9,13 +9,14 @@ manipulates a *downloaded* model. This one manipulates a scan of an object you a
 
 ## Project tracks
 
-The repo now holds three tracks, planned separately so new work can't disrupt the live object hologram:
+Where this is heading: an **architectural hologram platform**. Upload a LiDAR scan of any room or object, interact with it through universal gesture and mouse controls (no hand-made parts), colour individual objects, rearrange furniture, and see what the scanner missed, filled in by a free, local algorithm and always marked as inferred. Everything on this page today is **v1**, the engine that platform is built on.
 
 | Track | Plan |
 | --- | --- |
-| **A — Object Hologram** (everything below, live) | [plans/object-hologram/ROADMAP.md](plans/object-hologram/ROADMAP.md) |
-| **B — Room Hologram**: scan a whole room and interact with every object in it | [plans/room-hologram/ROADMAP.md](plans/room-hologram/ROADMAP.md) |
-| **C — Neurotech Bionic Arm**: the Neurotechnology Exploration Club's arm, with hand-tracking and hologram tie-ins | [plans/neurotech-arm/ROADMAP.md](plans/neurotech-arm/ROADMAP.md) |
+| **A — Hologram Platform** ★ upload any scan, segment it, control, colour, decorate | [plans/platform/ROADMAP.md](plans/platform/ROADMAP.md) |
+| **B — Scan Completion** ★ fill in undersides, backs and holes, free and Mac-runnable | [plans/scan-completion/ROADMAP.md](plans/scan-completion/ROADMAP.md) ([research](plans/scan-completion/RESEARCH.md)) |
+| **C — Neurotech Bionic Arm** (parked) | [plans/neurotech-arm/ROADMAP.md](plans/neurotech-arm/ROADMAP.md) |
+| *v1 history* — the object hologram below | [plans/object-hologram/ROADMAP.md](plans/object-hologram/ROADMAP.md) |
 
 The index and the isolation rules are in [ROADMAP.md](ROADMAP.md).
 
@@ -34,7 +35,7 @@ Both pages carry a **measurement panel**: real dimensions, detected key heights 
 Gesture pages need camera permission. On macOS you may have to allow it twice: once in the
 browser, and once in System Settings → Privacy & Security → Camera.
 
-## Status (Track A)
+## Status (v1)
 
 | Phase | State |
 | --- | --- |
@@ -84,11 +85,11 @@ Then open <http://localhost:8080>.
 | `smoothLandmarks.js` | Exponential smoothing on raw landmark positions, matched frame-to-frame by nearest wrist position |
 | `serve.py` | Static server that sends `no-store` |
 | `test.html`, `test.js` | Regression suite — open the page, read pass/fail. Synthetic hand geometry and the shipped chair scan; no build step, no framework |
-| `analyze_scan.py` | Suggests crop parameters for a new raw scan (see Track A roadmap) |
+| `analyze_scan.py` | Suggests crop parameters for a new raw scan (see v1 roadmap) |
 | `clean_scan.py` | **Raw scan → clean object.** Detects and removes the ground plane (without deleting the object's base), rebuilds missing structure by mirroring, fills gaps, welds watertight, decimates for the web |
-| `repair_scan.py` | Lower-level mesh repair (PyMeshLab, no GUI) — see Track A roadmap for what worked and what didn't |
+| `repair_scan.py` | Lower-level mesh repair (PyMeshLab, no GUI) — see v1 roadmap for what worked and what didn't |
 | `ROADMAP.md`, `plans/` | Track index + isolation rules; one roadmap per track under `plans/` |
-| `room/`, `neurotech/` *(not created yet)* | Where Track B and Track C code will live, kept apart from the Track A files above |
+| `platform/`, `completion/`, `neurotech/` *(not created yet)* | Where Platform (browser), Scan Completion (Python) and Arm code will live, kept apart from the v1 files above |
 
 No bundler and no dependencies to install for the site itself — Three.js and MediaPipe
 both load from a CDN via an import map. `analyze_scan.py` needs `numpy`; `clean_scan.py`

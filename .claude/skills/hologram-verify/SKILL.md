@@ -49,13 +49,13 @@ If not `200`, start it in the background: `python serve.py 8080` (macOS) or
 If the change touches anything gesture/camera-related, say explicitly that
 this suite only proves the code does what it's supposed to given known
 synthetic inputs — it is not a substitute for a real webcam session, per
-this project's own repeated caveat in Track A's roadmap
+this project's own repeated caveat in the v1 roadmap
 (`plans/object-hologram/ROADMAP.md`).
 
-**Tracks:** `test.html` is Track A's suite and the contract for every shared
+**Tracks:** `test.html` is the v1 engine's suite and the contract for every shared
 root module. It must stay at 0 failures whichever track the change is for.
-Once Track B/C have their own test pages (`room/test.html`,
-`neurotech/test.html`), run the changed track's page too.
+Once the Platform has `platform/test.html` (and Scan Completion has
+`completion/benchmark.py`), run the changed track's check too.
 
 ## 3. Commit
 

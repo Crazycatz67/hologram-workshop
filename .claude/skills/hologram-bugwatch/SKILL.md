@@ -68,10 +68,11 @@ After investigating or fixing an item, edit its entry in place in `BUGS.md`:
 
 ## Folding in new testing feedback
 
-New items get a track tag at the start of their heading — `[A]` Object
-Hologram, `[B]` Room Hologram, `[C]` Neurotech Bionic Arm. A bug in a shared
-root module that a new track exposed is still `[A]` (the module is Track
-A's), noting which track found it.
+New items get a track tag at the start of their heading — `[A]` Hologram
+Platform, `[B]` Scan Completion, `[C]` Neurotech Bionic Arm. Bugs in the v1
+root modules are `[A-v1]`, noting which track found them. Scan Completion
+bugs are verified by running its Python tools / `completion/benchmark.py`,
+not `test.html`.
 
 When the user reports something broken (live-hands testing, a browser
 check, anything), don't leave it as a one-off note in conversation — add it

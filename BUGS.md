@@ -16,10 +16,11 @@ Each item's status line is one of:
 - `DEFERRED` — real, not a bug in this project's code, blocked on something
   outside it (a re-scan, a design decision, etc).
 
-**Tracks (2026-09-29):** one file for all three tracks, but every new item's
-heading starts with its track tag: `[A]` Object Hologram, `[B]` Room Hologram,
-`[C]` Neurotech Bionic Arm (see the root `ROADMAP.md`). Items #1–7 below
-predate the split and are all `[A]`.
+**Tracks (2026-09-29):** one file for all tracks, but every new item's
+heading starts with its track tag: `[A]` Hologram Platform, `[B]` Scan
+Completion, `[C]` Neurotech Bionic Arm (see the root `ROADMAP.md`). Items #1–7
+below predate the split and are `[A-v1]`: bugs in the v1 engine the Platform
+builds on.
 
 ---
 
@@ -64,7 +65,7 @@ components instead of ~33 real objects. Confirmed this is not fixable by
 any pipeline change, not just `--multi-part`: a direct test of reconstructing
 the whole scan as ONE combined object (abandoning per-piece splitting
 entirely) crashes Poisson reconstruction outright. The whole-set-scan
-approach is abandoned — see item #6 and Track A roadmap's 2026-09-23(2) entry.
+approach is abandoned — see item #6 and v1 roadmap's 2026-09-23(2) entry.
 `clean_scan.py --multi-part` itself is not deleted (still correct against
 synthetic data, might be useful for a smaller future multi-object scan) but
 is no longer the path to the chess hologram.
@@ -73,7 +74,7 @@ is no longer the path to the chess hologram.
 
 **Status: OPEN — needs live camera confirm**
 
-Carried forward from Track A roadmap's 2026-09-08 entry: these three gestures
+Carried forward from v1 roadmap's 2026-09-08 entry: these three gestures
 have only ever been exercised by synthetic `test.js` sequences, never a real
 webcam session. Not touched this session.
 
@@ -81,7 +82,7 @@ webcam session. Not touched this session.
 
 **Status: FIXED (verified offline) for the script; blocked on the user for real scans**
 
-New capture plan (see Track A roadmap, 2026-09-23(2)): scan the board once plus
+New capture plan (see v1 roadmap, 2026-09-23(2)): scan the board once plus
 one example of each of the 6 unique piece types, clean each individually
 with the existing unmodified `clean_scan.py`, then run the new
 `assemble_chess_set.py` to lay them onto a standard starting position and

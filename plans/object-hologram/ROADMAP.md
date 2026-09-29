@@ -1,6 +1,6 @@
-# Track A — Object Hologram — Roadmap
+# v1 History — Object Hologram (Phases 0–5)
 
-> **Moved here 2026-09-29** from the repo-root `ROADMAP.md`, unchanged apart from this note and one Out of Scope line. This is the original project plan (scan one object → hologram → hand gestures). The project now has three tracks; the root [`ROADMAP.md`](../../ROADMAP.md) is the index and holds the rules that keep them from disrupting each other. Code comments that say "see ROADMAP.md Phase N" mean the phases in **this** file.
+> **Moved here 2026-09-29** from the repo-root `ROADMAP.md`, unchanged apart from this note and a few Out of Scope pointers. This is the **record of what v1 built**: one scanned object (chair, chess) → hologram → hand gestures. The chair and chess set turned out to be test assets for a bigger goal. Forward work now lives in two tracks: **[Hologram Platform](../platform/ROADMAP.md)** (upload any scan, universal controls, segmentation, colours, room decor) and **[Scan Completion](../scan-completion/ROADMAP.md)** (filling in what the scanner missed). The root [`ROADMAP.md`](../../ROADMAP.md) is the index. Code comments that say "see ROADMAP.md Phase N" mean the phases in **this** file. v1's open items (chess captures, live gesture confirmations) are still valid and continue as Platform maintenance.
 
 ## Revision History
 
@@ -324,7 +324,7 @@ Visual feedback is real 3D "ghost hands" in the scene itself, not a flat overlay
 ## Out of Scope
 
 - AR/passthrough glasses-style interaction (ruled out in Session 1 — no Vision Pro, and iPhone has no first-party 3D hand-joint API).
-- Multi-room / building-scale scanning (`RoomPlan`/`StructureBuilder`) — not relevant to a single scanned object. *(2026-09-29: scanning a **single room** is now its own track, Track B — see [`../room-hologram/ROADMAP.md`](../room-hologram/ROADMAP.md). It stays out of scope for this track; nothing in Track A should grow room-scale features.)*
+- Multi-room / building-scale scanning (`RoomPlan`/`StructureBuilder`) — not relevant to a single scanned object. *(2026-09-29: single-room scans are now in scope for the [Hologram Platform](../platform/ROADMAP.md). Generative filling of unscanned geometry is now in scope for [Scan Completion](../scan-completion/ROADMAP.md), free and local, with inferred parts always marked.)*
 - Ultraleap Leap Motion Controller hardware path — shelved on cost grounds (no-purchase constraint), not capability. Logged as a known future option if webcam-only tracking quality proves insufficient.
 - Physical object reassembly / broken-pottery concept — abandoned in Session 5 as research-grade difficulty for a portfolio timeline.
 

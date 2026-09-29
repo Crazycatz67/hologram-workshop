@@ -67,9 +67,9 @@ WHAT THIS CANNOT DO
 It does not invent detail that was never scanned. Poisson closes gaps by smoothly
 interpolating across them, which is honest for a small hole and a guess for a large one;
 --symmetrize is the only stage that fills a gap with real measured geometry, and it only
-works on objects that are actually symmetric. True generative 3D inpainting (describe the
-missing part, have a model synthesise it) is a different, paid, research-grade problem —
-deliberately out of scope here, see ROADMAP.md.
+works on objects that are actually symmetric. Filling larger unseen regions (planes,
+retrieved or generated models, aligned to the scan and marked as inferred) is the job of
+the Scan Completion track -- see plans/scan-completion/ROADMAP.md -- not this script.
 
 Always render the result and look at it. Every constant below has a tested default, not
 a correct one.

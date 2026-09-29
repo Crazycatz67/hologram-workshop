@@ -4,7 +4,7 @@
 
 **Relationship to Track A:** C *borrows* from A but doesn't depend on it, and A never depends on C. The arm itself (hardware, electronics, firmware) is a separate engineering project. Its browser-side tools live in `neurotech/`, its assets in `assets/arm/`, and it follows the isolation rules in the root [`ROADMAP.md`](../../ROADMAP.md).
 
-> **Status: scaffold.** Most of the arm's basics haven't been discussed yet (see "Parameters to confirm"). Everything below marked *assumed* or *proposed* is a placeholder to confirm or correct, not a decision.
+> **Status: PARKED (2026-09-29)** while the Hologram Platform and Scan Completion are the main focus. Nothing here is abandoned. **Scaffold:** Most of the arm's basics haven't been discussed yet (see "Parameters to confirm"). Everything below marked *assumed* or *proposed* is a placeholder to confirm or correct, not a decision.
 
 ## Revision History
 

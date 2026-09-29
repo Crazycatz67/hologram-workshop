@@ -11,12 +11,13 @@ Reconstruct state from durable sources — never assume anything from
 conversation memory alone, since a fresh session has none. Do all of the
 following, then synthesize one summary; don't just dump raw output.
 
-**Tracks (since 2026-09-29):** the project has three tracks — A Object
-Hologram, B Room Hologram, C Neurotech Bionic Arm. The root `ROADMAP.md` is a
+**Tracks (since 2026-09-29):** A Hologram Platform ★, B Scan Completion ★,
+C Neurotech Bionic Arm (parked), plus `plans/object-hologram/ROADMAP.md` as
+the v1 history of what's already built. The root `ROADMAP.md` is a
 short index + isolation rules; each track's plan lives at
 `plans/<track>/ROADMAP.md` with its own Revision History and "Next Concrete
 Action". If the user hasn't said which track, give a one-line status for each
-and ask which one to pick up — don't default to Track A.
+and ask which one to pick up — don't default to one.
 
 ## 1. Read the sources of truth, in this order
 
