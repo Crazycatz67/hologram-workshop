@@ -121,6 +121,12 @@ BOUNDARY_ANNULUS = 0.80  # "at the edge" means beyond this fraction of the crop 
 
 RANSAC_ITERATIONS = 400
 
+# POISSON_THREADS_NOTE: screened Poisson is always run single-threaded. With PyMeshLab's
+# default threading it intermittently aborts with "Failed to close loop" -- and exits the
+# process with status 0, so a failed clean-up looks like a successful one. Measured
+# 2026-09-29 on the chair: multi-threaded 1 success in 5 identical runs (and 1 in 3 for the
+# full documented clean_scan.py command); single-threaded 5 in 5.
+
 # --multi-part mode: a scan is treated as several separate objects (a chess board and its
 # pieces) rather than one. Components are split BEFORE Poisson fill, specifically so
 # reconstruction can never weld two pieces that sit close together into one blob -- Poisson
@@ -382,6 +388,7 @@ def process_component(ms, mesh_id, args, floor_y):
                 depth=args.poisson_depth,
                 samplespernode=args.poisson_samples,
                 pointweight=args.poisson_weight,
+                threads=1,  # see POISSON_THREADS_NOTE
             )
         except Exception as exc:
             print(f"    part {mesh_id}: Poisson failed ({exc}) -- keeping raw split geometry")
@@ -657,6 +664,7 @@ def main():
             depth=args.poisson_depth,
             samplespernode=args.poisson_samples,
             pointweight=args.poisson_weight,
+            threads=1,  # see POISSON_THREADS_NOTE
         )
         if ms.current_mesh_id() == before_id:
             raise SystemExit("Poisson reconstruction produced no new mesh -- input too sparse, "

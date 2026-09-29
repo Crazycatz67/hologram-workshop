@@ -6,3 +6,8 @@ assets/plush/
 __pycache__/
 .DS_Store
 Thumbs.db
+
+# Local Python environment for completion/ tools (never commit)
+.venv/
+# Benchmark outputs (regenerable)
+completion/out/

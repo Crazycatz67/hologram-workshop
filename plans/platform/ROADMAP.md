@@ -19,6 +19,12 @@ Nobody offers free, in-browser, gesture-controlled interaction with *your own se
 
 ## Revision History
 
+- **2026-09-29 (2):** **P0 built** in `platform/` (`index.html`, `main.js`, `upload.js`, `framing.js`).
+  - **What it does:** drag-drop or pick GLB/GLTF/OBJ(+MTL)/PLY, parsed in the browser. `detectFloorY` finds the lowest large up-facing surface: a histogram of vertices with upward normals, trusted only in the bottom 15% of the height, otherwise it falls back to the 1st percentile of height, so a floorless chair's seat is never taken for the floor. Every scan is placed with its floor at y=0, and scans wider than 2.5 m get the dollhouse framing. It shows a stats readout, a plain-material toggle and a "Load sample" button.
+  - **Deviation from v1:** framing never moves the scan (v1's `frameObject` re-centres it). The Platform needs one consistent floor for snapping, and pivots belong to the selected object.
+  - **Verified in Chrome:** the chair loads, standing on y=0, 76,000 tris, 0.61 × 0.67 × 0.80 m, no console errors. Room framing was checked only on a synthetic 6×5 m floor.
+  - **Not yet exercised:** a real room scan, actual drag-drop / file picker, PLY files, error paths.
+  - **Known gaps:** W×D is the axis-aligned box, not the oriented footprint (`measure.js` has the oriented version, due in P4). Point clouds render with a plain points material. The capture-tips panel overlaps the model in narrow windows.
 - **2026-09-29:** Track created as a main focus, alongside Scan Completion (Track B). It absorbs the short-lived "Room Hologram" track, whose useful content is merged below (capture notes, touching-objects and clutter risks, room-scale camera, size budget).
 
 ## Constraints (this track)
@@ -118,5 +124,5 @@ Upgrade r161 → current (≥0.180), fix whatever `test.html` catches, then:
 
 ## Next Concrete Action
 
-1. **P0:** `platform/index.html` with drag-drop upload (GLB/OBJ/PLY), floor/up-axis detection, and scale-aware framing, reusing the v1 modules by import.
-2. Load the accidental Area-mode room scan (or a fresh Area scan) and record triangle count and frame time on the M5 Air.
+1. **Finish P0 with a real room:** load the accidental Area-mode room scan (or a fresh Area scan) at `platform/index.html`, check the dollhouse framing, and record triangle count and frame time on the M5 Air. If it's heavy, add meshoptimizer decimation.
+2. **P1:** scene mode vs object mode, plus ray-select of whole connected components (a first "universal selection" before P2's real segmentation).

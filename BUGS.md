@@ -114,3 +114,17 @@ work correctly against that representation — this is reasoned through very
 carefully and the synthetic test is designed specifically to catch a
 regression here, but per items #1-3, `test.html` still hasn't actually been
 run in a browser this session to confirm it passes as written.
+
+## 8. [A-v1] Poisson fill randomly aborted clean_scan.py — and reported success
+
+**Status: FIXED (verified offline)** (2026-09-29). Found while building
+`completion/benchmark.py` (Track B): PyMeshLab's screened Poisson with default
+threading intermittently prints `Failed to close loop` and exits the process with
+**status 0**, so a failed clean-up looked like a successful one (no output file,
+no error code). Measured on the chair: multi-threaded Poisson succeeded 1/5
+identical runs; the documented `clean_scan.py` chair command produced output 1/3.
+Fix: `threads=1` on both Poisson calls (`POISSON_THREADS_NOTE` in `clean_scan.py`).
+After: 5/5 runs produce output, identical stage stats (symmetry 164.3°, 88.3%), and
+faster (5.4 s vs ~10.5 s). No regression check in `test.html` possible (Python) —
+`completion/benchmark.py` exercises Poisson on every run and reports any native
+crash as a FAILED row instead of hanging.

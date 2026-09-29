@@ -8,6 +8,20 @@ The research behind every choice here is in [`RESEARCH.md`](RESEARCH.md).
 
 ## Revision History
 
+- **2026-09-29 (2):** **B0 benchmark built and baselined** (`completion/benchmark.py`, run with `.venv/bin/python completion/benchmark.py`).
+  - **Setup:** hides the chair's underside, the side against a wall (4 walls, averaged) and 10 random 5 cm holes, then scores each method.
+  - **Scores:** *coverage* is the share of hidden surface recovered within 1/2 cm. *Added real* is the share of invented surface that lies within 2 cm of real geometry, which catches methods that "fill" by wrapping the object in a blob.
+  - **Isolation:** every method runs in its own process, so time and peak memory are per-method, and native crashes become FAILED rows.
+  - **Found and fixed a v1 bug on the way:** multi-threaded Poisson randomly aborted *with exit status 0* (BUGS.md #8). It's now single-threaded everywhere.
+  - **New method:** `mirror_gaps` (mirror across the symmetry plane, but keep only mirrored faces that land where the scan has nothing). It never invents surface that isn't real, and it replaces the old full-copy mirror that crashed Poisson on coincident surfaces.
+
+**Baseline** (2026-09-29, chair, M5 Air, all methods under 6 s and 0.5 GB; the ground-truth caveat in the script applies):
+
+| Scenario | Best current method | Coverage @2 cm | Added surface that's real | Verdict |
+| --- | --- | --- | --- | --- |
+| Random holes | mirror_gaps + Poisson | 100% (1 mm mean) | 100% | **Solved** |
+| Against a wall | mirror_gaps + Poisson | 88% | 79% | Good. close_holes covers 95% but only 44% of what it adds is real |
+| **Underside** | any Poisson variant | **75%** (baseline without filling: 64%) | **~63%** | **The open problem.** Mirroring can't help (the symmetry plane is vertical), so this is where plane/thickness priors (B1) and retrieval/generation (B2/B3) must earn their place |
 - **2026-09-29:** Track created as a main focus, alongside the Platform. Design based on a three-part research pass (completion algorithms, segmentation, prior art). Key finding: on a 16 GB Mac, **classical geometry + primitive fitting does most of the real work**. Generative completion of hidden sides is borderline on the Mac today (SPAR3D, Hunyuan3D-2mini forks), and the strongest scan-conditioned models still need CUDA or 24 GB+.
 
 ## Constraints (this track)
@@ -55,6 +69,15 @@ Tier 4. Keep a small local index of CLIP embeddings over a licence-filtered furn
 ### B3 — Generative Spike (Mac first)
 Tier 5. Install SPAR3D (MPS / low-VRAM mode) and a Hunyuan3D-2mini Mac fork on the M5, run the chair through each, and write down time, peak memory and B0 error. Try SPAR3D's point-cloud conditioning with the scan's own points. If the M5 can't cope, run the same scripts on the 2070. **Record the honest outcome either way.**
 
+**Install findings (2026-09-29 research, nothing installed yet; verify each step when running it):**
+- **Order:** TripoSR first (MIT, weights not gated, safest environment check), then SPAR3D, then a Hunyuan fork. Use a **separate Python 3.11/3.12 environment per model** (`uv venv --python 3.12`). Their pinned dependencies (e.g. SPAR3D pins numpy 1.26.4 and transformers 4.42.3) would break the benchmark's 3.13 `.venv`.
+- **SPAR3D** ([repo](https://github.com/Stability-AI/stable-point-aware-3d)):
+  - **Mac:** needs macOS 15.2+ and `PYTORCH_ENABLE_MPS_FALLBACK=1`. `--low-vram-mode` brings it to ~7 GB on CUDA; MPS memory is unconfirmed. The README says MPS "consumes more memory" and recommends CPU below 32 GB.
+  - **Builds and access:** it compiles two local extensions (`texture_baker`, `uv_unwrapper`; needs `brew install libomp cmake`), and there's an open Mac build issue (#20). **Weights are gated**: it's free, but you need a Hugging Face account, to accept the licence, and a login token.
+  - **Point-cloud conditioning only exists in `gradio_app.py`, not `run.py`.** It takes a `.ply` **with vertex RGB**, forced to exactly **512 points**, passed as `batch["pc_cond"]` (`[1, 512, 6]`: xyz + rgb in 0–1). The coordinate frame is undocumented. Plan: export the cloud the demo generates for a chair photo, study its frame and scale, then map our scan's points into it. To script it, copy `run_model()` from `gradio_app.py`.
+- **Hunyuan3D-2.1 Mac fork** ([VladimirTalyzin/hunyuan3d-2.1-mac-rocm](https://github.com/VladimirTalyzin/hunyuan3d-2.1-mac-rocm)): `./install.sh --shape-only`, Python 3.10–3.12, 5.7 min shape generation on an M4 Pro 24 GB, up to ~26 GB of weights for the full install. One secondary source claims 24 GB of RAM is needed for shape generation, so it's risky on 16 GB. **Licence excludes the EU, UK and South Korea.**
+- **SF3D:** it works on a Mac, but it takes no point-cloud input, so it's only useful as a second baseline.
+
 ### B4 — Multi-Scan Fusion
 If the user scans again after moving furniture, fuse the scans: the moved object reveals **real** hidden geometry (the RecurGS idea), which beats any guess.
 
@@ -80,5 +103,5 @@ Run the cascade per object after the Platform's segmentation (P2) has split a ro
 
 ## Next Concrete Action
 
-1. **B0:** write `completion/benchmark.py` against `assets/chair/chair_clean.obj`, which needs a held-out underside cut, and record today's pipeline as the baseline.
+1. **B1, aimed at the underside:** a *thickness prior* (panels like a seat are slabs: where the top is scanned and the bottom isn't, offset the top by the thickness measured at the panel's scanned edges) and *plane extension* (extend fitted planes to their intersections). Beat 75% coverage / 63% real on the underside row without losing the other rows.
 2. **B3 spike** (can run in parallel since it's just installs + one run): SPAR3D + Hunyuan3D-2mini on the M5, recording time and peak memory.

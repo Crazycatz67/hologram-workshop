@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hologram Platform — P0: Upload Any Scan</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b0d10; overflow: hidden; }
+    canvas { display: block; width: 100%; height: 100%; }
+    body { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #c9dcec; }
+
+    #hud {
+      position: fixed; top: 12px; left: 12px; right: 12px;
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    }
+    #hud > * {
+      background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 5px 9px; border-radius: 4px;
+    }
+    #status { color: #7fe3a1; }
+    #status.error { color: #ff5c5c; }
+    #fps { color: #9db4d0; }
+    #info { color: #c9dcec; }
+    #info:empty { display: none; }
+    button {
+      font: inherit; color: #4fd1ff; cursor: pointer;
+      background: rgba(0,0,0,0.55); border: 1px solid rgba(79,209,255,0.4);
+      padding: 5px 9px; border-radius: 4px;
+    }
+    button:hover { background: rgba(79,209,255,0.12); }
+
+    #guide {
+      position: fixed; bottom: 12px; left: 12px; max-width: 360px;
+      background: rgba(8,14,22,0.82); border: 1px solid rgba(120,200,255,0.16);
+      border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.5;
+      color: #9db4d0; backdrop-filter: blur(8px);
+    }
+    #guide b { color: #c9dcec; }
+    #guide p { margin: 0 0 6px; }
+    #guide p:last-child { margin: 0; color: #6b7d94; }
+
+    #drop {
+      position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+      background: rgba(11,13,16,0.7); border: 3px dashed #4fd1ff; box-sizing: border-box;
+      font-size: 20px; color: #4fd1ff; pointer-events: none; z-index: 10;
+    }
+    #drop.on { display: flex; }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="hud">
+    <button id="pick">Choose file…</button>
+    <button id="sample">Load sample</button>
+    <button id="plain">Plain material</button>
+    <span id="status">drop a .glb / .obj / .ply anywhere</span>
+    <span id="info"></span>
+    <span id="fps">— fps</span>
+  </div>
+  <div id="guide">
+    <p><b>Capture:</b> Scaniverse <b>Object</b> mode for single items, <b>Area</b> mode for rooms. Export as <b>GLB</b> or <b>OBJ</b>.</p>
+    <p>Rooms (over 2.5 m) open as a dollhouse view; smaller scans orbit like an object. Drag to orbit, scroll to zoom, R to auto-rotate.</p>
+    <p>Files are read in your browser and never uploaded.</p>
+  </div>
+  <div id="drop">Drop scan to load</div>
+  <input id="picker" type="file" accept=".glb,.gltf,.obj,.mtl,.ply" multiple hidden />
+
+  <script type="module">
+    import(`./main.js?v=${Date.now()}`);
+  </script>
+</body>
+</html>
