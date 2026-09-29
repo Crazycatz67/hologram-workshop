@@ -165,6 +165,8 @@ METHODS = {
     "mirror+thickness+poisson": chain(fill.mirror_gaps, fill.thickness_fill, fill.poisson),
     "slab": fill.slab_fill,
     "mirror+slab+poisson": chain(fill.mirror_gaps, fill.slab_fill, fill.poisson),
+    # What complete.py ships: the scan exactly as measured + inferred patches only.
+    "complete": lambda v, f: fill.complete(v, f)[:2],
 }
 
 METHOD_TIMEOUT = 600  # seconds; a native hang must become a FAILED row, not a stuck run

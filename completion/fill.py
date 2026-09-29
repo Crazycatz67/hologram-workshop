@@ -226,6 +226,28 @@ def slab_fill(v, f):
     return append(v, f, gv, gf)
 
 
+def complete(v, f, watertight=False):
+    """The recommended B1 pipeline, returning (vertices, faces, inferred_mask).
+
+    Default: the original scan faces EXACTLY as measured, plus the reconstructed surface
+    only where the scan has nothing within GAP -- the track's fill policy ("keep every real
+    scanned surface, fill only the gaps"). Poisson re-meshes everything, smoothing real
+    detail too, so its output is used only as the source of the gap patches. The seams
+    between scan and patch are not welded; for a single closed surface pass
+    watertight=True and every face is labelled by its distance to the scan instead.
+    """
+    rebuilt_v, rebuilt_f = poisson(*slab_fill(*mirror_gaps(v, f)))
+    if watertight:
+        centroids, _, _ = face_geometry(rebuilt_v, rebuilt_f)
+        dist, _ = cKDTree(sample_surface(v, f, SAMPLES, np.random.default_rng(0))).query(centroids)
+        return rebuilt_v, rebuilt_f, dist > GAP
+    pv, pf = keep_only_gaps(v, f, rebuilt_v, rebuilt_f)
+    out_v, out_f = append(v, f, pv, pf)
+    inferred = np.zeros(len(out_f), dtype=bool)
+    inferred[len(f):] = True
+    return out_v, out_f, inferred
+
+
 def close_holes(v, f):
     ms = to_meshset(v, f)
     ms.meshing_repair_non_manifold_edges()

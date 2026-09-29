@@ -20,6 +20,10 @@ The research behind every choice here is in [`RESEARCH.md`](RESEARCH.md).
 
   - **Stress cuts:** underside with 47% of the chair hidden goes 64% / 42% (Poisson) → **95% / 91%**. Ragged underside cut: 99% / 97%. Wall ragged or with a 60%-deep band: 100% / 100%.
   - **Cost:** ~5 s and ~0.39 GB on the M5 Air.
+  - **Shipped as `completion/complete.py`**, which writes the output contract: one `o <name>` with `usemtl scanned` / `usemtl inferred` groups, plus a JSON sidecar.
+    - **Default output:** the scan's faces exactly as measured, plus Poisson surface *only* in the gaps. This scores the same as the full chain (underside 98% / 96% real, wall 99% / 96%, holes 100% / 100%) while adding less surface.
+    - **`--watertight`:** the single sealed Poisson surface, labelled by distance.
+    - **Sanity check:** on the complete chair it infers **0.0%**. Nothing missing, nothing invented.
   - **This is now the recommended B1 pipeline.** The next honest test is a *different* object and a room, since everything so far is one chair.
 - **2026-09-29 (3):** **B1 first method: `thickness_fill` closes the underside gap** (`completion/fill.py`, which now holds all methods; the benchmark imports it).
   - **The idea:** panels are slabs. For each upward face with nothing scanned below it (probed straight down to 8 cm), take the drop to the nearest open scan boundary in plan view as the local thickness, and copy the face down by that amount. Then apply the merge rule. It uses measured geometry moved by a measured distance, with no model involved.
