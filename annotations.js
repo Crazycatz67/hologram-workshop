@@ -139,8 +139,18 @@ export function createAnnotations({ object, camera, renderer, scene, labelLayer,
     remove,
     setText,
     update,
+    // Teardown only (measurePanel.dispose on a carousel swap): drops the markers/labels from
+    // the scene WITHOUT saving. Going through remove() saved after each deletion, so swapping
+    // models away wrote an empty list over the model's stored notes -- they were gone when
+    // you swapped back. Deleting notes for real stays remove()'s job.
     clear() {
-      for (const note of [...notes]) remove(note.id);
+      for (const note of notes) {
+        scene.remove(note.marker);
+        note.marker.geometry.dispose();
+        note.marker.material.dispose();
+        note.label.remove();
+      }
+      notes.length = 0;
     }
   };
 }

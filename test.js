@@ -643,6 +643,44 @@ async function main() {
       `pos off by ${posErr.toExponential(2)}, rot off by ${rotErr.toExponential(2)}, scale off by ${scaleErr.toExponential(2)}`);
   });
 
+  // ---- saved notes survive panel construction and a carousel swap ----------------------
+  // Found by the 2026-09-29 lab run: with ANY saved note, createMeasurePanel threw a TDZ
+  // ReferenceError (annotations restored notes and called back into renderNotes before the
+  // `annotations` const existed), which left hologram.html's carousel stuck busy and the
+  // camera button disabled; and dispose() (every carousel swap) saved an empty list over the
+  // model's stored notes. Uses its own storage key and cleans up after itself.
+  const { createMeasurePanel } = await import(`./measurePanel.js${V}`);
+  group('Measure panel — saved notes (load + swap-away)', () => {
+    const key = 'hologram-notes:__regression-test';
+    const saved = JSON.stringify([{ x: 0, y: 0.1, z: 0, text: 'kept' }]);
+    localStorage.setItem(key, saved);
+    const panelScene = new THREE.Scene();
+    const box = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.8, 0.5));
+    panelScene.add(box);
+    const mount = document.createElement('div');
+    mount.hidden = true;
+    document.body.appendChild(mount);
+    let panel = null;
+    let err = null;
+    try {
+      panel = createMeasurePanel({
+        mount, object: box, camera, scene: panelScene,
+        renderer: { domElement: document.createElement('canvas') },
+        modelName: '__regression-test'
+      });
+    } catch (e) {
+      err = e;
+    }
+    checkTrue('a model with a saved note builds its panel without throwing', !err, err ? String(err) : 'ok');
+    const rows = mount.querySelectorAll('.note-row').length;
+    checkTrue('the saved note is listed', rows === 1, `${rows} note rows`);
+    panel?.dispose();
+    const after = localStorage.getItem(key);
+    checkTrue('dispose (a carousel swap) keeps the stored notes', after === saved, `stored after dispose: ${after}`);
+    localStorage.removeItem(key);
+    mount.remove();
+  });
+
   // ---- measurement, against the real shipped chair -------------------------------------
   let model = null;
   try {

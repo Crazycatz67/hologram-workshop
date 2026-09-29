@@ -35,6 +35,11 @@ executed. Needs: open `hologram.html`, swap between the two `MODELS`
 entries via the carousel UI and via arrow keys, 5+ times, confirm no
 console errors and no growing count of orphaned `requestAnimationFrame`
 loops (each `createMeasurePanel`/`.dispose()` pair should net to zero).
+**2026-09-29 lab run:** swapped 12× via arrow keys in a real browser (after the #9 fix; before it,
+the carousel stuck on "busy" whenever the model had a saved note). No console errors, status and
+active card are correct each time, and notes survive the swap (#10). The rAF count is still
+unconfirmed: the automation tab was backgrounded, so rAF never ticked. Code check: `dispose()`
+does `cancelAnimationFrame(frame)`.
 
 ## 2. Per-part explode retargeting — never run in a browser, and no real multi-part asset yet
 
@@ -49,7 +54,8 @@ a genuine live-hands feel.
 
 ## 3. New `test.js` group ('Literal explode + per-part retargeting') — never actually run
 
-**Status: FIXED (needs live confirm)**
+**Status: FIXED (verified offline)**: 2026-09-29 lab run. test.html ran in Chrome and every case
+in this group and in the OBJ-style group (#7) passes (suite 72/72).
 
 Written 2026-09-23 to close the real gap described in item #5. Needs
 `test.html` opened in a real browser to confirm it actually passes as
@@ -77,6 +83,12 @@ is no longer the path to the chess hologram.
 Carried forward from v1 roadmap's 2026-09-08 entry: these three gestures
 have only ever been exercised by synthetic `test.js` sequences, never a real
 webcam session. Not touched this session.
+**2026-09-29 gesture lab (synthetic):** the thresholds a live test should check first. Push only
+fires when apparent hand size changes by more than 30% per second (`DEPTH_DEADZONE`): palm
+0.10→0.13 over 1s does nothing, and neither does 0.08→0.13 over 2s. Spin ignores twists slower
+than ~14°/s (`TWIST_DEADZONE`): a 40° twist gives 13.9° of spin over 0.5s and 0 over 2s. Pitch
+needs the second hand to move more than ~35% of 0.24 frame in 0.67s. Stretch-explode has no lower
+bound at all (see #11).
 
 ## 6. Chess pipeline rebuilt around per-piece-type scans + `assemble_chess_set.py`
 
@@ -128,3 +140,56 @@ After: 5/5 runs produce output, identical stage stats (symmetry 164.3°, 88.3%),
 faster (5.4 s vs ~10.5 s). No regression check in `test.html` possible (Python) —
 `completion/benchmark.py` exercises Poisson on every run and reports any native
 crash as a FAILED row instead of hanging.
+
+## 9. [A-v1] Any saved note crashed the measure panel, and left hologram.html's camera button disabled
+
+**Status: FIXED (verified offline)**: 2026-09-29 lab run. `createAnnotations()` restores saved
+notes synchronously and calls `onChange` → `renderNotes()`, which read the `annotations` const
+before it was initialised (measurePanel.js, TDZ `ReferenceError`). Reproduced by saving one note
+to localStorage and reloading. index.html showed the error as its status, with the SIZE section
+empty. On hologram.html, `loadModelById` threw part-way through, so `swapping` stayed true, the
+carousel was stuck "busy", and `startBtn` was never re-enabled. Fixed by ignoring `onChange` until
+construction finishes; the existing initial `renderNotes()` draws the list. The regression group
+in test.js is "Measure panel — saved notes". Both pages now load cleanly with a saved note.
+
+## 10. [A-v1] Swapping models erased the previous model's saved notes
+
+**Status: FIXED (verified offline)**: 2026-09-29 lab run. `measurePanel.dispose()` →
+`annotations.clear()` → `remove()` per note, and `remove()` saves each time, so a carousel swap
+wrote `[]` over the model's stored notes. Measured: a stored note became `[]` after one swap, and
+the note was gone after swapping back. `clear()` now tears down markers and labels without
+persisting. Covered by the same test.js group, and confirmed live with 6 back-and-forth swaps.
+
+## 11. [A-v1] Explode stretches the object while two open hands are held still
+
+**Status: OPEN, needs live camera confirm.** Found by the gesture lab
+(`docs/lab/gestures/gesture-lab.html`). Explode is the only continuous channel with no deadzone
+(`applyExplode`), and its clamp floor is the home scale. Tracking noise can therefore push the
+stretch up but never back down. Measured with two still open hands, realistic 0.002 jitter and
+smoothing off: scale.x reaches 1.069 after 3s and 1.109 after 10s. At 0.004 jitter it reaches
+1.25 after 3s. Through the full pipeline (smoothing on) the lab shows none at 0.002 and
+1.06/1.15/1.21 at 0.004/0.008/0.012. Fix direction: a span-rate deadzone like the other channels.
+It needs a real-jitter number to size the deadzone, so it has not been guess-fixed.
+
+## 12. [A-v1] A fast clap fails below ~15fps because landmark smoothing is per-call
+
+**Status: OPEN, needs live camera confirm.** `smoothLandmarks.js` blends with a fixed
+`ALPHA = 0.5` on every call, which is the frame-rate trap manipulator.js removed everywhere else.
+The gesture lab ran a 200ms clap at 8, 10 and 12fps: it does not fire with smoothing on, and fires
+with smoothing off (it fires both ways at 15fps and above). A related effect: at 10fps, move, spin,
+push and tilt give 60–78% of their 60fps result (push gives 48%). Part of that is measured
+(`FILTER_GAIN` is exact only in continuous time; the discrete estimate is 0.93 at 15fps and 0.86
+at 10fps). Fix direction: a time-constant alpha, `1-exp(-dt/tau)` with tau ≈ 24ms (equal to 0.5
+at 60fps), which needs a timestamp passed in. Worth fixing only if the real camera runs below
+~20fps; check the fps HUD first.
+
+## 13. [A-v1] repair_scan.py `--poisson` silently wrote nothing about 2 runs in 5 (same cause as #8)
+
+**Status: FIXED (verified offline)**: 2026-09-29 lab run. The #8 fix (`threads=1`) was applied
+to clean_scan.py and completion/fill.py but not to repair_scan.py. Before: 5 identical runs of the
+documented chair `--poisson` command gave exit 0 every time, but only 3 wrote a file ("Failed to
+close loop"). After: 8/8 runs wrote a file with identical topology (56371 verts), ~2.0s each.
+Also fixed in this pass: analyze_scan.py told users to paste a `CHAIR_TRIM` into
+`trimByCylinder`, which no page calls any more. It now prints clean_scan.py's
+`--crop-center-x/--crop-center-z/--crop-radius` flags. The printed values were verified with a
+`clean_scan.py --dry-run`.

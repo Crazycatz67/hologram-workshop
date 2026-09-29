@@ -296,11 +296,18 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
   const exportOut = el('div', 'measure-stats');
   notesBody.append(noteBtn, noteList, exportRow, exportOut);
 
+  // createAnnotations() restores saved notes synchronously, calling onChange for each one
+  // BEFORE this const is initialised -- renderNotes() reading `annotations` then threw a
+  // TDZ ReferenceError, which aborted the whole panel (and hologram.js's model load with
+  // it) for anyone who had ever saved a note. The initial renderNotes() below draws the
+  // restored list once construction is done.
+  let notesReady = false;
   const annotations = createAnnotations({
     object, camera, renderer, scene, labelLayer,
     modelKey: modelName,
-    onChange: () => renderNotes()
+    onChange: () => { if (notesReady) renderNotes(); }
   });
+  notesReady = true;
 
   function renderNotes() {
     noteList.innerHTML = '';

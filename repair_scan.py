@@ -105,7 +105,11 @@ def main():
         print(f"cropped to radius {args.crop_radius} around ({cx}, {cz}): "
               f"{ms.current_mesh().vertex_number()} vertices remain")
 
-        ms.generate_surface_reconstruction_screened_poisson()
+        # threads=1: multi-threaded Poisson intermittently prints "Failed to close loop" and
+        # kills the process with exit status 0, so a failed repair looked like a success
+        # (measured here: 2/5 identical runs wrote no file). Same fix and cause as
+        # clean_scan.py's POISSON_THREADS_NOTE / BUGS.md #8.
+        ms.generate_surface_reconstruction_screened_poisson(threads=1)
         ms.set_current_mesh(ms.mesh_number() - 1)
         report_topology(ms, "after Poisson reconstruction")
 

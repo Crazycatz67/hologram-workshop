@@ -3,12 +3,12 @@
 Turns the by-hand analysis done for the chair scan (see ROADMAP.md Phase 2/3) into a
 repeatable tool: histograms the real vertex data, looks for a genuine empty gap between
 "the object" and "everything else the scan happened to pick up," and reports a center +
-radius ready to paste into trimGeometry.js's trimByCylinder().
+radius ready to pass to clean_scan.py (--crop-center-x/--crop-center-z/--crop-radius).
 
 This tool only RECOMMENDS parameters - it does not modify the GLB or apply the crop
-itself. The actual cropping logic already exists and is tested in trimGeometry.js;
-duplicating it here in Python would mean two implementations to keep in sync for no
-reason. Always look at the printed histogram before trusting the suggestion: a real gap
+itself. The actual cropping is clean_scan.py's ISOLATE stage (the browser-side
+trimByCylinder in trimGeometry.js is no longer called by any page); duplicating it here
+would mean two implementations to keep in sync for no reason. Always look at the printed histogram before trusting the suggestion: a real gap
 looks like a run of near-zero bins between two populated regions, not a guess.
 
 Assumes Y is up, matching glTF/Scaniverse convention.
@@ -165,8 +165,10 @@ def main():
             print(f"  radius={r_test:.3f}: {k} kept ({100*k/len(pos):.1f}%)")
 
     print()
-    print("Paste into main.js / hologram.js (or wherever trimByCylinder is called):")
-    print(f"  const CHAIR_TRIM = {{ center: {{ x: {cx:.3f}, z: {cz:.3f} }}, radius: {radius:.3f} }};")
+    # Cropping moved out of the browser into clean_scan.py (2026-09-06): trimByCylinder is no
+    # longer called by any page, so the suggestion is printed as clean_scan.py's own flags.
+    print("Pass to clean_scan.py (start with --dry-run):")
+    print(f"  --crop-center-x {cx:.3f} --crop-center-z {cz:.3f} --crop-radius {radius:.3f}")
     print()
     print("This is a suggestion, not a guarantee - check the histogram above matches what you'd")
     print("expect (one populated region near the center, a gap, then whatever else got scanned)")
