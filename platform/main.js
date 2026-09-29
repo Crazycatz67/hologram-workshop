@@ -4,7 +4,7 @@ const V = new URL(import.meta.url).search;
 
 const THREE = await import('three');
 const { createScene, startRenderLoop } = await import('../scene.js' + V);
-const { default: HolographicMaterial } = await import('../HolographicMaterial.js' + V);
+const { createLook } = await import('./look.js' + V);
 const { groupFiles, parseGroup, countTriangles, sha256Hex, filesFromDrop, ACCEPT } = await import('./upload.js' + V);
 const { createLibrary } = await import('./library.js' + V);
 const exporter = await import('./export.js' + V);
@@ -19,31 +19,15 @@ const infoEl = $('info');
 
 const { scene, camera, renderer, controls } = createScene();
 
-// Same look as hologram.js / main.js, so an uploaded scan is judged through the shader that ships.
-const hologramMaterial = new HolographicMaterial({
-  hologramColor: '#4fd1ff',
-  hologramBrightness: 1.25,
-  fresnelAmount: 0.45,
-  fresnelOpacity: 1.0,
-  scanlineSize: 40.0,
-  signalSpeed: 0.6,
-  hologramOpacity: 1.0,
-  enableBlinking: true,
-  blinkFresnelOnly: true
-});
+// Every hologram material comes from look.js: photosafe (WCAG flash limit, no additive
+// bloom, smoothed shading on rough scans), with the Realism / Motion controls.
+const look = createLook({ scene, mount: $('look') });
+const hologramMaterial = look.parents.base;
 const plainMaterial = new THREE.MeshStandardMaterial({ color: 0x8fd3ff, roughness: 0.6, metalness: 0.0 });
 const pointsMaterial = new THREE.PointsMaterial({ color: 0x4fd1ff, size: 0.01 });
 
-// Object-mode highlights are separate material instances so the shared base material is never
-// touched. Hover is a pale cyan, selection amber: distinct from each other and from the base.
-const hoverHolo = new HolographicMaterial({
-  hologramColor: '#d6fbff', hologramBrightness: 1.6, fresnelAmount: 0.6, fresnelOpacity: 1.0,
-  scanlineSize: 40.0, signalSpeed: 0.6, hologramOpacity: 1.0, enableBlinking: false
-});
-const selectedHolo = new HolographicMaterial({
-  hologramColor: '#ffb040', hologramBrightness: 1.6, fresnelAmount: 0.6, fresnelOpacity: 1.0,
-  scanlineSize: 40.0, signalSpeed: 0.6, hologramOpacity: 1.0, enableBlinking: false
-});
+// Object-mode highlights (hover pale cyan, selection amber) live in look.js too, so they
+// share the realism blend and the safety settings; these are the plain-mode equivalents.
 const hoverPlain = new THREE.MeshStandardMaterial({ color: 0x8fd3ff, emissive: 0x2f8fb0, roughness: 0.6 });
 const selectedPlain = new THREE.MeshStandardMaterial({ color: 0x8fd3ff, emissive: 0xb07020, roughness: 0.6 });
 
@@ -59,7 +43,7 @@ startRenderLoop({
   renderer, scene, camera, controls,
   onFrame: (fps) => { fpsEl.textContent = `${fps} fps`; },
   onTick: () => {
-    hologramMaterial.update(); hoverHolo.update(); selectedHolo.update();
+    look.update();
     objectMode.tick();
   }
 });
@@ -78,13 +62,14 @@ function drawnBox(root) {
 let plain = new URLSearchParams(location.search).get('plain') === '1';
 const plainBtn = $('plain');
 
-// THE one place materials are assigned (look.js will replace this). Contract: before a mesh
-// reaches here its loaded material is on `mesh.userData.original` (textures / vertex colours
-// intact), so a realism blend or GLB export can get the real scan back.
+// THE one place materials are assigned. Contract: before a mesh reaches here its loaded
+// material is on `mesh.userData.original` (textures / vertex colours intact) -- look.js
+// reads it for the realism blend, export.js for GLB export.
 function applyMaterials() {
   for (const item of items.values()) {
+    if (!item.root.userData.lookPrepared) { look.prepare(item.root); item.root.userData.lookPrepared = true; }
     item.root.traverse((c) => {
-      if (c.isMesh) c.material = plain ? plainMaterial : hologramMaterial;
+      if (c.isMesh) c.material = plain ? plainMaterial : look.materialFor(c, 'base');
       else if (c.isPoints) c.material = pointsMaterial;
     });
   }
@@ -93,10 +78,9 @@ function applyMaterials() {
 }
 plainBtn.addEventListener('click', () => { plain = !plain; applyMaterials(); });
 
-function materialFor(kind) {
-  if (kind === 'hover') return plain ? hoverPlain : hoverHolo;
-  if (kind === 'selected') return plain ? selectedPlain : selectedHolo;
-  return plain ? plainMaterial : hologramMaterial;
+function materialFor(kind, mesh) {
+  if (plain) return kind === 'hover' ? hoverPlain : kind === 'selected' ? selectedPlain : plainMaterial;
+  return look.materialFor(mesh, kind);
 }
 
 const modeBtn = $('mode'), undoBtn = $('undo'), showAllBtn = $('showall');

@@ -57,6 +57,14 @@ root module. It must stay at 0 failures whichever track the change is for.
 Once the Platform has `platform/test.html` (and Scan Completion has
 `completion/benchmark.py`), run the changed track's check too.
 
+## 2b. Photosafety check (any change to the hologram look)
+
+If the change touches `HolographicMaterial.js`, `hologramLook.js`, `scene.js`'s render
+loop, `platform/look.js`, or anything that changes brightness over time: open
+`http://localhost:8080/safety-test.html` and wait for `ALL PASS` / `SOME FAIL`. Every
+row must be ≤ 3 flashes/s (WCAG 2.3.1; BUGS.md #14 was 27/s). A FAIL blocks the commit
+exactly like a test.html failure. Content warning: the page renders the look on screen.
+
 ## 3. Commit
 
 - `git status` / `git diff --stat` to see exactly what changed.

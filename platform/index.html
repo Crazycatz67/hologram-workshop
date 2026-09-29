@@ -7,6 +7,13 @@
   <style>
     html, body { margin: 0; height: 100%; background: #0b0d10; overflow: hidden; }
     canvas { display: block; width: 100%; height: 100%; }
+    #look { position: fixed; right: 12px; bottom: 12px; z-index: 20; padding: 10px 12px; background: rgba(12,18,24,.85);
+            border: 1px solid #1f3444; border-radius: 8px; display: grid; gap: 6px; min-width: 250px; }
+    #look .look-row { display: flex; align-items: center; gap: 8px; }
+    #look label { min-width: 62px; }
+    #look input[type=range] { flex: 1; }
+    #look span { min-width: 40px; text-align: right; color: #8fb7cf; }
+    #look button { margin-left: auto; }
     body { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #c9dcec; }
 
     #hud {
@@ -114,6 +121,7 @@
     <span id="sel"></span>
     <span id="fps">— fps</span>
   </div>
+  <div id="look" aria-label="Hologram look"></div>
   <div id="guide">
     <p><b>Capture:</b> Scaniverse <b>Object</b> mode for single items, <b>Area</b> mode for rooms. Export as <b>GLB</b> or <b>OBJ</b>.</p>
     <p>Rooms (over 2.5 m) open as a dollhouse view; smaller scans orbit like an object. Drag to orbit, scroll to zoom, R to auto-rotate.</p>

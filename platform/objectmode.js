@@ -37,7 +37,7 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
 
   function paint() {
     for (const { id, mesh } of parts) {
-      mesh.material = materialFor(id === selectedId ? 'selected' : id === hoverId ? 'hover' : 'base');
+      mesh.material = materialFor(id === selectedId ? 'selected' : id === hoverId ? 'hover' : 'base', mesh);
     }
   }
 

@@ -19,6 +19,21 @@ Nobody offers free, in-browser, gesture-controlled interaction with *your own se
 
 ## Revision History
 
+- **2026-09-29 (4):** **Photosafe look, realism blend, multi-file library, exports, photo → hologram.**
+  - **Photosafety (BUGS.md #14):**
+    - The v1 look strobed at **27 flashes/s** (WCAG limit: 3). Every configuration now measures 0–1 (`safety-test.html`).
+    - Additive bloom is stopped by a single-layer depth pre-pass (chess: 2.69% → 0.81% blown-out pixels).
+    - Rough scans get smoothed shading, with no vertex moved.
+    - The OS "reduce motion" setting is honoured.
+  - **`platform/look.js`:** a Realism slider (0 = hologram, 1 = the scan's real texture / photo colours / clay shade for geometry-only scans, with a faint rim kept), a Motion slider, an optional gentle glow pulse, and a Calm preset. Settings persist per browser. Per-mesh variants share every look uniform, so one slider drives the whole scene. Verified on the textured `chair.glb` (real wood and floor texture at 100%) and a photo relief.
+  - **Library (`library.js`, `upload.js`, agent-built, reviewed):** drop many files or a folder. OBJ+MTL+textures and .gltf+.bin are matched by name so detail survives. Each file becomes a library item (hide / focus / remove), with "Arrange all" and object mode across every item.
+  - **Exports (`export.js`):**
+    - A GLB of the edited scene using the original materials, with `extras` recording the source and inferred share.
+    - Layout JSON with a sha256 per item, plus re-import (verified to restore moves and hides exactly).
+    - A printable floor-plan SVG with hulls, W×D labels and a scale bar.
+    - A PNG screenshot.
+  - **Photos (`photo.js`):** Depth Anything V2 small (Apache-2.0) in the browser via Transformers.js 4.3.0 on WebGPU (WASM fallback). A photo becomes a 2.5D relief with real colours in ~1.5 s warm. It's honestly labelled front-only, with estimated depth.
+  - **Known:** crowded layout in narrow windows (the Library panel covers the view); drag-drop from the OS and the folder picker are coded but only exercised programmatically.
 - **2026-09-29 (3):** **P1 first slice built (mouse and keyboard; gestures next).**
   - **Splitting:** `platform/segment.js` `splitComponents` welds vertices at 1 mm, runs union-find over triangles, and makes each connected component above 2% of the scan's diagonal its own selectable part. It's a placeholder until P2's plane-peel segmentation.
   - **Object mode:** `platform/objectmode.js`. Toggle with Tab or the button. Hover highlights before commit, click selects, drag moves on the floor plane with the camera locked while dragging, Shift+wheel rotates about the part's own centre, Delete hides, H shows all, Esc deselects, Cmd/Ctrl+Z undoes.
