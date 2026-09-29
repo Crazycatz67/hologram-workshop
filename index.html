@@ -3,124 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Hologram Project — Phase 2: Model Viewer</title>
+  <title>Hologram Workshop — Model Viewer</title>
+  <link rel="stylesheet" href="theme.css" />
   <style>
-    html, body { margin: 0; height: 100%; background: #0b0d10; overflow: hidden; }
-    canvas { display: block; width: 100%; height: 100%; }
-
-    #hud {
-      position: fixed;
-      top: 12px;
-      left: 12px;
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      pointer-events: none;
+    /* Same shell as hologram.html / platform (theme.css): measurements beside the view,
+       never over it. M collapses the column. */
+    #app {
+      height: 100%; display: grid;
+      grid-template-rows: var(--bar-h) 1fr var(--status-h);
+      grid-template-columns: var(--left-w, 290px) 1fr;
+      grid-template-areas: "top top" "left stage" "status status";
     }
-    #hud > * {
-      background: rgba(0, 0, 0, 0.55);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      padding: 5px 9px;
-      border-radius: 4px;
-    }
-    #status { color: #7fe3a1; }
-    #status.error { color: #ff5c5c; }
-    #fps { color: #9db4d0; }
-
-    #hint {
-      position: fixed;
-      bottom: 12px;
-      left: 12px;
-      font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      color: rgba(255, 255, 255, 0.45);
-      pointer-events: none;
-    }
-
-    /* ---- measurement panel ---- */
-    #measure {
-      position: fixed; top: 56px; left: 12px; z-index: 4; width: 250px;
-      background: var(--panel, rgba(8,14,22,0.82));
-      border: 1px solid var(--edge, rgba(120,200,255,0.16));
-      border-radius: 8px; padding: 12px; backdrop-filter: blur(8px);
-      max-height: calc(100vh - 120px); overflow-y: auto;
-      color: var(--text, #c9dcec);
-      font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    }
+    #app:has(#measure.hidden) { --left-w: 0px; }
+    #topbar { grid-area: top; }
+    #measure { grid-area: left; border-right: 1px solid var(--line); padding: 12px 12px 14px; font-size: 12px; }
     #measure.hidden { display: none; }
-    #measure .panel-title {
-      display: flex; align-items: center; justify-content: space-between;
-      font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
-      color: var(--dim, #6b7d94); margin: 0 0 8px;
-    }
-    #measure .panel-title + .panel-title { margin-top: 14px; }
-    button.unit {
-      font: inherit; font-size: 11px; padding: 1px 7px; border-radius: 3px;
-      background: transparent; color: var(--accent, #4fd1ff);
-      border: 1px solid rgba(79,209,255,0.4); cursor: pointer; text-transform: none;
-    }
-    .measure-dims { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-    .dim {
-      background: rgba(0,0,0,0.3); border: 1px solid var(--edge, rgba(120,200,255,0.16));
-      border-radius: 4px; padding: 6px 4px; text-align: center;
-    }
-    .dim-k { display: block; font-size: 10px; color: var(--dim, #6b7d94); letter-spacing: 0.1em; }
-    .dim-v { display: block; font-size: 13px; color: var(--text, #c9dcec); margin-top: 2px; }
-    .measure-scaled { margin-top: 7px; font-size: 11px; color: #ffd166; }
-    .measure-stats { margin-top: 7px; font-size: 11px; color: var(--dim, #6b7d94); line-height: 1.5; }
-    button.wide { width: 100%; margin-top: 10px; text-align: center; }
-    button.ghost.active { color: #ffd166; border-color: rgba(255,209,102,0.55); }
-    .measure-tape { margin-top: 6px; font-size: 11px; color: var(--dim, #6b7d94); }
-    .fit-row { display: flex; align-items: center; gap: 5px; }
-    .fit-input {
-      width: 100%; min-width: 0; font: inherit; font-size: 12px; padding: 4px 6px;
-      background: rgba(0,0,0,0.35); color: var(--text, #c9dcec);
-      border: 1px solid var(--edge, rgba(120,200,255,0.16)); border-radius: 4px;
-    }
-    .fit-x, .fit-unit { color: var(--dim, #6b7d94); font-size: 11px; }
-    .measure-fit { margin-top: 7px; font-size: 11px; color: var(--dim, #6b7d94); line-height: 1.45; }
-    .measure-fit.ok { color: #7fe3a1; }
-    .measure-fit.bad { color: #ff8a65; }
-
-    /* measurement panel: collapsible sections, notes, labels */
-    .measure-head {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 8px;
-    }
-    .measure-title {
-      font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
-      color: var(--dim, #6b7d94);
-    }
-    .sec { border-top: 1px solid var(--edge, rgba(120,200,255,0.16)); }
-    .sec:first-of-type { border-top: none; }
-    .sec-head {
-      display: flex; align-items: center; justify-content: space-between; width: 100%;
-      background: transparent; border: none; padding: 8px 0; cursor: pointer;
-      font: inherit; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
-      color: var(--dim, #6b7d94);
-    }
-    .sec-head:hover { color: var(--text, #c9dcec); }
-    .sec-caret { color: var(--dim, #6b7d94); }
-    .sec-body { padding-bottom: 10px; }
-    select.fit-input { width: 100%; cursor: pointer; }
-    .surface-row { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
-    .surface-h { color: var(--accent, #4fd1ff); min-width: 62px; }
-    .surface-d { color: var(--dim, #6b7d94); font-size: 11px; }
-    .measure-caveat {
-      margin-top: 7px; font-size: 10px; line-height: 1.45; color: #ff8a65;
-      border-left: 2px solid rgba(255,138,101,0.5); padding-left: 7px;
-    }
-    .note-list { margin-top: 8px; display: grid; gap: 5px; }
-    .note-row { display: flex; gap: 5px; align-items: center; }
-    .note-row .fit-input { flex: 1; }
-    button.note-del { padding: 2px 8px; line-height: 1.2; }
-    .note-layer { position: fixed; inset: 0; z-index: 3; pointer-events: none; }
-    .note-label {
-      position: absolute; transform: translate(10px, -50%);
-      background: rgba(8,14,22,0.9); border: 1px solid rgba(127,227,161,0.55);
-      border-radius: 3px; padding: 2px 6px; white-space: nowrap;
-      font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      color: #7fe3a1; max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+    #stage { grid-area: stage; position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+    #stage canvas { display: block; width: 100%; height: 100%; }
+    #statusbar { grid-area: status; }
+    #status { color: var(--ok); }
+    #status.error { color: var(--err); }
+    #fps { margin-left: auto; color: var(--faint); }
+    @media (max-width: 760px) {
+      #app { grid-template-columns: 0 1fr; }
+      #measure:not(.hidden) { position: fixed; top: var(--bar-h); bottom: var(--status-h); left: 0; width: min(300px, 86vw); z-index: 25; box-shadow: 0 0 40px rgba(0,0,0,.55); }
     }
   </style>
   <script type="importmap">
@@ -133,12 +39,23 @@
   </script>
 </head>
 <body>
-  <div id="hud">
-    <span id="status">loading…</span>
-    <span id="fps">— fps</span>
+  <div id="app">
+    <header id="topbar" class="topbar">
+      <div class="brand"><a href="platform/index.html">Hologram <span>Workshop</span></a></div>
+      <div class="sep"></div>
+      <span class="note">Model viewer</span>
+      <div class="spacer"></div>
+      <a href="hologram.html"><button class="ghost" tabindex="-1">Gesture demo →</button></a>
+      <a href="platform/index.html"><button class="primary" tabindex="-1">Open the workshop →</button></a>
+    </header>
+    <aside id="measure" class="side" aria-label="Measurements"></aside>
+    <main id="stage" aria-label="Model"></main>
+    <footer id="statusbar" class="statusbar">
+      <span id="status">loading…</span>
+      <span id="hint" hidden>drag to orbit · scroll to zoom · right-drag to pan · R auto-rotate · M measurements</span>
+      <span id="fps">— fps</span>
+    </footer>
   </div>
-  <div id="hint" hidden>drag to orbit · scroll to zoom · right-drag to pan · R to toggle auto-rotate</div>
-  <div id="measure"></div>
 
   <script type="module">
     import(`./main.js?v=${Date.now()}`);

@@ -3,246 +3,103 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Hologram Project — Phase 4: Gesture Control</title>
+  <title>Hologram Workshop — Gesture Demo</title>
+  <link rel="stylesheet" href="theme.css" />
   <style>
-    :root {
-      --bg: #05070a;
-      --panel: rgba(8, 14, 22, 0.82);
-      --edge: rgba(120, 200, 255, 0.16);
-      --text: #c9dcec;
-      --dim: #6b7d94;
-      --accent: #4fd1ff;
-      --warm: #ffd166;
-      --good: #7fe3a1;
+    /* Layout (2026-09-29 redo, shared tokens in theme.css): measurements on the left,
+       practice on the right, the hologram in its own cell that no panel covers. P and M
+       collapse their columns -- hologram.js toggles .hidden on the panels, and :has() turns
+       that into a narrower grid, so no layout logic lives in JS. */
+    #app {
+      height: 100%; display: grid;
+      grid-template-rows: var(--bar-h) 1fr var(--status-h);
+      grid-template-columns: var(--left-w, 290px) 1fr var(--right-w, 280px);
+      grid-template-areas: "top top top" "left stage right" "status status status";
     }
+    #app:has(#measure.hidden) { --left-w: 0px; }
+    #app:has(#panel.hidden) { --right-w: 0px; }
+    #topbar { grid-area: top; }
+    #measure { grid-area: left; border-right: 1px solid var(--line); }
+    #stage { grid-area: stage; position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+    #panel { grid-area: right; border-left: 1px solid var(--line); }
+    #statusbar { grid-area: status; }
+    #measure.hidden, #panel.hidden { display: none; }
 
-    html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
-    body { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text); }
-
-    /* Tracking runs on the video whether or not it's visible -- MediaPipe reads camera
-       frames, not the rendered page. Hidden by default: seeing your own video feed broke
-       the "object floating in space" illusion. D shows it for debugging tracking. */
-    #cam, #overlay {
-      position: fixed; inset: 0; width: 100%; height: 100%;
-      object-fit: cover; visibility: hidden;
+    /* Camera + tracking overlay live inside the view, behind the hologram. Hidden by default:
+       seeing your own video broke the "object floating in space" illusion. D shows them. */
+    #stage > video, #stage > #overlay, #stage > canvas:not(#overlay) {
+      position: absolute; inset: 0; width: 100%; height: 100%; display: block;
     }
+    #cam, #overlay { object-fit: cover; visibility: hidden; }
     body.debug-camera #cam, body.debug-camera #overlay { visibility: visible; }
     #cam { z-index: 0; transform: scaleX(-1); background: #000; }
     #overlay { z-index: 1; }
+    #stage > canvas:not(#overlay) { z-index: 2; }
+    .note-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 
-    #stage { position: fixed; inset: 0; z-index: 2; }
-    #stage canvas { display: block; width: 100%; height: 100%; }
-
-    /* ---- top bar: only what you need at a glance ---- */
-    #topbar {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 4;
-      display: flex; align-items: center; gap: 10px;
-      padding: 10px 12px;
-      background: linear-gradient(to bottom, rgba(5, 7, 10, 0.9), transparent);
-    }
+    /* Gesture state pill (hologram.js replaces #mode's class with the mode name). */
     #mode {
-      padding: 4px 10px; border-radius: 999px;
-      border: 1px solid var(--edge); color: var(--dim);
-      text-transform: uppercase; letter-spacing: 0.1em; font-size: 11px;
+      display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px;
+      border: 1px solid var(--line-2); color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
     }
-    #mode.grab { color: var(--warm); border-color: rgba(255, 209, 102, 0.5); }
-    #mode.transform { color: var(--accent); border-color: rgba(79, 209, 255, 0.5); }
-    #mode.explode { color: #ff8a65; border-color: rgba(255, 138, 101, 0.5); }
-    #status { color: var(--good); }
-    #status.error { color: #ff5c5c; }
-    #fps, #explodeMode { color: var(--dim); font-size: 12px; }
-    .spacer { flex: 1; }
+    #mode.grab { color: var(--warm); border-color: rgba(255,209,102,.5); }
+    #mode.transform { color: var(--accent); border-color: rgba(79,209,255,.5); }
+    #mode.explode { color: #ff9a7a; border-color: rgba(255,154,122,.5); }
+    #status { color: var(--ok); }
+    #status.error { color: var(--err); }
+    #fps { margin-left: auto; color: var(--faint); }
 
-    button {
-      font: inherit; color: #dff6ff;
-      background: rgba(30, 90, 130, 0.7);
-      border: 1px solid rgba(120, 220, 255, 0.35);
-      padding: 5px 12px; border-radius: 4px; cursor: pointer;
-    }
-    button:disabled { opacity: 0.4; cursor: default; }
-    button.ghost { background: transparent; color: var(--dim); border-color: var(--edge); }
-    button.ghost:hover { color: var(--text); }
-
-    /* ---- practice panel ---- */
-    #panel {
-      position: fixed; top: 52px; right: 12px; z-index: 4; width: 234px;
-      background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
-      padding: 12px; backdrop-filter: blur(8px);
-      /* Same reasoning as #measure's own max-height: adding the gesture reference made
-         this panel taller, and a fixed-position panel that just overflows the viewport
-         on a shorter screen is invisible past the fold rather than merely inconvenient. */
-      max-height: calc(100vh - 64px); overflow-y: auto;
-    }
-    #panel.hidden { display: none; }
-    .panel-title {
-      font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
-      color: var(--dim); margin-bottom: 8px;
-    }
-
-    .drill { display: grid; grid-template-columns: 1fr; gap: 4px; margin-bottom: 12px; }
+    /* ---- practice panel (right) ---- */
+    #panel { padding: 0 12px 14px; }
+    .panel-title { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 14px 2px 8px; }
+    .drill { display: grid; gap: 4px; }
     .drill button {
-      text-align: left; background: transparent; border: 1px solid transparent;
-      color: var(--dim); padding: 6px 8px; border-radius: 4px;
+      display: block; height: auto; text-align: left; padding: 8px 10px; white-space: normal;
+      background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
     }
-    .drill button:hover { color: var(--text); border-color: var(--edge); }
-    .drill button.active {
-      background: rgba(79, 209, 255, 0.14);
-      border-color: rgba(79, 209, 255, 0.55);
-      color: var(--accent);
-    }
-    .drill button .k { color: inherit; }
-    .drill button .sub { display: block; font-size: 11px; color: var(--dim); margin-top: 2px; }
-    .drill button.active .sub { color: rgba(201, 220, 236, 0.75); }
-
-    /* live "is it firing right now" light */
-    #live {
-      display: flex; align-items: center; gap: 8px;
-      padding: 8px; border-radius: 4px; margin-bottom: 12px;
-      border: 1px solid var(--edge); background: rgba(0, 0, 0, 0.3);
-    }
-    #lamp {
-      width: 10px; height: 10px; border-radius: 50%;
-      background: #33404e; flex: none;
-      transition: background 90ms linear, box-shadow 90ms linear;
-    }
-    #lamp.on { background: var(--good); box-shadow: 0 0 10px rgba(127, 227, 161, 0.9); }
-    #liveText { font-size: 12px; color: var(--dim); }
-
-    label.tune {
-      display: block; font-size: 11px; color: var(--dim);
-      margin: 10px 0 3px; letter-spacing: 0.04em;
-    }
-    label.tune b { color: var(--text); font-weight: normal; }
-    input[type="range"] { width: 100%; accent-color: var(--accent); }
-    .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-    .row input[type="checkbox"] { accent-color: var(--accent); }
-    .row label { font-size: 12px; color: var(--dim); }
-
-    /* always-visible reference: what each hand shape does, regardless of which drill
-       is selected -- distinct from the per-drill coach text below the stage, which only
-       covers the one gesture currently being practiced. */
-    #legend { display: grid; gap: 3px; }
-    .legend-row {
-      display: flex; justify-content: space-between; gap: 10px;
-      font-size: 11px; padding: 3px 0;
-    }
+    .drill button.active { background: var(--accent-soft); border-color: rgba(79,209,255,.55); color: var(--accent); }
+    .drill button .sub { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+    #live { display: flex; align-items: center; gap: 8px; padding: 10px; margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
+    /* The "firing now" lamp changes colour only -- no glow pulse, no blink. */
+    #lamp { width: 10px; height: 10px; border-radius: 50%; background: #33404e; flex: none; transition: background 120ms linear; }
+    #lamp.on { background: var(--ok); }
+    #liveText { font-size: 12px; color: var(--muted); }
+    label.tune { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin: 12px 2px 4px; }
+    label.tune b { color: var(--text); font-weight: 500; font-family: var(--mono); }
+    input[type="range"] { width: 100%; }
+    .row { display: flex; align-items: center; gap: 8px; margin: 12px 2px 0; font-size: 12px; color: var(--muted); }
+    #legend { display: grid; gap: 2px; }
+    .legend-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 4px 2px; border-bottom: 1px solid var(--line); }
     .legend-k { color: var(--text); flex: none; }
-    .legend-v { color: var(--dim); text-align: right; }
+    .legend-v { color: var(--muted); text-align: right; }
 
+    /* Measurement panel styles live in theme.css (shared with index.html). */
 
-    /* ---- measurement panel ---- */
-    #measure {
-      position: fixed; top: 52px; left: 12px; z-index: 4; width: 250px;
-      background: var(--panel, rgba(8,14,22,0.82));
-      border: 1px solid var(--edge, rgba(120,200,255,0.16));
-      border-radius: 8px; padding: 12px; backdrop-filter: blur(8px);
-      max-height: calc(100vh - 120px); overflow-y: auto;
-      color: var(--text, #c9dcec);
-      font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    }
-    #measure.hidden { display: none; }
-    #measure .panel-title {
-      display: flex; align-items: center; justify-content: space-between;
-      font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
-      color: var(--dim, #6b7d94); margin: 0 0 8px;
-    }
-    #measure .panel-title + .panel-title { margin-top: 14px; }
-    button.unit {
-      font: inherit; font-size: 11px; padding: 1px 7px; border-radius: 3px;
-      background: transparent; color: var(--accent, #4fd1ff);
-      border: 1px solid rgba(79,209,255,0.4); cursor: pointer; text-transform: none;
-    }
-    .measure-dims { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-    .dim {
-      background: rgba(0,0,0,0.3); border: 1px solid var(--edge, rgba(120,200,255,0.16));
-      border-radius: 4px; padding: 6px 4px; text-align: center;
-    }
-    .dim-k { display: block; font-size: 10px; color: var(--dim, #6b7d94); letter-spacing: 0.1em; }
-    .dim-v { display: block; font-size: 13px; color: var(--text, #c9dcec); margin-top: 2px; }
-    .measure-scaled { margin-top: 7px; font-size: 11px; color: #ffd166; }
-    .measure-stats { margin-top: 7px; font-size: 11px; color: var(--dim, #6b7d94); line-height: 1.5; }
-    button.wide { width: 100%; margin-top: 10px; text-align: center; }
-    button.ghost.active { color: #ffd166; border-color: rgba(255,209,102,0.55); }
-    .measure-tape { margin-top: 6px; font-size: 11px; color: var(--dim, #6b7d94); }
-    .fit-row { display: flex; align-items: center; gap: 5px; }
-    .fit-input {
-      width: 100%; min-width: 0; font: inherit; font-size: 12px; padding: 4px 6px;
-      background: rgba(0,0,0,0.35); color: var(--text, #c9dcec);
-      border: 1px solid var(--edge, rgba(120,200,255,0.16)); border-radius: 4px;
-    }
-    .fit-x, .fit-unit { color: var(--dim, #6b7d94); font-size: 11px; }
-    .measure-fit { margin-top: 7px; font-size: 11px; color: var(--dim, #6b7d94); line-height: 1.45; }
-    .measure-fit.ok { color: #7fe3a1; }
-    .measure-fit.bad { color: #ff8a65; }
-
-    /* ---- model carousel: which hologram is currently loaded ---- */
+    /* ---- in-view overlays: model picker and the coaching line ---- */
     #modelCarousel.carousel {
-      position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
-      z-index: 4; display: flex; gap: 8px;
+      position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 4; display: flex; gap: 8px;
     }
-    #modelCarousel .model-card {
-      background: var(--panel); border: 1px solid var(--edge); color: var(--dim);
-      border-radius: 8px; padding: 8px 16px; backdrop-filter: blur(8px);
-      transition: transform 120ms ease, border-color 120ms ease, color 120ms ease;
-    }
-    #modelCarousel .model-card:hover:not(:disabled) {
-      color: var(--text); border-color: rgba(79, 209, 255, 0.4); transform: scale(1.06);
-    }
-    #modelCarousel .model-card.active {
-      color: var(--accent); border-color: rgba(79, 209, 255, 0.6);
-      background: rgba(79, 209, 255, 0.14); transform: scale(1.08);
-    }
-    #modelCarousel.busy .model-card { opacity: 0.5; cursor: default; }
-
-    /* ---- the instruction line: one gesture, big, instead of a wall of tiny text ---- */
+    #modelCarousel .model-card { height: 32px; background: rgba(16,22,29,.9); color: var(--muted); }
+    #modelCarousel .model-card.active { color: var(--accent); border-color: rgba(79,209,255,.6); background: var(--accent-soft); }
+    #modelCarousel.busy .model-card { opacity: .5; cursor: default; }
     #coach {
-      position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
-      z-index: 4; text-align: center; max-width: min(680px, 88vw);
-      pointer-events: none;
+      position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 4;
+      text-align: center; width: min(640px, 92%); pointer-events: none;
+      padding: 10px 14px; border-radius: 10px; background: rgba(10,13,17,.72); border: 1px solid var(--line);
     }
-    #coachTitle { font-size: 15px; color: var(--accent); letter-spacing: 0.04em; }
-    #coachBody { font-size: 13px; color: rgba(201, 220, 236, 0.72); margin-top: 5px; line-height: 1.5; }
-    #coachKeys { font-size: 11px; color: var(--dim); margin-top: 8px; }
+    #coachTitle { font-size: 14px; font-weight: 600; color: var(--accent); }
+    #coachBody { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+    #coachKeys { font-size: 11px; color: var(--faint); margin-top: 6px; }
 
-    /* measurement panel: collapsible sections, notes, labels */
-    .measure-head {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 8px;
-    }
-    .measure-title {
-      font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
-      color: var(--dim, #6b7d94);
-    }
-    .sec { border-top: 1px solid var(--edge, rgba(120,200,255,0.16)); }
-    .sec:first-of-type { border-top: none; }
-    .sec-head {
-      display: flex; align-items: center; justify-content: space-between; width: 100%;
-      background: transparent; border: none; padding: 8px 0; cursor: pointer;
-      font: inherit; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
-      color: var(--dim, #6b7d94);
-    }
-    .sec-head:hover { color: var(--text, #c9dcec); }
-    .sec-caret { color: var(--dim, #6b7d94); }
-    .sec-body { padding-bottom: 10px; }
-    select.fit-input { width: 100%; cursor: pointer; }
-    .surface-row { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
-    .surface-h { color: var(--accent, #4fd1ff); min-width: 62px; }
-    .surface-d { color: var(--dim, #6b7d94); font-size: 11px; }
-    .measure-caveat {
-      margin-top: 7px; font-size: 10px; line-height: 1.45; color: #ff8a65;
-      border-left: 2px solid rgba(255,138,101,0.5); padding-left: 7px;
-    }
-    .note-list { margin-top: 8px; display: grid; gap: 5px; }
-    .note-row { display: flex; gap: 5px; align-items: center; }
-    .note-row .fit-input { flex: 1; }
-    button.note-del { padding: 2px 8px; line-height: 1.2; }
-    .note-layer { position: fixed; inset: 0; z-index: 3; pointer-events: none; }
-    .note-label {
-      position: absolute; transform: translate(10px, -50%);
-      background: rgba(8,14,22,0.9); border: 1px solid rgba(127,227,161,0.55);
-      border-radius: 3px; padding: 2px 6px; white-space: nowrap;
-      font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      color: #7fe3a1; max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+    /* Narrow screens: the practice panel and measurements start collapsed-width drawers. */
+    @media (max-width: 960px) {
+      #app { grid-template-columns: 0 1fr 0; }
+      #measure:not(.hidden), #panel:not(.hidden) {
+        position: fixed; top: var(--bar-h); bottom: var(--status-h); width: min(300px, 86vw); z-index: 25;
+        box-shadow: 0 0 40px rgba(0,0,0,.55);
+      }
+      #measure { left: 0; } #panel { right: 0; }
+      .wide-only { display: none; }
     }
   </style>
   <script type="importmap">
@@ -255,56 +112,71 @@
   </script>
 </head>
 <body>
-  <video id="cam" playsinline muted></video>
-  <canvas id="overlay"></canvas>
-  <div id="stage"></div>
+  <div id="app">
+    <header id="topbar" class="topbar">
+      <div class="brand wide-only"><a href="platform/index.html" title="Open the full workshop">Hologram <span>Workshop</span></a></div>
+      <div class="sep wide-only"></div>
+      <button id="start" class="primary" disabled>Start camera</button>
+      <button id="reset">Reset</button>
+      <span id="mode">idle</span>
+      <div class="spacer"></div>
+      <span id="explodeMode" class="note wide-only">—</span>
+      <button id="togglePanel" class="ghost">hide panel</button>
+    </header>
 
-  <div id="topbar">
-    <button id="start" disabled>start camera</button>
-    <button id="reset" class="ghost">reset</button>
-    <span id="mode">idle</span>
-    <span id="status">loading model…</span>
-    <span class="spacer"></span>
-    <span id="explodeMode">—</span>
-    <span id="fps">— fps</span>
-    <button id="togglePanel" class="ghost">hide panel</button>
+    <aside id="measure" class="side" aria-label="Measurements"></aside>
+
+    <main id="stage" aria-label="Hologram">
+      <video id="cam" playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div id="modelCarousel"></div>
+      <div id="coach">
+        <div id="coachTitle">—</div>
+        <div id="coachBody"></div>
+        <div id="coachKeys"><kbd>R</kbd> reset · <kbd>D</kbd> camera view · <kbd>P</kbd> practice · <kbd>M</kbd> measure · <kbd>←</kbd><kbd>→</kbd> switch model · drag to orbit</div>
+      </div>
+    </main>
+
+    <aside id="panel" class="side" aria-label="Practice">
+      <div class="panel-title">Practice — one at a time</div>
+      <div class="drill" id="drills"></div>
+
+      <div id="live">
+        <span id="lamp"></span>
+        <span id="liveText">camera off</span>
+      </div>
+
+      <div class="panel-title">Feel</div>
+      <label class="tune" for="sens">sensitivity <b id="sensVal">1.0×</b></label>
+      <input type="range" id="sens" min="0.2" max="2" step="0.1" value="1" />
+
+      <label class="tune" for="trig">trigger delay <b id="trigVal">3 frames</b></label>
+      <input type="range" id="trig" min="1" max="12" step="1" value="3" />
+
+      <div class="row">
+        <input type="checkbox" id="momentum" checked />
+        <label for="momentum">momentum (coast after release)</label>
+      </div>
+
+      <div class="panel-title">Gesture reference</div>
+      <div id="legend"></div>
+    </aside>
+
+    <footer id="statusbar" class="statusbar">
+      <span id="status">loading model…</span>
+      <span id="fps">— fps</span>
+    </footer>
   </div>
 
-  <div id="panel">
-    <div class="panel-title">Practice — one at a time</div>
-    <div class="drill" id="drills"></div>
-
-    <div id="live">
-      <span id="lamp"></span>
-      <span id="liveText">camera off</span>
-    </div>
-
-    <div class="panel-title">Feel</div>
-    <label class="tune">sensitivity <b id="sensVal">1.0×</b></label>
-    <input type="range" id="sens" min="0.2" max="2" step="0.1" value="1" />
-
-    <label class="tune">trigger delay <b id="trigVal">3 frames</b></label>
-    <input type="range" id="trig" min="1" max="12" step="1" value="3" />
-
-    <div class="row">
-      <input type="checkbox" id="momentum" checked />
-      <label for="momentum">momentum (coast after release)</label>
-    </div>
-
-    <div class="panel-title">Gesture reference</div>
-    <div id="legend"></div>
-  </div>
-
-  <div id="measure"></div>
-
-  <div id="modelCarousel"></div>
-
-  <div id="coach">
-    <div id="coachTitle">—</div>
-    <div id="coachBody"></div>
-    <div id="coachKeys">R — reset · D — camera view · P — panel · ← → — switch model · drag — orbit</div>
-  </div>
-
+  <script>
+    // Narrow screens: panels are drawers over the hologram, so start with both closed (P / M
+    // or the button open them). hologram.js reads the .hidden class, so this is all it takes.
+    if (matchMedia('(max-width: 960px)').matches) {
+      document.getElementById('measure').classList.add('hidden');
+      document.getElementById('panel').classList.add('hidden');
+      document.getElementById('togglePanel').textContent = 'show panel';
+    }
+  </script>
   <script type="module">
     const stamp = Date.now();
     import(`./hologram.js?v=${stamp}`);

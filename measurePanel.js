@@ -113,8 +113,12 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
   mount.innerHTML = '';
 
   // A layer for the note labels, over the canvas but not stealing clicks from it.
+  // In the canvas's own container, not <body>: annotations.js positions labels by the
+  // canvas's width/height only, so the layer must share the canvas's origin. Pages where the
+  // canvas fills the window behave exactly as before; pages that lay the canvas out in a
+  // grid cell (the 2026-09-29 layouts) get correctly placed labels.
   const labelLayer = el('div', 'note-layer');
-  document.body.appendChild(labelLayer);
+  (renderer.domElement.parentElement ?? document.body).appendChild(labelLayer);
 
   const head = el('div', 'measure-head');
   head.append(el('span', 'measure-title', 'Measurements'));

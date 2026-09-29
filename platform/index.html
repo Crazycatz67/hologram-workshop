@@ -4,39 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Hologram Workshop</title>
+  <link rel="stylesheet" href="../theme.css" />
   <style>
     /* One design system for the whole page (2026-09-29 UI overhaul): every panel, button and
        label draws from these tokens, and the 3D view owns its own grid cell -- panels sit
        beside it, never on top of it (except as drawers on narrow screens). Calm by design:
        no animation beyond short opacity/transform transitions, and none at all when the OS
        asks for reduced motion. */
-    :root {
-      --bg: #0a0d11;
-      --panel: #10161d;
-      --panel-2: #0c1117;
-      --line: #1d2935;
-      --line-2: #2a3a4a;
-      --text: #d6e4ef;
-      --muted: #8196a8;
-      --faint: #56687a;
-      --accent: #4fd1ff;
-      --accent-soft: rgba(79, 209, 255, 0.12);
-      --select: #ffb040;
-      --ok: #7fd6a1;
-      --err: #ff7a7a;
-      --radius: 6px;
-      --gap: 8px;
-      --bar-h: 48px;
-      --status-h: 28px;
-      --side-w: 300px;
-      --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    }
-    * { box-sizing: border-box; }
-    [hidden] { display: none !important; }   /* id-level display rules must never beat hidden */
-    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
-    body { font: 13px/1.45 var(--sans); }
-    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+    /* Tokens, base controls and reduced-motion handling come from ../theme.css. */
 
     /* ---- shell ---------------------------------------------------------------- */
     #app {
@@ -54,24 +29,6 @@
     #statusbar { grid-area: status; }
     #stage canvas { display: block; width: 100%; height: 100%; }
     body.left-closed #left, body.right-closed #right { display: none; }
-
-    /* ---- controls ------------------------------------------------------------- */
-    button, select, input { font: inherit; color: inherit; }
-    button {
-      display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
-      color: var(--text); background: var(--panel-2); border: 1px solid var(--line-2);
-      border-radius: var(--radius); cursor: pointer; white-space: nowrap;
-      transition: background .12s, border-color .12s;
-    }
-    button:hover:not(:disabled) { background: var(--accent-soft); border-color: rgba(79,209,255,.45); }
-    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-    button:disabled { opacity: .4; cursor: default; }
-    button.primary { color: #06131a; background: var(--accent); border-color: var(--accent); font-weight: 600; }
-    button.primary:hover:not(:disabled) { background: #7fdfff; }
-    button.active { color: var(--select); border-color: rgba(255,176,64,.6); background: rgba(255,176,64,.08); }
-    button.ghost { background: none; border-color: transparent; color: var(--muted); }
-    button.ghost:hover:not(:disabled) { color: var(--text); }
-    .sep { width: 1px; height: 22px; background: var(--line); margin: 0 2px; }
 
     /* ---- top bar -------------------------------------------------------------- */
     #topbar {

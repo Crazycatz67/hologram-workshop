@@ -13,7 +13,8 @@ const statusEl = document.getElementById('status');
 const fpsEl = document.getElementById('fps');
 const hintEl = document.getElementById('hint');
 
-const { scene, camera, renderer, controls } = createScene();
+// The view has its own grid cell (index.html's #stage); panels sit beside it.
+const { scene, camera, renderer, controls } = createScene(document.getElementById('stage'));
 
 // The real scan texture is fully replaced by this material's procedural shader — that's
 // the intended Phase 3 look, not a hybrid of scanned color and hologram effect.
@@ -89,5 +90,7 @@ loadModel({ objPath })
   });
 
 window.addEventListener('keydown', (e) => {
+  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName ?? '')) return;  // typing a note
   if (e.key.toLowerCase() === 'r') controls.autoRotate = !controls.autoRotate;
+  if (e.key.toLowerCase() === 'm') document.getElementById('measure').classList.toggle('hidden');
 });
