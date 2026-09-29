@@ -8,6 +8,19 @@ The research behind every choice here is in [`RESEARCH.md`](RESEARCH.md).
 
 ## Revision History
 
+- **2026-09-29 (4):** **`slab_fill` generalises the thickness prior to every direction and closes the wall gap too.**
+  - **The idea:** a backrest against a wall is the same problem as a seat underside, turned on its side. Faces are grouped by the nearest of 26 sphere directions, and each group probes, measures thickness and copies along its own direction.
+  - **Chain `mirror_gaps → slab_fill → poisson` (coverage @2 cm / added surface that's real):**
+
+    | Scenario | Before (best chain) | New chain |
+    | --- | --- | --- |
+    | Underside | 99% / 99% (thickness chain) | 98% / 97% (within noise) |
+    | **Wall** | 89% / 79% | **99% / 97%** |
+    | Holes | 100% / 100% | 100% / 100% |
+
+  - **Stress cuts:** underside with 47% of the chair hidden goes 64% / 42% (Poisson) → **95% / 91%**. Ragged underside cut: 99% / 97%. Wall ragged or with a 60%-deep band: 100% / 100%.
+  - **Cost:** ~5 s and ~0.39 GB on the M5 Air.
+  - **This is now the recommended B1 pipeline.** The next honest test is a *different* object and a room, since everything so far is one chair.
 - **2026-09-29 (3):** **B1 first method: `thickness_fill` closes the underside gap** (`completion/fill.py`, which now holds all methods; the benchmark imports it).
   - **The idea:** panels are slabs. For each upward face with nothing scanned below it (probed straight down to 8 cm), take the drop to the nearest open scan boundary in plan view as the local thickness, and copy the face down by that amount. Then apply the merge rule. It uses measured geometry moved by a measured distance, with no model involved.
   - **Result:** the chain `mirror_gaps → thickness_fill → poisson` takes the **underside from 75% → 99% coverage @2 cm, with 99% of added surface real (up from 63%)**. Wall and holes rows are unchanged (89% / 100%). Runtime is 4.5 s and peak memory 0.37 GB on the M5 Air.
@@ -116,5 +129,5 @@ Run the cascade per object after the Platform's segmentation (P2) has split a ro
 
 ## Next Concrete Action
 
-1. **B1 next:** validate `mirror → thickness → poisson` on a second, non-slab object and on a room once one is scanned; then add *plane extension* for wall-side gaps (the wall row is still 89% / 79% real). *(Done: thickness prior for undersides, see revision 3.)* Original target: a *thickness prior* (panels like a seat are slabs: where the top is scanned and the bottom isn't, offset the top by the thickness measured at the panel's scanned edges) and *plane extension* (extend fitted planes to their intersections). Beat 75% coverage / 63% real on the underside row without losing the other rows.
+1. **B1 next:** validate `mirror → slab → poisson` on a second, non-slab object (round stool, sofa, lamp) and on a room once one is scanned. Then wire it into a `completion/complete.py` CLI that writes the `scanned` / `inferred` output contract, so the Platform (P5) can show it. *(Done: thickness prior for undersides, see revision 3.)* Original target: a *thickness prior* (panels like a seat are slabs: where the top is scanned and the bottom isn't, offset the top by the thickness measured at the panel's scanned edges) and *plane extension* (extend fitted planes to their intersections). Beat 75% coverage / 63% real on the underside row without losing the other rows.
 2. **B3 spike** (can run in parallel since it's just installs + one run): SPAR3D + Hunyuan3D-2mini on the M5, recording time and peak memory.

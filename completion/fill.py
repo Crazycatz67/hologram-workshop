@@ -165,6 +165,67 @@ def thickness_fill(v, f):
     return append(v, f, gv, gf)
 
 
+SLAB_DIRECTIONS = 26     # directions sampled on the sphere; faces are grouped by the nearest
+
+
+def _sphere_directions(n):
+    """n roughly evenly spaced unit vectors (Fibonacci sphere)."""
+    i = np.arange(n) + 0.5
+    phi = np.arccos(1 - 2 * i / n)
+    theta = np.pi * (1 + 5 ** 0.5) * i
+    return np.stack([np.cos(theta) * np.sin(phi), np.cos(phi), np.sin(theta) * np.sin(phi)], axis=1)
+
+
+def slab_fill(v, f):
+    """thickness_fill in every direction: rebuild the missing far side of any slab.
+
+    The underside of a seat is one case; the back of a backrest pushed against a wall is
+    the same case turned on its side. Faces are grouped by the nearest of a set of
+    directions d; for each group the three steps of thickness_fill run along d instead of
+    along vertical: probe along -d for existing surface, measure the drop along d to the
+    nearest open boundary (nearest in the plane perpendicular to d), copy the face by that
+    drop. Grouping keeps it vectorised -- one boundary KD-tree per direction, not per face.
+    """
+    centroids, normals, _ = face_geometry(v, f)
+    boundary = boundary_vertices(v, f)
+    if len(boundary) == 0:
+        return v, f
+    surface = cKDTree(sample_surface(v, f, SAMPLES, np.random.default_rng(1)))
+    dirs = _sphere_directions(SLAB_DIRECTIONS)
+    group = np.argmax(normals @ dirs.T, axis=1)
+    depths = np.arange(2 * PROBE_STEP, MAX_THICKNESS + 1e-9, PROBE_STEP)
+    pieces = []
+
+    for g, d in enumerate(dirs):
+        faces = np.flatnonzero((group == g) & (normals @ d > UPWARD))
+        if len(faces) == 0:
+            continue
+        probes = centroids[faces, None, :] - depths[None, :, None] * d
+        hit, _ = surface.query(probes.reshape(-1, 3), distance_upper_bound=PROBE_HIT)
+        faces = faces[~np.isfinite(hit).reshape(len(faces), len(depths)).any(axis=1)]
+        if len(faces) == 0:
+            continue
+
+        # Coordinates in the plane perpendicular to d: any two axes orthogonal to it.
+        a = np.cross(d, [1.0, 0.0, 0.0] if abs(d[0]) < 0.9 else [0.0, 1.0, 0.0])
+        a /= np.linalg.norm(a)
+        b = np.cross(d, a)
+        plane = lambda p: np.stack([p @ a, p @ b], axis=1)
+        _, nearest = cKDTree(plane(boundary)).query(plane(centroids[faces]))
+        thickness = (centroids[faces] - boundary[nearest]) @ d
+        ok = (thickness > MIN_THICKNESS) & (thickness < MAX_THICKNESS)
+        faces, thickness = faces[ok], thickness[ok]
+        if len(faces):
+            pieces.append(v[f[faces]] - d * thickness[:, None, None])
+
+    if not pieces:
+        return v, f
+    new_v = np.concatenate(pieces).reshape(-1, 3)
+    new_f = np.arange(len(new_v)).reshape(-1, 3)[:, ::-1]
+    gv, gf = keep_only_gaps(v, f, new_v, new_f)
+    return append(v, f, gv, gf)
+
+
 def close_holes(v, f):
     ms = to_meshset(v, f)
     ms.meshing_repair_non_manifold_edges()
