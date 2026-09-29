@@ -227,6 +227,8 @@
       #left { left: 0; } #right { right: 0; }
       body:not(.left-open) #left, body:not(.right-open) #right { display: none; }
       .wide-only { display: none; }
+      /* keep the panel toggles on screen: drop the secondary buttons, not the navigation */
+      .brand, #folder, #showall, .sep { display: none; }
     }
   </style>
   <script type="importmap">

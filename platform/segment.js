@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { splitMeshIntoParts, describePart } from './parts.js';
 
 // PLACEHOLDER segmentation for P1. It only answers "which triangles are physically connected?",
 // which is enough to make a chess set's pieces or a room's loose furniture selectable, and
@@ -9,7 +10,9 @@ import * as THREE from 'three';
 
 const DEFAULTS = {
   weld: 0.001,      // metres: vertices closer than this count as the same point (see below)
-  minDiagFrac: 0.02 // components smaller than 2% of the scan's bbox diagonal are not selectable
+  minDiagFrac: 0.02, // components smaller than 2% of the scan's bbox diagonal are not selectable
+  autoParts: true,   // split single-mesh scans into structural parts (parts.js)
+  autoMinTris: 2000  // components smaller than this are left whole
 };
 
 function find(parent, i) {
@@ -76,7 +79,7 @@ function extract(geo, tris, matrix, normalMatrix) {
 //   rests: meshes holding the tiny leftovers (never selectable)
 export function splitComponents(object, opts = {}) {
   const t0 = performance.now();
-  const { weld, minDiagFrac } = { ...DEFAULTS, ...opts };
+  const { weld, minDiagFrac, autoParts, autoMinTris } = { ...DEFAULTS, ...opts };
 
   // A bare Mesh (PLY) can't hold children of its own that render separately; wrap it.
   let root = object;
@@ -151,7 +154,9 @@ export function splitComponents(object, opts = {}) {
     const restTris = [];
     for (const g of groups.values()) {
       if (g.box.getSize(p).length() >= minDiag) {
-        found.push({ geo: extract(geo, g.tris, matrix, normalMatrix), material: m.material, tris: g.tris.length });
+        found.push({ geo: extract(geo, g.tris, matrix, normalMatrix), material: m.material, tris: g.tris.length,
+                     // GLTFLoader sanitises node names (spaces -> underscores); undo that for display
+                     name: sources.length > 1 ? m.name.replace(/_/g, ' ').trim() : '' });
       } else {
         for (const t of g.tris) restTris.push(t);
       }
@@ -166,10 +171,35 @@ export function splitComponents(object, opts = {}) {
     geo.dispose();
   }
 
+  // A scan that arrives as ONE mesh has no parts of its own: split each big connected
+  // component into structural parts (parts.js -- seat, legs, runners...). A file that
+  // already defines several meshes (e.g. assets/chair/chair_detail.glb, parts baked offline)
+  // keeps its own parts and names. Automatic parts are a heuristic starting point.
+  if (autoParts && sources.length === 1) {
+    const expanded = [];
+    for (const f of found) {
+      if (f.tris < autoMinTris) { expanded.push(f); continue; }
+      const tmp = new THREE.Mesh(f.geo, f.material);
+      const pieces = splitMeshIntoParts(tmp, { matrix: new THREE.Matrix4() });
+      if (pieces.length <= 1) { expanded.push(f); continue; }
+      f.geo.dispose();
+      for (const pm of pieces) {
+        pm.geometry.computeBoundingBox();
+        expanded.push({ geo: pm.geometry, material: f.material, tris: pm.geometry.index ? pm.geometry.index.count / 3 : 0,
+                        kind: pm.userData.partKind });
+      }
+    }
+    found.length = 0;
+    found.push(...expanded);
+  }
+
   found.sort((a, b) => b.tris - a.tris);
   const parts = found.map((f, i) => {
     const mesh = new THREE.Mesh(f.geo, f.material);
-    mesh.name = `part-${i + 1}`;
+    if (!f.geo.boundingBox) f.geo.computeBoundingBox();
+    const label = f.name || (f.kind ? describePart(f.geo.boundingBox, scanBox, f.kind) : '');
+    mesh.name = label || `part-${i + 1}`;
+    if (label) mesh.userData.label = label;
     mesh.userData.partId = i + 1;
     root.add(mesh);
     return { id: i + 1, mesh, tris: f.tris, box: f.geo.boundingBox.clone() };

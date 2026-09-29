@@ -107,7 +107,11 @@ class HolographicMaterial extends ShaderMaterial {
         #include <fog_vertex>
 
         vUv = uv;
-        #ifdef USE_COLOR
+        // Vertex colours arrive as vec3, or vec4 when the file stores RGBA (USE_COLOR_ALPHA,
+        // e.g. trimesh-written GLBs) -- assigning a vec4 to vColorH fails shader compilation.
+        #if defined( USE_COLOR_ALPHA )
+          vColorH = color.rgb;
+        #elif defined( USE_COLOR )
           vColorH = color;
         #else
           vColorH = vec3(1.0);

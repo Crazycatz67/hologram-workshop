@@ -9,6 +9,8 @@ const { groupFiles, parseGroup, countTriangles, sha256Hex, filesFromDrop, ACCEPT
 const { createLibrary } = await import('./library.js' + V);
 const exporter = await import('./export.js' + V);
 const { splitComponents } = await import('./segment.js' + V);
+// meshoptimizer for the part splitter's proxy on dense scans; loads in the background.
+import('./parts.js').then((m) => m.loadSimplifier());   // same specifier as segment.js's import -> same module instance
 const { createObjectMode } = await import('./objectmode.js' + V);
 const { createMeasurements } = await import('./measurements.js' + V);
 const { createShell } = await import('./shell.js' + V);
@@ -413,7 +415,7 @@ $('folder').addEventListener('click', () => folderPicker.click());
 for (const p of [picker, folderPicker]) {
   p.addEventListener('change', () => { if (p.files.length) loadFiles([...p.files]); p.value = ''; });
 }
-$('sample').addEventListener('click', () => loadUrl('../assets/chair/chair_detail.ply'));
+$('sample').addEventListener('click', () => loadUrl('../assets/chair/chair_detail.glb'));
 
 window.addEventListener('keydown', (e) => {
   if (e.target.matches?.('input, textarea')) return;

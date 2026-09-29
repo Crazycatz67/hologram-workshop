@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>parts.js test</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  html,body{margin:0;height:100%;background:#0b0f14;color:#cfe;font:12px ui-monospace,monospace}
+  #hud{position:fixed;top:8px;left:8px;background:#000a;padding:8px 10px;border-radius:6px;max-width:560px;max-height:95vh;overflow:auto;z-index:2}
+  pre{margin:6px 0 0;white-space:pre}
+  a{color:#8cf}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/" } }
+</script></head>
+<body>
+<div id="hud">parts.js — <a href="?model=obj">chair_clean.obj</a> · <a href="?model=glb">chair.glb</a><pre id="log">loading…</pre></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { splitMeshIntoParts } from './parts.js';
+
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent = s; };
+const which = new URLSearchParams(location.search).get('model') || 'obj';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0f14);
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.01, 100);
+const controls = new OrbitControls(camera, renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(1, 2, 1.5); scene.add(sun);
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+
+async function loadSource() {
+  if (which === 'glb') {
+    const g = await new GLTFLoader().loadAsync('../assets/chair/chair.glb');
+    return g.scene;
+  }
+  return new OBJLoader().loadAsync('../assets/chair/chair_clean.obj');
+}
+
+function frame(obj) {
+  const box = new THREE.Box3().setFromObject(obj);
+  const c = box.getCenter(new THREE.Vector3()), r = box.getSize(new THREE.Vector3()).length();
+  controls.target.copy(c);
+  camera.position.copy(c).add(new THREE.Vector3(0.9, 0.6, 1.1).multiplyScalar(r * 0.9));
+  camera.near = r / 100; camera.far = r * 20; camera.updateProjectionMatrix();
+}
+
+// Greedy one-to-one match on the worst bbox-corner difference.
+function compare(ref, parts) {
+  const pairs = [];
+  ref.parts.forEach((rp, i) => parts.forEach((jp, j) => {
+    let corner = 0, extent = 0;
+    for (let a = 0; a < 3; a++) {
+      corner = Math.max(corner, Math.abs(rp.bbox.min[a] - jp.bbox.min[a]), Math.abs(rp.bbox.max[a] - jp.bbox.max[a]));
+      extent = Math.max(extent, Math.abs((rp.bbox.max[a] - rp.bbox.min[a]) - (jp.bbox.max[a] - jp.bbox.min[a])));
+    }
+    pairs.push({ i, j, corner, extent });
+  }));
+  pairs.sort((a, b) => a.corner - b.corner);
+  const usedR = new Set(), usedJ = new Set(), rows = [];
+  for (const p of pairs) {
+    if (usedR.has(p.i) || usedJ.has(p.j)) continue;
+    usedR.add(p.i); usedJ.add(p.j);
+    const rp = ref.parts[p.i], jp = parts[p.j];
+    const dv = (jp.vertexCount - rp.vertexCount) / rp.vertexCount;
+    rows.push({ ref: p.i, js: p.j, refKind: rp.kind, jsKind: jp.kind, refVerts: rp.vertexCount, jsVerts: jp.vertexCount,
+      dVerts: +(dv * 100).toFixed(1), extentCm: +(p.extent * 100).toFixed(2), cornerCm: +(p.corner * 100).toFixed(2),
+      ok: p.extent <= 0.015 && Math.abs(dv) <= 0.10 });
+  }
+  rows.sort((a, b) => a.ref - b.ref);
+  return rows;
+}
+
+async function run() {
+  const src = await loadSource();
+  src.updateMatrixWorld(true);
+  const meshes = [];
+  src.traverse((c) => { if (c.isMesh) meshes.push(c); });
+  log(`loaded ${meshes.length} mesh(es); splitting…`);
+  await new Promise((r) => setTimeout(r, 30)); // let the HUD paint before the synchronous split
+
+  const group = new THREE.Group();
+  const results = [];
+  const t0 = performance.now();
+  for (const m of meshes) {
+    m.userData.original = { name: m.name || 'source' };
+    const out = splitMeshIntoParts(m);
+    results.push({ source: m.name, split: out.split, meshes: out });
+    out.forEach((pm, k) => {
+      const hue = (group.children.length * 0.618034) % 1;
+      pm.material = new THREE.MeshLambertMaterial({ color: new THREE.Color().setHSL(hue, 0.75, 0.55), side: THREE.DoubleSide });
+      group.add(pm);
+    });
+  }
+  const ms = performance.now() - t0;
+  scene.add(group);
+  frame(group);
+
+  const allParts = results.flatMap((r) => r.split.parts);
+  const summary = {
+    model: which, meshes: meshes.length, parts: group.children.length, ms: +ms.toFixed(0),
+    names: group.children.map((m) => m.name),
+    perMesh: results.map((r) => ({ source: r.source, welded: r.split.weldedVertices, faces: r.split.faceLabels.length,
+      parts: r.split.parts.length, thicknessSplitCm: +(r.split.thicknessSplit * 100).toFixed(2), timings: r.split.timings })),
+  };
+  let text = `${summary.model}: ${summary.meshes} mesh -> ${summary.parts} parts in ${summary.ms} ms\n`;
+  for (const r of summary.perMesh) text += `  welded ${r.welded} v, ${r.faces} f, split ${r.thicknessSplitCm} cm\n  ${JSON.stringify(r.timings)}\n`;
+  text += '\n' + allParts.map((p) => `  ${String(p.id).padStart(2)} ${p.kind.padEnd(5)} ${String(p.vertexCount).padStart(6)} v  ` +
+    p.bbox.max.map((v, a) => ((v - p.bbox.min[a]) * 100).toFixed(1)).join(' x ') + ' cm').join('\n');
+
+  if (which === 'obj') {
+    const ref = await (await fetch('../completion/out/parts_reference.json')).json();
+    const rows = compare(ref, allParts);
+    summary.reference = { parts: ref.parts.length, thicknessSplitCm: +(ref.thicknessSplit * 100).toFixed(2), seconds: ref.seconds };
+    summary.match = rows;
+    summary.pass = allParts.length === ref.parts.length && rows.every((r) => r.ok) &&
+      Math.abs(ref.thicknessSplit - results[0].split.thicknessSplit) <= 0.002;
+    text += `\n\nvs Python: ${ref.parts.length} parts, split ${summary.reference.thicknessSplitCm} cm  -> ${summary.pass ? 'PASS' : 'FAIL'}\n`;
+    text += ' ref js kind        refV   jsV   dV%  dExt  dCorner\n';
+    for (const r of rows) text += ` ${String(r.ref).padStart(3)} ${String(r.js).padStart(2)} ${r.refKind.padEnd(5)}/${r.jsKind.padEnd(5)} ${String(r.refVerts).padStart(6)} ${String(r.jsVerts).padStart(6)} ${String(r.dVerts).padStart(5)} ${String(r.extentCm).padStart(5)} ${String(r.cornerCm).padStart(5)} ${r.ok ? 'ok' : 'XX'}\n`;
+  }
+  log(text);
+  window.partsResult = summary;
+}
+run().catch((e) => { log('ERROR ' + e.stack); console.error(e); window.partsResult = { error: String(e) }; });
+</script>
+</body></html>

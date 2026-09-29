@@ -49,7 +49,18 @@ def thickness(v, f, max_t=0.20, step=0.004, hit=0.004):
     """Distance through the object at each vertex: probe inward along -normal until a
     surface sample facing the other way is reached (a poor man's shape diameter)."""
     vn = vertex_normals(v, f)
-    pts = fill.sample_surface(v, f, 300_000, np.random.default_rng(0))
+    # Deterministic barycentric lattice (spacing <= hit), not random samples: random ones made
+    # borderline vertices flip thin/thick between runs and the part count depend on the seed.
+    ea = np.linalg.norm(v[f[:, 0]] - v[f[:, 1]], axis=1)
+    eb = np.linalg.norm(v[f[:, 1]] - v[f[:, 2]], axis=1)
+    ec = np.linalg.norm(v[f[:, 2]] - v[f[:, 0]], axis=1)
+    lat = np.maximum(1, np.ceil(np.maximum(np.maximum(ea, eb), ec) / hit)).astype(int)
+    chunks = []
+    for n in np.unique(lat):
+        tris = f[lat == n]
+        w = np.array([(1 - p / n - q / n, p / n, q / n) for p in range(n + 1) for q in range(n + 1 - p)])
+        chunks.append(np.einsum("wk,tkd->twd", w, v[tris]).reshape(-1, 3))
+    pts = np.concatenate(chunks)
     tree = cKDTree(pts)
     # normals of samples: nearest vertex normal is good enough
     _, nv = cKDTree(v).query(pts); pn = vn[nv]
@@ -82,6 +93,7 @@ def segment(v, f, radius=0.035, angle=25, min_share=0.01):
     thr = np.exp(otsu(logt))
     thick = logt > np.log(thr)
     print(f"  thickness: median {np.nanmedian(t)*100:.1f} cm, split at {thr*100:.1f} cm -> {thick.mean():.0%} thick")
+    segment.last_split = float(thr)
     lin, pla, sca, axis, normal = descriptors(v, radius)
     label = np.where(lin >= np.maximum(pla, sca), 0, np.where(pla >= sca, 1, 2))  # 0 tube,1 slab,2 joint
     label[thick] = 3                                                               # 3 thick body
@@ -140,6 +152,10 @@ def segment(v, f, radius=0.035, angle=25, min_share=0.01):
         other = np.where(reg[a[m]] == s, reg[b[m]], reg[a[m]])
         if len(other) == 0: reg[reg == s] = -2; continue
         vals, cnt = np.unique(other, return_counts=True)
+        # Prefer a neighbour that is NOT itself small: two slivers merging into each other
+        # can cross min_share together and survive as a fake part.
+        big = share[np.searchsorted(ids, vals)] >= min_share
+        if big.any(): vals, cnt = vals[big], cnt[big]
         reg[reg == s] = vals[np.argmax(cnt)]
     def absorb_islands(reg):
         return _absorb_islands(reg, a, b)
@@ -190,7 +206,9 @@ def _absorb_islands(reg, a, b, share=0.70):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('mesh'); ap.add_argument('--radius', type=float, default=0.035)
     ap.add_argument('--angle', type=float, default=25); ap.add_argument('--min-share', type=float, default=0.01)
-    ap.add_argument('-o', default='completion/out/parts.ply'); args = ap.parse_args()
+    ap.add_argument('-o', default='completion/out/parts.ply')
+    ap.add_argument('--json', help='also write per-part vertexCount/bbox/kind + Otsu split (for the JS port test)')
+    args = ap.parse_args()
     import pymeshlab, time
     ms = pymeshlab.MeshSet(); ms.load_new_mesh(args.mesh); m = ms.current_mesh()
     v, f = m.vertex_matrix().astype(float), m.face_matrix().astype(np.int64)
@@ -200,6 +218,19 @@ def main():
     for k in range(reg.max()+1):
         p = v[reg == k]; ext = p.max(0) - p.min(0)
         print(f"  part {k:2d}: {len(p):6d} verts  bbox {ext[0]*100:5.1f} x {ext[1]*100:5.1f} x {ext[2]*100:5.1f} cm  kind {['tube','slab','joint','body'][np.bincount(label[reg==k], minlength=4).argmax()]}")
+    if args.json:
+        import json
+        kinds = ['tube', 'panel', 'joint', 'body']
+        parts = []
+        for k in range(reg.max() + 1):
+            m = reg == k; p = v[m]
+            parts.append({'id': k, 'kind': kinds[np.bincount(label[m], minlength=4).argmax()],
+                          'vertexCount': int(m.sum()), 'faceCount': int(np.sum(m[f[:, 0]])),
+                          'bbox': {'min': p.min(0).tolist(), 'max': p.max(0).tolist()}})
+        Path(args.json).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.json).write_text(json.dumps({'mesh': args.mesh, 'vertices': len(v), 'faces': len(f),
+            'thicknessSplit': segment.last_split, 'seconds': round(time.time() - t, 2), 'parts': parts}, indent=1))
+        print('wrote', args.json)
     out = Path(args.o); out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, 'w') as fh:
         fh.write(f"ply\nformat ascii 1.0\nelement vertex {len(v)}\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nelement face {len(f)}\nproperty list uchar int vertex_indices\nend_header\n")
