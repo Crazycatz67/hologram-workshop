@@ -4,6 +4,7 @@ This file is the **index**, not a plan. Each track has its own roadmap, Next Con
 
 ## Revision History
 
+- **2026-09-30:** **Track B moved from research to built.** B0 (benchmark) is done; B1 (classical completion) ships for objects and, via `plane_extend`, for room planes; the B3 TripoSR spike is done. `complete.py --mode auto` picks the room or object pipeline. Free ground truths are in `assets/benchmark/` (git-ignored). Limits: thin shells and big thick furniture still fail, and the room numbers come from a perfectly planar synthetic room. Details and numbers in `plans/scan-completion/ROADMAP.md` (revision 2026-09-30 (5)).
 - **2026-09-29 (2):** **Re-focused around an architectural hologram platform.** The owner clarified that the project was always meant for interacting with objects in general, and the chair was only a test asset. Two main-focus tracks:
   - **Hologram Platform:** upload any room or object scan → hologram, universal controls with no hand-made parts, per-object colours, room decor.
   - **Scan Completion:** a free, Mac-runnable algorithm that fills in what the scanner missed, always marked as inferred. Backed by a research pass recorded in `plans/scan-completion/RESEARCH.md`.
@@ -16,7 +17,7 @@ This file is the **index**, not a plan. Each track has its own roadmap, Next Con
 | Track | What it is | Plan | Status |
 | --- | --- | --- | --- |
 | **A — Hologram Platform** ★ | The website. Upload any LiDAR scan (room or object) → hologram → universal gesture + mouse controls → automatic object/part segmentation → per-object colours → room decor (move, hide/restore, snap, measure) | [`plans/platform/ROADMAP.md`](plans/platform/ROADMAP.md) | Planned. Built on the live v1 engine |
-| **B — Scan Completion** ★ | The fill-in-the-blanks algorithm: undersides, backs, holes, noise. Free, runs on a MacBook Air M5, inferred parts always marked | [`plans/scan-completion/ROADMAP.md`](plans/scan-completion/ROADMAP.md) + [`RESEARCH.md`](plans/scan-completion/RESEARCH.md) | Planned. Research done |
+| **B — Scan Completion** ★ | The fill-in-the-blanks algorithm: undersides, backs, holes, noise. Free, runs on a MacBook Air M5, inferred parts always marked | [`plans/scan-completion/ROADMAP.md`](plans/scan-completion/ROADMAP.md) + [`RESEARCH.md`](plans/scan-completion/RESEARCH.md) | **B0 done. B1 shipped** for objects and room planes. B3 TripoSR spike done. Limits: thin shells, big thick furniture |
 | **C — Neurotech Bionic Arm** | The Neurotechnology Exploration Club's arm, and its hand-tracking / hologram tie-ins | [`plans/neurotech-arm/ROADMAP.md`](plans/neurotech-arm/ROADMAP.md) | **Parked.** Basics still to confirm |
 | *v1 history* | What's already built: one scanned object (chair, chess) → hologram → gestures, measurement, per-part explode | [`plans/object-hologram/ROADMAP.md`](plans/object-hologram/ROADMAP.md) | Live on GitHub Pages. Open items continue as Platform maintenance |
 
@@ -49,8 +50,8 @@ B produces files, A displays and interacts with them. Their only coupling is the
 ## Priority
 
 **A and B are the joint main focus.** Suggested order, since each step unblocks the next:
-1. B0 (the completion benchmark) and A-P0 (upload any scan), which are independent.
-2. A-P1/P2 (controls, segmentation) alongside B1 (classical completion).
+1. ~~B0 (the completion benchmark)~~ done; A-P0 (upload any scan) is independent of B.
+2. A-P1/P2 (controls, segmentation) alongside the B1 follow-ups (thin shells, big furniture, real-scan room test).
 3. A-P5 shows B's output.
 
 v1 maintenance (chess captures, live gesture confirmations) continues when convenient. C is parked until its basics are answered.

@@ -5,9 +5,10 @@ rule: real scanned geometry is never moved or replaced, and new geometry is only
 where the scan has no surface nearby. Methods are scored by completion/benchmark.py --
 change one, re-run it, and compare against the baseline table in the roadmap.
 
-Meshes are passed around as plain (vertices, faces) numpy arrays so methods compose:
+Meshes are passed around as plain (vertices, faces) numpy arrays so methods compose. The
+recommended B1 chain (what complete() runs):
     v, f = mirror_gaps(v, f)
-    v, f = thickness_fill(v, f)
+    v, f = slab_fill(v, f)
     v, f = poisson(v, f)
 """
 
@@ -22,7 +23,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import clean_scan  # noqa: E402  -- reuse the shipped symmetry search, never fork it
 
 GAP = 0.01               # metres; new geometry closer than this to the scan is redundant
-SAMPLES = 250_000        # surface samples for nearest-surface queries (~3 mm on a chair)
+SAMPLES = 250_000        # surface samples for nearest-surface queries (~3 mm on a chair)...
+SAMPLES_PER_M2 = 210_000  # ...and never sparser than the chair's density (1.18 m2), so the
+                          # absolute thresholds below (PROBE_HIT, GAP) mean the same thing on a
+                          # sofa as on a chair. A fixed count left 21% of an 8 m2 sofa's own
+                          # surface more than 4 mm from the nearest sample (BUGS.md #21).
 
 
 # ---------------------------------------------------------------- mesh helpers
@@ -45,6 +50,12 @@ def sample_surface(v, f, n, rng):
     s = np.sqrt(r1)
     a, b, c = v[f[idx, 0]], v[f[idx, 1]], v[f[idx, 2]]
     return (1 - s)[:, None] * a + (s * (1 - r2))[:, None] * b + (s * r2)[:, None] * c
+
+
+def sample_count(v, f, minimum=SAMPLES):
+    """Samples needed to cover this mesh at least as densely as SAMPLES covers the chair."""
+    _, _, area = face_geometry(v, f)
+    return max(minimum, int(area.sum() * SAMPLES_PER_M2))
 
 
 def submesh(v, f, keep):
@@ -70,7 +81,7 @@ def keep_only_gaps(v, f, new_v, new_f, gap=GAP):
     if len(new_f) == 0:
         return np.empty((0, 3)), np.empty((0, 3), dtype=np.int64)
     centroids, _, _ = face_geometry(new_v, new_f)
-    dist, _ = cKDTree(sample_surface(v, f, SAMPLES, np.random.default_rng(0))).query(centroids)
+    dist, _ = cKDTree(sample_surface(v, f, sample_count(v, f), np.random.default_rng(0))).query(centroids)
     return submesh(new_v, new_f, dist > gap)
 
 
@@ -139,7 +150,7 @@ def thickness_fill(v, f):
 
     # 1. Is the bottom already there? Probe points below each top face; a scan sample
     #    within PROBE_HIT of any probe (past the face's own thickness band) means yes.
-    surface = cKDTree(sample_surface(v, f, SAMPLES, np.random.default_rng(1)))
+    surface = cKDTree(sample_surface(v, f, sample_count(v, f), np.random.default_rng(1)))
     depths = np.arange(2 * PROBE_STEP, MAX_THICKNESS + 1e-9, PROBE_STEP)
     # Straight down, not along the normal: thickness is measured vertically (step 2) and the
     # copy moves vertically (step 3), so the check that the bottom is missing must agree.
@@ -190,7 +201,7 @@ def slab_fill(v, f):
     boundary = boundary_vertices(v, f)
     if len(boundary) == 0:
         return v, f
-    surface = cKDTree(sample_surface(v, f, SAMPLES, np.random.default_rng(1)))
+    surface = cKDTree(sample_surface(v, f, sample_count(v, f), np.random.default_rng(1)))
     dirs = _sphere_directions(SLAB_DIRECTIONS)
     group = np.argmax(normals @ dirs.T, axis=1)
     depths = np.arange(2 * PROBE_STEP, MAX_THICKNESS + 1e-9, PROBE_STEP)
@@ -239,7 +250,7 @@ def complete(v, f, watertight=False):
     rebuilt_v, rebuilt_f = poisson(*slab_fill(*mirror_gaps(v, f)))
     if watertight:
         centroids, _, _ = face_geometry(rebuilt_v, rebuilt_f)
-        dist, _ = cKDTree(sample_surface(v, f, SAMPLES, np.random.default_rng(0))).query(centroids)
+        dist, _ = cKDTree(sample_surface(v, f, sample_count(v, f), np.random.default_rng(0))).query(centroids)
         return rebuilt_v, rebuilt_f, dist > GAP
     pv, pf = keep_only_gaps(v, f, rebuilt_v, rebuilt_f)
     out_v, out_f = append(v, f, pv, pf)

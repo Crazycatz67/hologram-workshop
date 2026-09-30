@@ -89,7 +89,7 @@ Then open <http://localhost:8080>.
 | `clean_scan.py` | **Raw scan → clean object.** Detects and removes the ground plane (without deleting the object's base), rebuilds missing structure by mirroring, fills gaps, welds watertight, decimates for the web |
 | `repair_scan.py` | Lower-level mesh repair (PyMeshLab, no GUI) — see v1 roadmap for what worked and what didn't |
 | `ROADMAP.md`, `plans/` | Track index + isolation rules; one roadmap per track under `plans/` |
-| `platform/`, `completion/`, `neurotech/` *(not created yet)* | Where Platform (browser), Scan Completion (Python) and Arm code will live, kept apart from the v1 files above |
+| `platform/`, `completion/`, `neurotech/` *(`neurotech/` not created yet)* | Where Platform (browser), Scan Completion (Python) and Arm code live, kept apart from the v1 files above. `platform/` and `completion/` exist; `assets/benchmark/` holds the git-ignored ground-truth scans (see its `SOURCES.md`) |
 
 No bundler and no dependencies to install for the site itself — Three.js and MediaPipe
 both load from a CDN via an import map. `analyze_scan.py` needs `numpy`; `clean_scan.py`

@@ -3,13 +3,19 @@
 # record, but not worth carrying in history — delete this line to start tracking it.
 assets/plush/
 
-__pycache__/
-.DS_Store
-Thumbs.db
+# Downloaded benchmark ground truths (see assets/benchmark/SOURCES.md)
+assets/benchmark/*
+!assets/benchmark/SOURCES.md
+
+# Benchmark and completion outputs. Mostly regenerable, but completion/out also holds
+# the chess-photos run, which is not: back it up before deleting.
+completion/out/
 
 # Local Python environment for completion/ tools (never commit)
 .venv/
-# Benchmark outputs (regenerable)
-completion/out/
 # Local AI model checkouts + weights for the B3 spike (multi-GB, never commit)
 .models/
+
+__pycache__/
+.DS_Store
+Thumbs.db

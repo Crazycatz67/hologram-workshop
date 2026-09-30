@@ -37,6 +37,12 @@ not a perfect one, so treat scores as comparisons BETWEEN methods rather than ab
 accuracy. A better ground truth (a scan with the chair flipped to capture its underside,
 registered to the upright scan) would tighten this.
 
+completion/truths.py builds non-slab truths (stool, vase, lamp, sofa) the methods were not
+tuned on. They are exact synthetic geometry: no scan noise, no holes, perfect symmetry.
+They test whether a method's assumptions hold on a new shape, not how it copes with a real
+scanner, so their scores are an upper bound for those shapes, not a real-scan result.
+Results for a non-default --truth go to results_<stem>.json and out/<stem>/<scenario>/.
+
 Usage:
     .venv/bin/python completion/benchmark.py                      # all methods, all scenarios
     .venv/bin/python completion/benchmark.py --methods none poisson --scenarios underside
@@ -49,7 +55,6 @@ Saved meshes land in completion/out/ and open in the v1 viewer, e.g.
 import argparse
 import json
 import multiprocessing as mp
-import os
 import resource
 import sys
 import time
@@ -68,7 +73,8 @@ import fill  # noqa: E402
 OUT = REPO / "completion" / "out"
 
 TRUTH_SAMPLES = 20_000     # points on the hidden region
-OUTPUT_SAMPLES = 250_000   # points on a method's output; ~3 mm spacing on a chair-sized mesh
+OUTPUT_SAMPLES = 250_000   # points on a method's output; ~3 mm spacing on a chair-sized mesh,
+                           # scaled up by area for bigger meshes (fill.sample_count, BUGS.md #21)
 ADDED_THRESHOLD = 0.005    # metres; output farther than this from the input counts as added
 
 # Faces count as "facing" a direction when dot(face normal, direction) exceeds this --
@@ -82,7 +88,7 @@ HOLE_RADIUS = 0.05         # metres
 # ---------------------------------------------------------------- mesh helpers
 # Shared with the methods themselves: one implementation, in fill.py.
 
-from fill import face_geometry, sample_surface, submesh  # noqa: E402
+from fill import face_geometry, sample_count, sample_surface, submesh  # noqa: E402
 
 
 def load_vf(path):
@@ -224,15 +230,17 @@ def run_method(method, v, f):
 def score(out_v, out_f, partial_tree, truth_tree, hidden_pts, rng):
     if len(out_f) == 0:
         return None
-    out_pts = sample_surface(out_v, out_f, OUTPUT_SAMPLES, rng)
+    out_pts = sample_surface(out_v, out_f, sample_count(out_v, out_f, OUTPUT_SAMPLES), rng)
     d_hidden, _ = cKDTree(out_pts).query(hidden_pts)
 
-    d_input, _ = partial_tree.query(out_pts)
+    # Only the thresholds matter for these two, so cap the search: identical results, and
+    # far-off invented surface no longer makes the query crawl (27 s -> ~1 s on a sofa).
+    d_input, _ = partial_tree.query(out_pts, distance_upper_bound=ADDED_THRESHOLD)
     added = out_pts[d_input > ADDED_THRESHOLD]
     _, _, out_area = face_geometry(out_v, out_f)
     added_area = out_area.sum() * len(added) / len(out_pts)
     if len(added):
-        d_added, _ = truth_tree.query(added)
+        d_added, _ = truth_tree.query(added, distance_upper_bound=0.02)
         added_ok = float(np.mean(d_added < 0.02))
     else:
         added_ok = float("nan")
@@ -265,7 +273,12 @@ def main():
     print(f"ground truth: {Path(args.truth).name}  {len(v)} verts  {len(f)} faces  "
           f"{size[0]:.2f} x {size[1]:.2f} x {size[2]:.2f} m  area {area.sum():.2f} m2\n")
 
-    truth_tree = cKDTree(sample_surface(v, f, OUTPUT_SAMPLES, rng))
+    default_truth = Path(args.truth).resolve() == (REPO / "assets/chair/chair_clean.obj").resolve()
+    stem = Path(args.truth).stem
+    mesh_dir = OUT if default_truth else OUT / stem  # other truths don't overwrite the chair's files
+    results_path = OUT / ("results.json" if default_truth else f"results_{stem}.json")
+
+    truth_tree = cKDTree(sample_surface(v, f, sample_count(v, f, OUTPUT_SAMPLES), rng))
     rows = []
     for name, mask in hidden_masks(v, f, rng).items():
         group = scenario_group(name)
@@ -274,11 +287,11 @@ def main():
         pv, pf = submesh(v, f, ~mask)
         hv, hf = submesh(v, f, mask)
         hidden_pts = sample_surface(hv, hf, TRUTH_SAMPLES, rng)
-        partial_tree = cKDTree(sample_surface(pv, pf, OUTPUT_SAMPLES, rng))
+        partial_tree = cKDTree(sample_surface(pv, pf, sample_count(pv, pf, OUTPUT_SAMPLES), rng))
         share = area[mask].sum() / area.sum()
         print(f"[{name}] hid {mask.sum()} faces ({share:.1%} of surface)")
         if args.save_meshes:
-            write_obj(OUT / name / "partial.obj", pv, pf)
+            write_obj(mesh_dir / name / "partial.obj", pv, pf)
 
         for method in args.methods:
             out_v, out_f, elapsed, peak_mb, err = run_method(method, pv, pf)
@@ -290,12 +303,12 @@ def main():
                              f"added {s['added_m2']:.3f} m2 ({s['added_ok2cm']:.0%} real)")
             print(f"    {method:<18} {elapsed:6.1f}s {peak_mb:6.0f} MB   {status}")
             if args.save_meshes and not err:
-                write_obj(OUT / name / f"{method.replace('+', '_')}.obj", out_v, out_f)
+                write_obj(mesh_dir / name / f"{method.replace('+', '_')}.obj", out_v, out_f)
 
     summarize(rows, args.methods)
     OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / "results.json").write_text(json.dumps(rows, indent=2))
-    print(f"\nraw results: {OUT / 'results.json'}")
+    results_path.write_text(json.dumps(rows, indent=2))
+    print(f"\nraw results: {results_path}")
 
 
 def summarize(rows, methods):

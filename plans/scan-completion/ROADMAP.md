@@ -8,6 +8,31 @@ The research behind every choice here is in [`RESEARCH.md`](RESEARCH.md).
 
 ## Revision History
 
+- **2026-09-30 (5):** **B1 tested beyond the chair, and a room path added.** Team round: Debbie stress-tested the object chain, Cody built the room case, Ricky found free ground truths; all numbers re-checked by the overseer.
+  - **Non-slab objects** (`completion/truths.py`, synthetic, noise-free, so upper bounds). Cells are coverage @2 cm / added surface that's real, for `complete`:
+
+    | Object | Underside | Wall | Holes |
+    | --- | --- | --- | --- |
+    | Chair (regression, unchanged) | 98% / 96% | 99% / 96% | 100% / 100% |
+    | Stool (thin round parts) | 100% / 100% | 100% / 100% | 93% / 100% |
+    | Vase (5 mm shell) | 100% / 24% | 100% / 15% | 73% / 100% |
+    | Lamp (open shade on spokes) | 94% / 79% | 100% / 14% | 86% / 83% |
+    | Sofa (2.1 m, 30 cm base) | 24% / 13% | 74% / 35% | 96% / 12% |
+
+    **Verdict:** holds on thin round parts; fails on thin shells (Poisson balloons them, BUGS #24) and on big thick furniture (thicker than the 8 cm probe, and the symmetry search misses planes on objects over ~1 m, #22). Sanity: 0.0% inferred on every complete truth.
+  - **Metric blind spot:** coverage@2cm can't see thin parts ("none" scores 100% on vase walls). A normal-aware coverage gives 36% there. Not yet in the benchmark.
+  - **Bug fixed:** #21, a fixed 250k sample count made every absolute threshold wrong on large objects (`fill.sample_count()`; chair unchanged). Logged open: #22, #23 (slab_fill measures thickness to another part's edge; a tested variant trades chair 98→96% for sofa 24→39%), #24, #25.
+  - **Rooms: tier 1 `plane_extend` (`completion/planes.py`) and a synthetic room benchmark (`completion/room_bench.py`).** 4.2 × 3.6 m room with sofa, table, cabinet and doorway; what the scanner misses comes from exact sight lines from 8 phone positions. Coverage @2 cm / added real:
+
+    | Scenario | poisson | complete (object chain) | **plane_extend** |
+    | --- | --- | --- | --- |
+    | Occlusion (13% hidden) | 7% / 41% | 13% / 19% | **54% / 100%** |
+    | Sofa hidden (A-P4), sofa passed as `occluders` | 43% / 41% | 51% / 21% | **100% / 100%** |
+    | Holes | 86% / 53% | 84% / 18% | **100% / 100%** |
+
+    Occlusion stops at 54% because the rest (sofa back, cabinet top, table underside) is surface no plane can produce. Doorways are left open. ~1.8 s and 0.5 GB. The synthetic room is perfectly planar, so these are upper bounds. F@5cm (the Atlas / SG-NN tolerance) is reported too.
+  - **`complete.py` now picks a pipeline:** `--mode auto` (default) runs `plane_extend` when it finds ≥3 shell planes and the object chain otherwise, because the object chain invents walls on rooms (#25). The sidecar records the mode.
+  - **Free ground truths fetched** (`assets/benchmark/`, git-ignored; sources and licences in `assets/benchmark/SOURCES.md`): 3 ABO models, a Poly Haven sofa, a Google Scanned Objects teapot, and the Redwood Bedroom laser scan + depth-camera reconstruction (public domain). **ABO is CC BY 4.0, not non-commercial** (checked on its index page 2026-09-30). The Redwood pair is not in a shared frame (~50 m apart) and needs registration first.
 - **2026-09-29 (4):** **`slab_fill` generalises the thickness prior to every direction and closes the wall gap too.**
   - **The idea:** a backrest against a wall is the same problem as a seat underside, turned on its side. Faces are grouped by the nearest of 26 sphere directions, and each group probes, measures thickness and copies along its own direction.
   - **Chain `mirror_gaps → slab_fill → poisson` (coverage @2 cm / added surface that's real):**
@@ -56,7 +81,7 @@ The research behind every choice here is in [`RESEARCH.md`](RESEARCH.md).
 
 ## Constraints (this track)
 
-- **Free only.** No paid APIs, subscriptions or credit-metered services. Every model and dataset used has its **licence recorded** in the output sidecar (e.g. Hunyuan excludes the EU/UK/South Korea, ABO is non-commercial, PyMeshLab is GPL).
+- **Free only.** No paid APIs, subscriptions or credit-metered services. Every model and dataset used has its **licence recorded** in the output sidecar (e.g. Hunyuan excludes the EU/UK/South Korea, ABO is CC BY 4.0 (attribution), PyMeshLab is GPL).
 - **Mac first.** Scripts take `--device mps|cpu|cuda`. The M5 Air is the target: it's fanless, so run one object at a time and write down real timings. The RTX 2070 (8 GB) desktop is an allowed fallback for the same scripts. Free cloud (Colab / HF Spaces) is the last resort, only for experiments.
 - **Offline Python tooling**, the same pattern as `clean_scan.py`: it produces assets, and the browser only displays them. The Platform site stays no-build. Code lives in `completion/`. Reuse `clean_scan.py` functions by import, don't fork them.
 - **Honest evaluation.** No method is adopted on screenshots alone (see B0).
@@ -151,5 +176,10 @@ Run the cascade per object after the Platform's segmentation (P2) has split a ro
 
 ## Next Concrete Action
 
-1. **B1 next:** validate `mirror → slab → poisson` on a second, non-slab object (round stool, sofa, lamp) and on a room once one is scanned. Then wire it into a `completion/complete.py` CLI that writes the `scanned` / `inferred` output contract, so the Platform (P5) can show it. *(Done: thickness prior for undersides, see revision 3.)* Original target: a *thickness prior* (panels like a seat are slabs: where the top is scanned and the bottom isn't, offset the top by the thickness measured at the panel's scanned edges) and *plane extension* (extend fitted planes to their intersections). Beat 75% coverage / 63% real on the underside row without losing the other rows.
-2. **B3 spike** (can run in parallel since it's just installs + one run): SPAR3D + Hunyuan3D-2mini on the M5, recording time and peak memory.
+1. **Real data before more tuning** (everything so far is one real chair plus synthetic truths):
+   - **Redwood Bedroom:** register the depth-camera reconstruction onto the laser scan (FPFH+RANSAC → ICP), then score `plane_extend` against laser points in the hidden region (`room_bench.evaluate()` already takes point truths).
+   - **Benchmark objects** in `assets/benchmark/`: run them through `benchmark.py --truth`, after a visibility filter (the CAD models have faces between parts that no scanner could see).
+   - **The owner's flip-scan chair** (scan it upside down in Scaniverse and register it to the upright scan) would be the most honest underside truth of all.
+2. **Close the object-chain failures:** density trim for Poisson (#24, thin shells), the finer symmetry search (#22, one line in `clean_scan.py`, a shared root file, so it needs the owner's OK and `test.html` green), the `slab_fill` shell-plane skip (#25), and an owner decision on the #23 variant. Add normal-aware coverage to the benchmark.
+3. **B1 "done" is still the Platform showing it:** P5 renders `usemtl inferred` distinctly (Track A).
+4. **B3 spike** (independent): TripoSR is done; SPAR3D and Hunyuan3D-2mini on the M5, recording time and peak memory.

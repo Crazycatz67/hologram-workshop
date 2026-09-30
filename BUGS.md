@@ -320,3 +320,127 @@ this was live for about 12 hours. Fix: objects without matrices are treated as a
 Regression check: "matrix-less stand-ins (platform Measure tab) measure without crashing"
 (test.html 120/0). Verified on platform/index.html: the chair (57.7 cm, all 8 parts) and the chess
 photo both measure.
+
+## 21. [B] Completion thresholds meant nothing on large objects: fixed 250k samples
+
+**Status: FIXED (verified offline)** (2026-09-30). Found by Debbie running the benchmark on a
+synthetic 2.1 m sofa (`completion/truths.py`).
+- **Symptom:** the `none` method (the partial scan, unchanged) reported 0.27–0.72 m² of
+  "added" surface on the sofa (0.000 on the chair). Scores and `slab_fill`'s "is the back
+  already scanned?" probe were silently wrong on anything much bigger than the chair.
+- **Reproduction:** sample 250k points on `completion/out/truths/sofa.obj` twice and query one
+  set against the other: 9.0% of the sofa's own surface is >5 mm from the nearest sample (the
+  added threshold) and 21.5% is >4 mm (`PROBE_HIT`). Chair: 0.00% / 0.00%.
+- **Root cause:** `fill.SAMPLES` and `benchmark.OUTPUT_SAMPLES` were fixed counts (commented
+  "~3 mm on a chair") used against absolute-distance thresholds, so spacing grew with area
+  (fill.py `keep_only_gaps`, `thickness_fill`, `slab_fill`, `complete`; benchmark.py `score`, `main`).
+- **Fix:** `fill.sample_count()` = max(250k, area × 210k/m²), the chair's own density; the
+  chair keeps exactly 250k. Scoring queries capped with `distance_upper_bound` (bit-identical
+  scores, 50.7 s → 5.5 s per sofa output) so the denser sampling doesn't cost 20 minutes a run.
+- **Regression check:** `.venv/bin/python completion/benchmark.py --truth completion/out/truths/sofa.obj --methods none`
+  must print `added 0.000 m2` on every row.
+
+## 22. [B] Symmetry search misses the mirror plane on objects over ~1 m (clean_scan.py)
+
+**Status: OPEN** (2026-09-30). Found by Debbie on the synthetic sofa; the fix is in `clean_scan.py`,
+which is shared with v1 and was not in her assignment.
+- **Symptom:** a perfectly mirror-symmetric 2.1 m sofa scores 56.4% overlap (trust threshold
+  60%) at 61.5° — the wrong (front/back) plane — so `mirror_gaps` refuses to mirror. The true
+  plane at 152° scores 92.4%.
+- **Reproduction:** `clean_scan.find_symmetry_plane(v, np.random.default_rng(0))` on
+  `completion/out/truths/sofa.obj` → 56.4% at 61.5°.
+- **Root cause:** `clean_scan.py:293` samples a fixed 30 offsets across the object, a 6.1 cm
+  step on the sofa (1.4 cm on the chair), against a 2 cm voxel tolerance; 3.3 cm off the true
+  plane the overlap is already down to 61%, so the coarse pass never lands in the right basin.
+  Proven by re-running the identical search with the offset step capped at 1 cm: 76.0% at
+  152.6° (16.6 s instead of 3.4 s).
+- **Fix (proposed):** in `proj_range`, `np.linspace(lo, hi, max(30, int(abs(hi - lo) / 0.01) + 1))`
+  (step ≤ SYMMETRY_VOXEL / 2). The 46-angle coarse grid (3.9°) likely needs the same treatment
+  for long objects: 76% is still well short of the true 92%. Re-run the chair after changing it
+  (`clean_scan.py` chair command + `completion/benchmark.py`).
+
+## 23. [B] slab_fill takes the "thickness" from a different part's edge
+
+**Status: OPEN** (2026-09-30). Found by Debbie on non-slab truths (`completion/truths.py`). A
+design weakness rather than a crash, logged so the numbers aren't lost.
+- **Symptom:** stool: 36.9% of the seat top is never offset (Poisson happens to close it, so
+  coverage still reads 100%). Lamp: 54% of the base top is never offset, underside 94%. Sofa:
+  with 1% of the surface hidden as holes, `slab_fill` adds 0.85 m² of which 23% is real.
+- **Root cause:** `fill.py` `slab_fill` picks the nearest open-boundary vertex in the plane
+  perpendicular to the direction, ignoring distance along it, then discards the face if that
+  drop is outside [4 mm, 8 cm]. The nearest edge is often another part: the stool's rung
+  31 cm below the seat, the lamp shade rim and spokes 27–44 cm *above* its base (the 26
+  directions sit ~16° off vertical, so tall parts project sideways by ~8 cm). On thick parts
+  (sofa, 14–30 cm) the 8 cm probe never meets the far side, so every face looks like a slab
+  and its "thickness" is the drop to the nearest hole edge.
+- **Tried, not shipped:** picking the nearest boundary *with a plausible drop* (k=32). Lamp
+  underside 94% → 100% coverage but added-real 83% → 63%; sofa underside 24% → 39%; chair
+  underside 98%/96% → 96%/92% and holes real 100% → 96%. A trade-off for the owner, not a fix.
+
+## 24. [B] Poisson balloons when one side of a thin shell is hidden
+
+**Status: OPEN** (2026-09-30). Found by Debbie on the vase and lamp truths.
+- **Symptom:** lamp, wall scenario: ~0.18 m² added (the whole lamp is 0.35 m²), only 14–18%
+  real, a skirt out to r ≈ 0.30 m around a 0.14 m shade. Vase underside: 0.22 m² added, 24% real.
+  Also inflates the sofa: underside 3.8 m² added, 13% real.
+- **Root cause:** with one face of a 5 mm wall hidden, screened Poisson (`fill.py` `poisson`)
+  sees a single oriented sheet and closes the solid on the open side; `keep_only_gaps` then
+  keeps it because it is far from the scan. The roadmap's tier 3 specifies "screened Poisson
+  with density trim"; `fill.poisson` has no density trim.
+- **Fix (proposed, needs a benchmark run):** trim low-density Poisson vertices
+  (`compute_selection_by_condition_per_vertex` on quality after Poisson with `preclean`/density
+  output), or reject patches that don't touch a scan boundary.
+- **Note:** coverage@2cm cannot see this class of failure. On the vase and lamp, `none` already
+  scores 100% on walls because the kept inner skin is within 5 mm of every hidden point.
+  Normal-aware coverage (an output point within 2 cm must face the same way, dot > 0.5) gives
+  the honest numbers for `complete`: vase wall **36%**, vase underside 65%, lamp wall **55%**
+  (plain coverage says 100% for all three).
+
+## 25. [B] The object pipeline invents walls on room scans (slab_fill treats walls as slabs)
+
+**Status: MITIGATED (verified offline)** (2026-09-30). Found by Cody on the synthetic room
+(`completion/room_bench.py`).
+- **Symptom:** `fill.complete()` on the room occlusion scan adds 22–27 m², only 18–21% of it real,
+  in 30–34 s at up to 3.5 GB. `slab_fill` alone adds 5.64 m² by copying floor and walls to fake
+  "thickness" offsets, and Poisson then wraps the ghost walls. (`mirror_gaps` correctly declines:
+  overlap 0.44, below 0.60.)
+- **Mitigation:** `completion/complete.py` now auto-detects rooms (≥3 shell planes from
+  `planes.find_planes`) and runs `planes.plane_extend` instead of the object chain. Synthetic room:
+  6 shell planes found → room mode, 6.9% inferred, 1.7 s; the chair still finds 0 → object mode,
+  0.0% inferred.
+- **Still open:** `fill.slab_fill` itself should skip faces on shell planes (or cap probe offsets by
+  object size), so a segmented room part that includes a slice of wall can't trigger it.
+- **Regression check:** `.venv/bin/python completion/room_bench.py --methods complete plane_extend --scenarios occlusion`.
+
+## 26. [A-v1] Releasing a tilt or two-hand pinch chains straight into explode
+
+**Status: OPEN** (2026-09-30, found by Debbie's gesture audit, reproduced offline with synthetic hands).
+- **Symptom:** hold a tilt (fist + second hand), open the fist: the mode becomes `explode` ~267 ms
+  later, and lowering both hands casually then flies the parts out to the full 0.6 offset.
+- **Cause:** "two open hands" is exactly the pose a tilt leaves behind. `manipulator.js:738-741`
+  (`enterFor` / `explode.update`) only raises the entry bar to `SWITCH_AWAY_MS` (300 ms), and that
+  timer is already running during the old gesture's 220 ms release.
+- **Fix direction (owner decision):** require a short neutral gap after any release before a
+  two-hand gesture can start, or let explode start only from IDLE with no gesture in the last ~400 ms.
+- **Repro:** paste the scratch script (`gesture-chain-repro.js`, session scratchpad) into DevTools on hologram.html.
+  Live check: the owner's 5-minute webcam checklist, step 3.
+
+## 27. [A-v1] A fast reverse of explode fires a clap and resets everything, with no undo
+
+**Status: OPEN** (2026-09-30, Debbie). Explode the chair, then bring the open hands together fast:
+the clap check (`manipulator.js:715-719`) sees two hands closing fast and resets pose, scale,
+explode and part selection. Slowly bringing them together just reverses the explode (0.6 → 0.108).
+Live check: webcam checklist step 4.
+
+## 28. [A-v1] Part selection is never wired on hologram.html
+
+**Status: OPEN** (2026-09-30, Debbie; verified by grep). `manipulator.selectPartAtScreenPoint`
+(`manipulator.js:670`) is only called from `test.js`: no pointer handler or pinch calls it, so the
+chair's 8 parts can't be picked on the live page and #2's live confirm can't be tried.
+
+## 29. [A-v1] hands.html leaks a whole GestureRecognizer on every camera stop/start
+
+**Status: OPEN** (2026-09-30, Debbie; verified by reading). Same bug as #16, fixed only in
+hologram.js (`if (!tracker)` at hologram.js:207). `hands.js:34` creates a new tracker on every
+start and `stop()` (hands.js:51-60) never closes it. Fix: copy hologram.js's pattern. Live check:
+stop/start 5× on hands.html and watch memory in Activity Monitor.

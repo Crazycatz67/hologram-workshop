@@ -39,7 +39,7 @@ Sources: [PyMeshLab](https://github.com/cnr-isti-vclab/PyMeshLab), [pymeshfix](h
 ### 1.4 Retrieve a real model and align it (Scan2CAD-style replacement)
 - **Research code:** [Scan2CAD](https://arxiv.org/abs/1811.11187), [ROCA](https://github.com/cangumeli/ROCA), [DiffCAD](https://github.com/DaoyiG/DiffCAD), [FastCAD](https://arxiv.org/pdf/2403.15161) and [HOC-Search](https://arxiv.org/pdf/2309.06107) are all CUDA and trained on ScanNet/ShapeNet. It's better to build a small version of our own. **Newest:** [CAOA (Jun 2026)](https://arxiv.org/abs/2606.18429), which completes the point cloud first, then aligns a CAD model with symmetry priors; it reports +17% on Scan2CAD and its code is released.
 - **Free model libraries:**
-  - **[ABO, Amazon Berkeley Objects](https://amazon-berkeley-objects.s3.amazonaws.com/index.html):** 7,953 real product GLBs *with real dimensions*. CC BY-NC 4.0, which is fine for a non-commercial student project.
+  - **[ABO, Amazon Berkeley Objects](https://amazon-berkeley-objects.s3.amazonaws.com/index.html):** 7,953 real product GLBs *with real dimensions*. **CC BY 4.0** (attribution; corrected 2026-09-30 from its index page — earlier notes said CC BY-NC).
   - **[Objaverse](https://huggingface.co/datasets/allenai/objaverse):** licence per object, with ~721K CC-BY. Filter the metadata by licence and category.
   - **3D-FUTURE:** custom Alibaba agreement ([terms](https://terms.aliyun.com/legal-agreement/terms/suit_bu1_ali_cloud/suit_bu1_ali_cloud202004171628_60052.html)).
 - **Retrieval:** CLIP (open_clip) on a photo or rendered views runs on MPS. [OpenShape](https://colin97.github.io/OpenShape/) does point-cloud → shape nearest-neighbour search.
@@ -192,5 +192,5 @@ Nobody combines these, and none of them requires a paid service:
 - Nothing that truly conditions on the partial scan runs well on 16 GB Apple Silicon *today*.
 - Mac ports are community-maintained and fragile.
 - Generated or retrieved objects are approximate.
-- Licences carry restrictions (Hunyuan territory exclusions, ABO non-commercial, PyMeshLab GPL).
+- Licences carry restrictions (Hunyuan territory exclusions, ABO needs attribution (CC BY 4.0), PyMeshLab GPL).
 - **Most of the real gain will come from planes, primitives and Poisson.**
