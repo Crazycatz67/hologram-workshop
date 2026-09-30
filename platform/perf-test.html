@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Render benchmark</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  html,body{margin:0;background:#0b0f14;color:#cfe;font:12px ui-monospace,monospace}
+  #hud{padding:8px 10px}
+  #stage{width:1280px;height:800px;position:relative}
+  #stage canvas{width:1280px;height:800px;display:block}
+  table{border-collapse:collapse;margin-top:6px}
+  td,th{border:1px solid #234;padding:2px 6px;text-align:right}
+  th{background:#122}
+  a{color:#8cf}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/" } }
+</script></head>
+<body>
+<div id="hud">
+  Render benchmark: times renderer.render directly in a loop with a readPixels sync, so a
+  background tab's throttled requestAnimationFrame can't skew it.
+  Scans: <a href="?scan=../assets/chair/chair_detail.glb">chair_detail.glb</a> ·
+  <a href="?scan=../assets/chair/chair.glb">chair.glb</a> ·
+  <a href="?scan=../assets/chess/chess.glb">chess.glb</a>
+  &nbsp; params: scan, n (frames, 200), pr (1,2), modes (legacy,platform)
+  <div id="status">loading…</div>
+  <table id="out"></table>
+</div>
+<div id="stage"></div>
+<script type="module" src="./perf-test.js"></script>
+</body></html>

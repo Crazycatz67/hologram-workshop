@@ -67,6 +67,14 @@ function extract(geo, tris, matrix, normalMatrix) {
   return g;
 }
 
+// parts.js always emits 32-bit indices; a part with < 65,536 vertices only needs 16-bit,
+// which halves its index buffer (GPU memory and per-draw index bandwidth). Values unchanged.
+function compactIndex(g) {
+  const idx = g.index;
+  if (!idx || !(idx.array instanceof Uint32Array) || g.attributes.position.count > 65535) return;
+  g.setIndex(new THREE.BufferAttribute(Uint16Array.from(idx.array), 1));
+}
+
 // Splits every mesh under `object` into connected components. Mutates the scene graph:
 // each source mesh is replaced by one mesh per selectable component plus (if anything small
 // was left over) one "rest" mesh, all direct children of the returned root, all with
@@ -184,6 +192,7 @@ export function splitComponents(object, opts = {}) {
       if (pieces.length <= 1) { expanded.push(f); continue; }
       f.geo.dispose();
       for (const pm of pieces) {
+        compactIndex(pm.geometry);
         pm.geometry.computeBoundingBox();
         expanded.push({ geo: pm.geometry, material: f.material, tris: pm.geometry.index ? pm.geometry.index.count / 3 : 0,
                         kind: pm.userData.partKind });

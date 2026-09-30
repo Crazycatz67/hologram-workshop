@@ -312,7 +312,10 @@ export function exportPlan(ctx) {
 // the snapshot is taken synchronously at the toBlob call.
 export function exportPNG(ctx) {
   const { renderer, scene, camera } = ctx;
-  renderer.render(scene, camera);
+  // Same path as the live view (single-layer pass + display LOD), so the PNG matches the
+  // screen instead of showing the additive bloom a plain render() would.
+  if (scene.userData.renderSingleLayer) scene.userData.renderSingleLayer(renderer, scene, camera);
+  else renderer.render(scene, camera);
   return new Promise((res, rej) => renderer.domElement.toBlob(
     (blob) => (blob ? res({ blob, filename: `hologram-${stamp()}.png` }) : rej(new Error('screenshot failed'))), 'image/png'));
 }

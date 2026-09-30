@@ -19,6 +19,11 @@ Nobody offers free, in-browser, gesture-controlled interaction with *your own se
 
 ## Revision History
 
+- **2026-09-29 (5):** **Rendering performance: display LOD + a cheaper single-layer pass (`platform/lod.js`, `platform/perf-test.html`).**
+  - **Measured first:** `perf-test.html` times `render()` directly with a readPixels sync (rAF-throttled fps counters lie in background tabs). On this Mac the 304k-tri chair costs ~0.74 ms/frame pipelined at pr 1 (0.94 at pr 2), so it's not a bottleneck here; the work is headroom for weaker laptops and room scans.
+  - **Display LOD:** meshoptimizer simplifies dense scenes to ≤120k displayed tris (chair_detail 304k → 120k at 0.02–0.06 mm error; chess 233k → 120k at 0.05 mm). The LOD shares the scan's vertex buffers (only a new index) and is swapped in only inside `render()`, so measurements, exports, raycasts and splitting always read the full scan (Measure tab verified identical). Full detail returns when zoomed so close the error would exceed ~1.5 px, when Realism > 0.5, and always in Plain mode.
+  - **Single-layer pass:** the depth pre-pass now covers only additive-blended meshes and is skipped entirely in Plain mode. Same geometry in both passes, so no z-fighting.
+  - **Result:** pipelined ms/frame −35–45% on chair_detail and chess; Photosafety on the platform path is 0 flashes/s even when the LOD is forced on and off every 10 frames. The PNG export now uses the same render path as the screen.
 - **2026-09-29 (4):** **Photosafe look, realism blend, multi-file library, exports, photo → hologram.**
   - **Photosafety (BUGS.md #14):**
     - The v1 look strobed at **27 flashes/s** (WCAG limit: 3). Every configuration now measures 0–1 (`safety-test.html`).

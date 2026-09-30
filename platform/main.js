@@ -5,6 +5,7 @@ const V = new URL(import.meta.url).search;
 const THREE = await import('three');
 const { createScene, startRenderLoop } = await import('../scene.js' + V);
 const { createLook } = await import('./look.js' + V);
+const { createDisplayLod } = await import('./lod.js' + V);
 const { groupFiles, parseGroup, countTriangles, sha256Hex, filesFromDrop, ACCEPT } = await import('./upload.js' + V);
 const { createLibrary } = await import('./library.js' + V);
 const exporter = await import('./export.js' + V);
@@ -29,6 +30,11 @@ createShell();
 // bloom, smoothed shading on rough scans), with the Realism / Motion controls.
 const look = createLook({ scene, mount: $('look') });
 const hologramMaterial = look.parents.base;
+// Display LOD + a filtered single-layer pass (lod.js). Replaces the whole-scene pre-pass
+// look.js installed; mesh.geometry stays the FULL scan outside render(), so measurements,
+// exports, raycasts and part splitting never see the simplified copy.
+const lod = createDisplayLod({ scene, camera, renderer, look });
+scene.userData.renderSingleLayer = lod.render;
 const plainMaterial = new THREE.MeshStandardMaterial({ color: 0x8fd3ff, roughness: 0.6, metalness: 0.0 });
 const pointsMaterial = new THREE.PointsMaterial({ color: 0x4fd1ff, size: 0.01 });
 
@@ -45,7 +51,7 @@ let measurements = null;
 //     parts:[{id:'<item>.<local>', local, mesh}], tris, points }
 // root carries the item transform (floor placement / arrange); parts sit under it.
 const items = new Map();
-window.hologram = { scene, camera, renderer, controls, model: null, material: hologramMaterial, edits, items };
+window.hologram = { scene, camera, renderer, controls, model: null, material: hologramMaterial, edits, items, lod };
 
 startRenderLoop({
   renderer, scene, camera, controls,
@@ -173,6 +179,7 @@ function removeItem(id) {
   objectMode.removeItem(id);
   measurements.removeItem(id);
   scene.remove(it.root);
+  lod.remove(it.root);
   it.root.traverse((c) => {
     c.geometry?.dispose();
     const m = c.userData.original;
@@ -268,6 +275,7 @@ async function pump() {
       objectMode.addParts(item.parts.map(({ id: pid, mesh }) => ({ id: pid, mesh })));
       objectMode.addItem(id, item.root);
       applyMaterials();
+      lod.add(item.root);   // after applyMaterials: the LOD shares the smoothed shading normals
       window.hologram.model ??= item.root;
       library.update(id, { status: 'ready', message: '', tris: built.tris, points: built.points, progress: 1 });
       frameAll();
