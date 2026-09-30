@@ -151,6 +151,14 @@ async function main() {
     check('volume sums both parts', d.volume, 2, 1e-9);
     g.scale.setScalar(2);   // the object's OWN transform must still be ignored
     check('scaling the whole object does not change its real size', measure.measureObject(g).height, 3, 1e-9);
+    // Regression (2026-09-30): the platform's Measure tab passes a plain stand-in with no
+    // matrices (vertices already baked); partMatrix crashed on it and broke every
+    // measurement on the workshop page.
+    const pos = new THREE.BoxGeometry(1, 2, 1).getAttribute('position');
+    const idx = new THREE.BoxGeometry(1, 2, 1).getIndex();
+    const stand = { isMesh: true, geometry: { getAttribute: (n) => (n === 'position' ? pos : undefined), getIndex: () => idx } };
+    const proxy = { children: [stand], updateWorldMatrix() {}, traverse(fn) { fn(stand); } };
+    check('matrix-less stand-ins (platform Measure tab) measure without crashing', measure.measureObject(proxy).height, 2, 1e-9);
   });
 
   group('Gesture isolation — the practice-mode guarantee', () => {

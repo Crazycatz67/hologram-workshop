@@ -307,3 +307,16 @@ first version of the fix froze the page because its variable `e` clashed with
 renamed. Now: detailed chair 57.7 × 50.3 × 79.6 cm, 16.1 L, seat 44.8 cm (the clean mesh
 gives 57.7 × 50.3 × 79.5 cm and 15.98 L). There are 3 new regression checks in test.html
 (119/0).
+
+## 20. [A] Workshop Measure tab crashed for every model (regression from #19)
+
+**Status: FIXED (verified offline)** (2026-09-30). Found while loading the owner's chess
+photo on the workshop page: the item showed "Cannot read properties of undefined (reading
+'clone')" and the Measure tab stuck on "measuring…". Root cause: #19's `partMatrix`
+(measure.js) assumed every object has `matrixWorld`, but `platform/measurements.js` measures a
+plain stand-in whose transforms are already baked into its vertices, so every workshop
+measurement threw each frame. #19 was verified on the gesture demo only, not the workshop page;
+this was live for about 12 hours. Fix: objects without matrices are treated as already placed.
+Regression check: "matrix-less stand-ins (platform Measure tab) measure without crashing"
+(test.html 120/0). Verified on platform/index.html: the chair (57.7 cm, all 8 parts) and the chess
+photo both measure.

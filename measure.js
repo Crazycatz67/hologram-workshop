@@ -27,7 +27,9 @@ const RAD = Math.PI / 180;
 // parts stacked at one spot (51 cm tall instead of 80, 2026-09-29). The object's OWN
 // transform stays excluded, as before: scaling the hologram must not change the real size.
 function partMatrix(object, child) {
-  if (child === object) return null;
+  // Plain stand-ins with no matrices (platform/measurements.js passes geometry whose
+  // transforms are already baked into the vertices) are already in the right frame.
+  if (child === object || !object.matrixWorld || !child.matrixWorld) return null;
   const e = object.matrixWorld.clone().invert().multiply(child.matrixWorld).elements;
   const id = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
   return e.every((v, i) => Math.abs(v - id[i]) < 1e-9) ? null : e;
