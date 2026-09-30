@@ -89,6 +89,13 @@ fires when apparent hand size changes by more than 30% per second (`DEPTH_DEADZO
 than ~14°/s (`TWIST_DEADZONE`): a 40° twist gives 13.9° of spin over 0.5s and 0 over 2s. Pitch
 needs the second hand to move more than ~35% of 0.24 frame in 0.67s. Stretch-explode has no lower
 bound at all (see #11).
+**2026-09-29 smoothing rewrite (synthetic):** the per-second velocity deadzones are gone. Every
+channel now maps hand displacement to model motion through a small backlash deadzone, so slow
+motion registers: a 40° twist over 2s now spins 22.4° (was 0), palm 0.10→0.13 over 1s now pulls
+the model ~39cm closer (was 0), and push, pitch and spin fire at every duration tried up to 8s.
+Push gain is 0.5 (canonical push −41cm; was −28cm at 60fps and −13cm at 10fps). Still needs a real
+hand: whether push and pitch feel right, and whether a still real fist creeps in depth (it does
+at 4–6× the synthetic jitter: −1.4/−5.2cm over 3s).
 
 ## 6. Chess pipeline rebuilt around per-piece-type scans + `assemble_chess_set.py`
 
@@ -162,7 +169,7 @@ persisting. Covered by the same test.js group, and confirmed live with 6 back-an
 
 ## 11. [A-v1] Explode stretches the object while two open hands are held still
 
-**Status: OPEN, needs live camera confirm.** Found by the gesture lab
+**Status: FIXED (needs live confirm)** (2026-09-29 smoothing rewrite). Found by the gesture lab
 (`docs/lab/gestures/gesture-lab.html`). Explode is the only continuous channel with no deadzone
 (`applyExplode`), and its clamp floor is the home scale. Tracking noise can therefore push the
 stretch up but never back down. Measured with two still open hands, realistic 0.002 jitter and
@@ -170,10 +177,17 @@ smoothing off: scale.x reaches 1.069 after 3s and 1.109 after 10s. At 0.004 jitt
 1.25 after 3s. Through the full pipeline (smoothing on) the lab shows none at 0.002 and
 1.06/1.15/1.21 at 0.004/0.008/0.012. Fix direction: a span-rate deadzone like the other channels.
 It needs a real-jitter number to size the deadzone, so it has not been guess-fixed.
+**Fix:** explode is commanded from the change in hand span through a 0.3-palm backlash deadzone
+(`commandExplode`), and its limits (home-scale floor, literal 0..1) are applied to an unclamped
+per-session value instead of clamping each increment, which was the ratchet. Measured after: two
+still open hands give stretch exactly 1.000 for 10s raw at 0.002 and for 3s through the filter at
+0.002–0.012 (was 1.109 / 1.06–1.21); the canonical pull-apart still gives stretch 1.92. The
+deadzone is sized for the synthetic jitter, so a real still-hands check is still owed. test.js:
+"Model follow — a still hand holds the model exactly still".
 
 ## 12. [A-v1] A fast clap fails below ~15fps because landmark smoothing is per-call
 
-**Status: OPEN, needs live camera confirm.** `smoothLandmarks.js` blends with a fixed
+**Status: FIXED (needs live confirm)** (2026-09-29 smoothing rewrite). `smoothLandmarks.js` blended with a fixed
 `ALPHA = 0.5` on every call, which is the frame-rate trap manipulator.js removed everywhere else.
 The gesture lab ran a 200ms clap at 8, 10 and 12fps: it does not fire with smoothing on, and fires
 with smoothing off (it fires both ways at 15fps and above). A related effect: at 10fps, move, spin,
@@ -182,6 +196,14 @@ push and tilt give 60–78% of their 60fps result (push gives 48%). Part of that
 at 10fps). Fix direction: a time-constant alpha, `1-exp(-dt/tau)` with tau ≈ 24ms (equal to 0.5
 at 60fps), which needs a timestamp passed in. Worth fixing only if the real camera runs below
 ~20fps; check the fps HUD first.
+**Fix:** a One Euro filter (speed-adaptive cutoff) on real frame timestamps, which hologram.js
+now passes in (from `requestVideoFrameCallback` capture times where available), plus a 250ms hold
+for a hand that drops out. The manipulator no longer estimates velocity (FILTER_GAIN is gone), so
+the 10fps shortfall is gone too. Measured after (synthetic): clap recall 22/24, 24/24, 24/24,
+24/24 at 8/12/24/60fps (was 0, 0, 22, 24); move 98.6cm at 60, 24 and 12fps (was 76.1/73.3/64.3);
+rest jitter 26–33% of raw (was 54%); lag on a clap-speed hand 4–5ms (was 17–33ms). test.js groups
+"Landmark smoothing — One Euro filter" and "Clap at low camera frame rates". Live check: the
+fps HUD, then clap in the Clap drill.
 
 ## 13. [A-v1] repair_scan.py `--poisson` silently wrote nothing about 2 runs in 5 (same cause as #8)
 
@@ -220,3 +242,52 @@ flashing … people who can't handle the flashing". Measured with the new
 Result: every configuration now measures **0–1 flashes/s** (chair and chess), and test.html
 still reports 72/0. Not yet confirmed by a person sensitive to flicker; `safety-test.html` is
 the regression check and belongs in `hologram-verify`.
+
+## 15. [A-v1] A frame with a zero-size hand fired a clap reset
+
+**Status: FIXED (verified offline)** (2026-09-29, found in the smoothing/accuracy sweep).
+`handSpan()` returns 0 when either hand's palm length is 0, and `checkClap` (manipulator.js) read
+that as "hands together, closing infinitely fast", so one degenerate frame (all landmarks on one
+point) after the hands had been apart reset the model. Reproduced against the pre-fix code: scale
+1.3 → 1.0 on that frame. `checkClap` now ignores a span that isn't > 0. test.js: "Clap ignores a
+degenerate (zero-size) hand". Rare with real MediaPipe output, but it is a free reset out of
+nothing when it happens.
+
+## 16. [A-v1] Every camera stop/start leaked a whole gesture recognizer
+
+**Status: FIXED (needs live confirm)** (2026-09-29). `startTracking()` in hologram.js called
+`createHandTracker()` on every start, and `stopTracking()` never called `tracker.close()`, so each
+stop → start built another MediaPipe GestureRecognizer (WASM runtime, 8 MB model, GPU context)
+and orphaned the old one. Found by code reading; it can't be run here because starting needs the
+camera permission. The tracker is now created once and reused, which also makes a restart skip
+the model load. Live check: stop/start the camera 5× and watch memory in Activity Monitor.
+
+## 17. [A-v1] Typing in the measure panel's fields fired hologram.js keyboard shortcuts
+
+**Status: FIXED (verified offline)** (2026-09-29). hologram.js's window `keydown` handler did not
+check the event target, so typing in the measure panel's calibration or fit-check inputs ran the
+shortcuts: arrow keys (moving the caret) swapped the model, `m` hid the measure panel, `r` reset
+the model, `p`/`d` toggled panels. Reproduced in hologram.html by focusing the calibration input
+and sending `m` + ArrowRight: the panel hid and the chair swapped to chair.glb. The handler now
+ignores keys aimed at inputs/textareas/selects/contenteditable and modified keys; re-checked the
+same way (nothing fires in the input, ArrowRight outside it still swaps).
+
+## 18. [A] Platform object mode: coarse, device-dependent wheel steps and a jumpy drag
+
+**Status: FIXED (verified offline)** (2026-09-29). `platform/objectmode.js`:
+- Wheel steps were 0.005 rad and 0.1% per raw delta unit: one Chrome notch (100) turned 29° and
+  scaled ×1.105, while a Firefox line-mode notch (deltaMode 1, deltaY 3) turned 0.9°, 33× less.
+  Now normalised to pixels (`wheelPixels`: lines × 40, pages × 800, capped at two notches per
+  event) and stepped 7.5° / ×1.051 per 100 px notch; a trackpad swipe of the same length turns the
+  same.
+- The drag applied every pointermove immediately, so uneven event delivery (0–3 per frame on
+  trackpads and high-DPI mice) moved the part in uneven steps. It now eases toward the newest
+  cursor position once per display frame (25 ms), and release (or any endMove) snaps to the exact
+  cursor point first, so the recorded edit and undo/replay stay exact.
+- A drag ray within 3° of the horizontal drag plane is ignored (and such a press doesn't start a
+  drag): near the horizon the plane hit runs toward infinity, so one pixel flung the part metres.
+  Found by ray/plane arithmetic, not a regression test.
+test.js: "Platform object mode — wheel steps, eased drag, exact history" (replayTo(0 / first /
+end) and full undo are bit-exact). Also checked on platform/index.html with the sample loaded:
+3 Shift+wheel notches → one 22.5° edit, one Alt notch → ×1.0513, undo restores bit-exactly.
+

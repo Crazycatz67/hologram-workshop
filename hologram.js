@@ -191,13 +191,19 @@ loadModelById(MODELS[0].id);
 async function startTracking() {
   startBtn.disabled = true;
   try {
-    setStatus('loading gesture model…');
-    tracker = await createHandTracker({ numHands: 2 });
+    // Reused across stop/start: the recognizer holds the WASM runtime, the model and a GPU
+    // context, and stopTracking() never closed it, so every restart used to build (and leak)
+    // another one (BUGS #16). Loading it once also makes a restart near-instant.
+    if (!tracker) {
+      setStatus('loading gesture model…');
+      tracker = await createHandTracker({ numHands: 2 });
+    }
 
     setStatus('requesting camera…');
     stream = await startCamera(video);
 
     tracking = true;
+    watchVideoFrames();
     startBtn.textContent = 'stop camera';
     startBtn.disabled = false;
     setStatus('tracking');
@@ -214,6 +220,8 @@ function stopTracking() {
   stream = null;
   video.srcObject = null;
   hands = [];
+  latestFrame = null;
+  frameWatchStream = null;
   resetLandmarkSmoothing();
   hologramMaterial.setBrightness(MODE_BRIGHTNESS.idle);
   overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
@@ -228,6 +236,10 @@ function stopTracking() {
 startBtn.addEventListener('click', () => (tracking ? stopTracking() : startTracking()));
 resetBtn.addEventListener('click', () => manipulator?.reset());
 window.addEventListener('keydown', (e) => {
+  // Typing in a field (the measure panel's calibration and fit-check inputs, a note) must not
+  // reset the model, hide panels, or swap models on every arrow key (BUGS #17).
+  if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   const key = e.key.toLowerCase();
   if (key === 'r') manipulator?.reset();
   if (key === 'd') document.body.classList.toggle('debug-camera');
@@ -241,6 +253,52 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// Camera frame timing. requestVideoFrameCallback reports each new camera frame once, with
+// its capture time; the old way (polling video.currentTime from the render loop) stamped
+// frames with whenever the render loop noticed them, which adds up to a display frame of
+// random error to every dt. At 30 fps that is ±50% noise on the elapsed time the landmark
+// filter and every per-second rate divide by. Falls back to the old polling where the API
+// is missing (older Safari), and to the callback's own time where captureTime is absent.
+let latestFrame = null;   // { t, id } of the newest camera frame not yet processed
+let frameCounter = 0;
+let lastFrameStamp = -Infinity;
+let frameWatchStream = null;
+
+function watchVideoFrames() {
+  if (!video.requestVideoFrameCallback || frameWatchStream === stream) return;
+  frameWatchStream = stream;
+  const mine = stream;
+  const onFrame = (now, meta) => {
+    if (!tracking || stream !== mine) return;
+    // captureTime shares performance.now()'s clock; anything implausible falls back to the
+    // callback's own time.
+    const c = meta?.captureTime;
+    const t = Number.isFinite(c) && Math.abs(c - now) < 1000 ? c : now;
+    latestFrame = { t, id: ++frameCounter };
+    video.requestVideoFrameCallback(onFrame);
+  };
+  video.requestVideoFrameCallback(onFrame);
+}
+
+// The timestamp of a camera frame that hasn't been processed yet, or null. Always strictly
+// increasing, which the tracker requires.
+let processedFrameId = 0;
+function nextFrameTime() {
+  let t = null;
+  if (video.requestVideoFrameCallback) {
+    if (!latestFrame || latestFrame.id === processedFrameId) return null;
+    processedFrameId = latestFrame.id;
+    t = latestFrame.t;
+  } else {
+    if (video.currentTime === lastVideoTime) return null;
+    lastVideoTime = video.currentTime;
+    t = performance.now();
+  }
+  if (t <= lastFrameStamp) t = lastFrameStamp + 1;
+  lastFrameStamp = t;
+  return t;
+}
+
 startRenderLoop({
   renderer,
   scene,
@@ -249,23 +307,27 @@ startRenderLoop({
   onFrame: (fps) => {
     fpsEl.textContent = `${fps} fps`;
   },
-  onTick: () => {
+  onTick: (tickNow = performance.now()) => {
     hologramMaterial.update();
 
-    if (!tracking || !sizeOverlayTo(overlay, video)) return;
+    if (!tracking || !sizeOverlayTo(overlay, video)) {
+      // Still advance the model's follow springs, so a release that was coasting when the
+      // camera stopped settles instead of freezing mid-glide.
+      manipulator?.tick(tickNow);
+      return;
+    }
 
     const aspect = overlay.width / overlay.height;
 
-    if (video.currentTime !== lastVideoTime) {
-      lastVideoTime = video.currentTime;
-      // One timestamp, reused for both calls. Small on its own, but the whole point of
-      // making the manipulator time-based (see manipulator.js) is that "when did this frame
-      // actually happen" is a real quantity now, not just a default parameter -- reading
-      // performance.now() twice a few statements apart was a needless place for that
-      // quantity to disagree with itself, however slightly.
-      const now = performance.now();
+    const frameTime = nextFrameTime();
+    if (frameTime !== null) {
+      // One timestamp per camera frame, used by the tracker, the landmark filter and the
+      // manipulator alike. Every filter downstream is time-based now, so this has to be when
+      // the frame was captured, not when the render loop happened to notice it (see
+      // nextFrameTime).
+      const now = frameTime;
       hands = tracker.read(video, now);
-      smoothHandLandmarks(hands);
+      smoothHandLandmarks(hands, now);
       for (const hand of hands) {
         hand.pinch = pinch(hand.landmarks, aspect, { gesture: hand.gesture });
         hand.fistLike = isFistLike(hand.gesture, hand.landmarks, aspect);
@@ -278,6 +340,9 @@ startRenderLoop({
       hologramMaterial.setBrightness(MODE_BRIGHTNESS[mode] ?? 1.0);
       updateLive(mode);
     }
+    // Every display frame, not just camera frames: the model's follow springs glide between
+    // camera frames instead of stepping at camera rate (manipulator.js, "FOLLOW").
+    manipulator?.tick(tickNow);
 
     // Real 3D hands (always on) are the primary visual feedback; the flat 2D skeleton
     // stays available behind the D-debug toggle for checking raw tracking accuracy.

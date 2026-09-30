@@ -11,32 +11,81 @@ const MIN_SCALE = 0.2;
 // gives real "make it huge" range without the object swallowing the whole viewport.
 const MAX_SCALE = 2.5;
 
-// Real-hands testing (first live webcam session) found move/spin/tilt/explode all described
-// as "finicky", "janky", or "gets stuck" -- different symptoms with one shared cause: nearly
-// every rate limit in this file was expressed as a PER-CALL bound (e.g. "no more than X per
-// frame"), which only means something fixed if update() fires at a constant rate. It does
-// not: MediaPipe drops frames under load, a documented risk since Phase 1. A per-call cap
-// evaluated against a call that happened to span more real time than usual will reject
-// motion that was, in real terms, perfectly normal speed -- reads as the gesture "sticking".
-// Everything below is now a genuine per-SECOND rate, checked against real elapsed time
-// (already threaded through every update() call as a timestamp). This is the same fix
-// already applied once, narrowly, to clap's closing-speed check; this generalizes it to
-// spin, pitch, roll, push, and explode.
-const MAX_MOVE_PER_SECOND = 9.0;
-const MAX_SPAN_RATIO_PER_FRAME = 1.5; // see applyTransform -- left as a per-call sanity bound
-                                       // on purpose; scale was reported working, and a huge
-                                       // ratio in any single call is a tracking glitch
-                                       // regardless of how much real time that call spanned.
-const MAX_TWIST_PER_SECOND = (Math.PI / 3) * 60; // old per-call cap x 60 (nominal 60fps)
-const MAX_PITCH_PER_SECOND = (Math.PI / 3) * 60;
-const MAX_ROLL_PER_SECOND = (Math.PI / 3) * 60;
-const MAX_DEPTH_RATIO_PER_SECOND = 6.0; // ratio-change per second, same reasoning as move/spin
+// ---- How hand motion becomes model motion (rewritten 2026-09-29) --------------------------
+//
+// Every continuous channel (move x/y, spin, pitch, roll, push, scale, explode) now runs the
+// same three stages, all timed by REAL elapsed time so they mean the same thing at 8 fps and
+// 60 fps (the project rule since the first live session; see stabilizer.js):
+//
+//   1. COMMAND: the hand's displacement since it took hold, mapped straight onto the model
+//      (move is 1:1 with the hand on screen, spin is 1:1 with the wrist twist). The previous
+//      version estimated hand VELOCITY from the gap between two exponential filters and
+//      integrated it. That lost 18% of a quick move and 58% of a quick twist (the estimate
+//      never caught up before the hand stopped), lost more at low frame rates (BUGS #12:
+//      60-78% of the 60 fps result at 10 fps), and a per-second velocity deadzone ignored slow
+//      deliberate motion entirely (BUGS #5: a 40° twist over 2 s did nothing).
+//   2. DEADZONE: a backlash ("slack") deadzone on each raw signal. The command only moves once
+//      the hand has moved further than the deadzone from where the slack was last taken up,
+//      so tracking jitter smaller than the deadzone produces EXACTLY zero motion (a steady
+//      hand holds the model still; BUGS #11's explode ratchet cannot happen), while a real
+//      move of any speed is followed exactly, minus the slack.
+//   3. FOLLOW: the model follows the command through a critically damped spring (the fastest
+//      response with no overshoot), integrated in closed form so a step settles in the same
+//      real time at any frame rate, with a per-channel top speed so a flick can't whip it
+//      across the screen. manipulator.tick(now), called every display frame by hologram.js,
+//      advances the spring between camera frames, so the model glides at display rate
+//      instead of stepping at camera rate.
+//
+// Momentum is kept (the owner asked for a release to coast rather than "a direct pause"): on
+// release the spring's current speed keeps pushing the command, decaying with
+// DAMPING_HALFLIFE. With momentum off, the model settles where the hand left it.
 
-// Radians of pitch/roll per normalized frame-unit the second hand moves per second — an
-// untuned guess, same as every other sensitivity constant here started out; needs a real
-// hand to tune further after this first live pass.
+// Deadzones, per raw signal, sized so the synthetic 0.002 per-landmark jitter (the figure
+// measured against real MediaPipe) can never reach them even WITHOUT landmark smoothing:
+// raw wrist noise peaks at ±0.002 per axis, raw palm size at ±3.3%, raw twist at ±1.3°.
+const MOVE_DEADZONE = 0.005;   // normalized frame units (≈1.6 cm of model at the default framing)
+const TWIST_DEADZONE = 0.05;   // radians of wrist twist (2.9°)
+const TILT_DEADZONE = 0.005;   // normalized frame units of second-hand motion
+const DEPTH_DEADZONE = 0.07;   // ln(palm size): apparent hand size is the noisiest signal
+const SCALE_DEADZONE = 0.05;   // ln(hand span)
+const EXPLODE_DEADZONE = 0.3;  // palm lengths of hand span (≈5% of a canonical pull-apart)
+
+// Spring stiffness (rad/s). Critically damped: a step settles to 2% in ~5.8/OMEGA seconds
+// (~180 ms) with no overshoot, and a steady motion trails by 2/OMEGA (~63 ms).
+const FOLLOW_OMEGA = 32;
+
+// Top speeds of the model itself, whatever the hand does.
+const MAX_SPEED = {
+  x: 4.0, y: 4.0,          // world units / s (the default framing is ~3.2 units wide)
+  spin: 6.0,               // rad / s
+  pitch: 4.0, roll: 4.0,   // rad / s
+  depth: 3.0,              // ln(distance) / s
+  scale: 3.0,              // ln(scale) / s
+  explode: 3.0             // ln(stretch) / s, or explode amount / s for literal explode
+};
+
+// Tracking-glitch guards: a raw signal changing faster than this between two camera frames
+// is a tracking jump (hand swap, mis-detection), not a motion; it is absorbed into the
+// deadzone reference instead of being followed.
+const MAX_MOVE_PER_SECOND = 9.0;                   // normalized frame widths / s
+const MAX_TWIST_PER_SECOND = 40;                   // rad / s
+const MAX_TILT_PER_SECOND = 9.0;                   // normalized frame units / s
+const MAX_DEPTH_RATIO_PER_SECOND = 6.0;            // ln(palm size) / s
+const MAX_SPAN_RATIO_PER_SECOND = 20.0;            // ln(span) / s
+
+// Push/pull gain: distance ∝ (palm size)^-PUSH_GAIN. 1.0 would be "hand twice as close, model
+// twice as close", which measured 2.7x the old push for the same motion (the old velocity
+// estimate only ever delivered part of it, and less at low frame rates); 0.5 keeps the
+// canonical push (palm 0.08 -> 0.13) near its old 60 fps size, now at every frame rate.
+const PUSH_GAIN = 0.5;
+
+// Radians of pitch/roll per normalized frame-unit the second hand moves (unchanged gain).
 const PITCH_SENSITIVITY = Math.PI;
 const ROLL_SENSITIVITY = Math.PI;
+
+// Coasting after release: real seconds for the release speed to halve.
+const DAMPING_HALFLIFE = 0.42;
+const MIN_COAST_FRACTION = 0.02; // stop coasting below 2% of the channel's top speed
 
 // Push/pull moves the object nearer or farther along the camera-to-object line, clamped
 // to this range of the distance it started at — close enough (0.3x) that pulling it
@@ -49,22 +98,6 @@ const MAX_DEPTH_RATIO = 3;
 // so a fast or erratic drag can never carry it fully off-screen — losing it that way had
 // no recovery except Reset, reported directly as frustrating during live testing.
 const VIEW_MARGIN = 0.7;
-
-// Grab no longer applies a raw per-frame delta directly to the object — it only sets a
-// target velocity (units/second, see above). Every update() call decays and applies
-// whatever velocity currently exists, scaled by real elapsed time, whether or not a hand is
-// still gripping. Reported live: releasing a twist felt like "a direct pause" — the
-// rotation stopped dead the instant tracking stopped feeding a delta. This lets it coast
-// for a moment instead, closer to how spinning something with real momentum behaves.
-//
-// DAMPING_HALFLIFE: real seconds for coasting velocity to drop to half. Converted to a
-// per-call decay factor from real dt each frame (see damping()), rather than a fixed 0.85
-// per call — the fixed version decayed slower in real time whenever frames were dropped,
-// since fewer, bigger per-call multiplications by 0.85 covered more wall-clock time than
-// intended.
-const DAMPING_HALFLIFE = 0.42; // seconds; ~0.85 per call at a nominal 60fps
-const MIN_ANGULAR_VELOCITY = 0.03;  // rad/s
-const MIN_LINEAR_VELOCITY = 0.003;  // world units/s
 
 // A clap — hands rapidly closing together — resets the hologram. Re-arms only once the
 // hands separate again, so holding them together doesn't fire it repeatedly.
@@ -137,68 +170,6 @@ const EXPLODE_PART_SELECT_THRESHOLD = 0.5;
 // stray gesture can't fling it arbitrarily far off into space with no way back short of
 // Reset.
 const PART_GRAB_RANGE = 3;
-
-// Hand tracking is never perfectly still: even with a hand held motionless and landmark
-// smoothing applied, positions jitter by roughly 0.002 in normalized frame units every
-// frame. Nothing rejected that, so every frame of noise was written straight into a
-// velocity and then coasted by momentum. Measured before this existed: a completely
-// stationary fist drifted the model 6.0cm, spun it 2.2 degrees and pushed it 3.5cm in
-// depth over 1.5 seconds -- reported as "it keeps accidentally moving around and doing
-// commands I never intended".
-//
-// These are SOFT deadzones (see deadzone()): the threshold is subtracted rather than
-// gating, so motion eases up from zero instead of snapping to full speed the instant it
-// crosses the line. Hard gating would trade drift for a jolt at the threshold, which is
-// the other half of the complaint -- that none of it felt fluid.
-//
-// Velocity is read as the GAP BETWEEN two exponential filters of the same signal — one
-// quick, one slow — instead of the difference between consecutive frames. Frame-to-frame
-// differencing cannot work here: for a hand held still with realistic landmark jitter, the
-// per-frame noise in each signal versus the per-frame signal from deliberately moving that
-// hand across the frame in one second:
-//
-//                        noise (median)    deliberate motion
-//   wrist position       0.0012 - 0.0026   0.0083     workable
-//   twist angle          0.0141 - 0.0417   ~0.026     marginal
-//   palm size ratio      0.0157 - 0.0360   0.0082     HOPELESS -- noise exceeds signal
-//
-// Two filters fix it because real motion is SUSTAINED and noise is not: the quick filter
-// tracks a moving hand closely, the slow one lags behind by an amount proportional to
-// speed, and the gap between them is a velocity estimate averaged over many samples.
-//
-// TAU_FAST / TAU_SLOW are real TIME CONSTANTS (seconds), not per-call blend weights. The
-// first version used fixed per-call weights (0.35 / 0.12), which is the same frame-rate
-// trap as everything else in this file: a filter that blends by a fixed fraction EVERY
-// CALL responds differently in real time depending on how often calls happen. A real time
-// constant lets the per-call blend weight be recomputed from actual elapsed time
-// (alpha = 1 - exp(-dt/tau), standard exponential-filter time-constant conversion), so the
-// filter's responsiveness means the same thing regardless of frame rate. Values below are
-// simply the OLD per-call weights converted to the time constant they implied at a nominal
-// 60fps, so the filter feels the same as before at a steady frame rate and stays correct
-// away from one: tau = -dt / ln(1 - alpha).
-const TAU_FAST = 0.0388; // seconds
-const TAU_SLOW = 0.1307; // seconds
-// For a signal ramping at a steady rate v, each filter lags the true value by v*tau in
-// steady state, so the gap between them settles at v * (TAU_SLOW - TAU_FAST) — inverting
-// that recovers v directly in real units/second, no per-frame convention involved.
-const FILTER_GAIN = 1 / (TAU_SLOW - TAU_FAST);
-
-// Per-second deadzones, since the signals they're applied to are now genuine per-second
-// rates (see above) rather than per-call deltas.
-const MOVE_DEADZONE = 0.05;   // normalized units/second
-const TWIST_DEADZONE = 0.24;  // radians/second
-const PITCH_DEADZONE = 0.05;  // normalized units/second
-const ROLL_DEADZONE = 0.05;   // normalized units/second
-const DEPTH_DEADZONE = 0.3;   // ratio-change/second -- largest of the four on purpose:
-                               // apparent hand size is the noisiest signal here, and also
-                               // the one with the most headroom, since a real push moves
-                               // the model far more than a real sideways sweep
-
-function deadzone(value, threshold) {
-  if (value > threshold) return value - threshold;
-  if (value < -threshold) return value + threshold;
-  return 0;
-}
 
 function wristOf(hand) {
   return hand.landmarks[0];
@@ -296,6 +267,51 @@ function findExplodeParts(object) {
 // gesture can be learned and tuned in isolation without anything else bleeding in.
 export const CHANNELS = ['move', 'spin', 'tilt', 'push', 'scale', 'explode', 'clap'];
 
+// Backlash deadzone on one raw signal. `sig` holds the slack reference (`anchor`) and the
+// previous raw value. Returns how far the anchor moved this call, which is the only motion
+// that reaches the command: zero while the signal wanders inside ±width of the anchor.
+function takeUpSlack(sig, value, width, maxRate, dt) {
+  const jump = value - sig.last;
+  sig.last = value;
+  // A tracking jump: shift the reference with it so the jump itself is never followed.
+  if (Math.abs(jump) > maxRate * dt) {
+    sig.anchor += jump;
+    return 0;
+  }
+  const off = value - sig.anchor;
+  if (off > width) { sig.anchor = value - width; return off - width; }
+  if (off < -width) { sig.anchor = value + width; return off + width; }
+  return 0;
+}
+
+const newSignal = (value) => ({ anchor: value, last: value });
+const newChannel = () => ({ cmd: 0, out: 0, vel: 0, coast: 0 });
+
+// One closed-form step of a critically damped spring pulling `c.out` toward `c.cmd`, exact
+// for any dt (so settle time is frame-rate independent), then the channel's top speed.
+// Returns the change in output this step.
+function follow(c, dt, maxSpeed) {
+  const e = c.out - c.cmd;
+  const j = c.vel + FOLLOW_OMEGA * e;
+  const ex = Math.exp(-FOLLOW_OMEGA * dt);
+  let next = c.cmd + (e + j * dt) * ex;
+  let vel = (c.vel - FOLLOW_OMEGA * j * dt) * ex;
+  let delta = next - c.out;
+  const cap = maxSpeed * dt;
+  if (Math.abs(delta) > cap) {
+    delta = Math.sign(delta) * cap;
+    vel = Math.sign(delta) * maxSpeed;
+  }
+  // Snap once the remaining error is below float noise, so a settled model is bit-still.
+  if (Math.abs(c.out + delta - c.cmd) < 1e-12 && Math.abs(vel) < 1e-9) {
+    delta = c.cmd - c.out;
+    vel = 0;
+  }
+  c.out += delta;
+  c.vel = vel;
+  return delta;
+}
+
 export function createManipulator(object, camera) {
   // Live-tunable, because every threshold in this file is an untuned guess made without a
   // webcam (see ROADMAP.md Phase 1) and the only way to fix "out of proportion" is to
@@ -317,8 +333,7 @@ export function createManipulator(object, camera) {
   // reusing that same short window for an interrupt is exactly what let a brief
   // misclassification hijack an active grab. Not tied to triggerFrames — the practice
   // panel's trigger-delay slider is about how quickly a gesture starts, not about how hard
-  // it is to rip control away from one already running, and conflating the two would make
-  // that slider affect something the user didn't ask it to.
+  // it is to rip control away from one already running.
   const SWITCH_AWAY_MS = 300;
 
   let grab = createStabilizer({ enterMs: framesToMs(settings.triggerFrames), exitMs: 220 });
@@ -336,24 +351,21 @@ export function createManipulator(object, camera) {
 
   const { literal: literalMode, parts: explodeParts } = findExplodeParts(object);
 
-  // Every gesture's tracking/velocity state, keyed by WHICHEVER thing it's currently being
-  // applied to -- `object` itself (every existing single-mesh model, and a literalMode
-  // object before/below the part-select threshold), or one specific part once the user has
-  // exploded past EXPLODE_PART_SELECT_THRESHOLD and selected it. `object`'s own entry
-  // behaves exactly like the single set of module-scope variables this replaced -- nothing
-  // about the existing single-target path changes.
+  // Every gesture's tracking and follow state, keyed by WHICHEVER thing it's currently being
+  // applied to -- `object` itself (every single-mesh model, and a literalMode object
+  // before/below the part-select threshold), or one specific part once the user has
+  // exploded past EXPLODE_PART_SELECT_THRESHOLD and selected it.
   const targetStates = new Map();
   function stateFor(target) {
     let s = targetStates.get(target);
     if (!s) {
       s = {
-        lastWrist: null, lastTwist: null, lastPitchWrist: null, lastPalm: null, twistAccum: 0,
-        // Two exponential filters over every tracked signal, one quick and one slow. See
-        // TAU_FAST for why velocity is read from the gap between them rather than from a
-        // frame-to-frame difference.
-        fast: null, slow: null, lastSpan: null,
-        angularVelocity: 0, pitchVelocity: 0, rollVelocity: 0, depthVelocity: 0,
-        linearVelocityX: 0, linearVelocityY: 0
+        holding: false,       // a fist is currently steering this target
+        lastWrist: null, lastPitchWrist: null,
+        lastTwist: null, twistAccum: 0,
+        sig: {},              // raw-signal deadzone state, rebuilt at every new grab
+        spanSig: null,        // two-hand scale deadzone state
+        ch: { x: newChannel(), y: newChannel(), spin: newChannel(), pitch: newChannel(), roll: newChannel(), depth: newChannel(), scale: newChannel() }
       };
       targetStates.set(target, s);
     }
@@ -361,11 +373,9 @@ export function createManipulator(object, camera) {
   }
 
   // Which single part (if any) grab/spin/tilt/scale currently act on instead of the whole
-  // object -- see selectPartAtScreenPoint. Push/pull deliberately never retargets (see
-  // applyMomentum): it always moves the whole assembly along the camera ray, never one part
-  // along it, since that ray is only meaningful in world space and a part's transform is
-  // local to `object`, which may itself be arbitrarily rotated/scaled by the time a part is
-  // selected.
+  // object -- see selectPartAtScreenPoint. Push/pull deliberately never retargets: it always
+  // moves the whole assembly along the camera ray, since that ray is only meaningful in world
+  // space and a part's transform is local to `object`.
   let activePart = null;
   const raycaster = new THREE.Raycaster();
 
@@ -374,14 +384,9 @@ export function createManipulator(object, camera) {
   }
 
   // object's own parent (the scene) never rotates, so rotateOnWorldAxis is exactly right for
-  // it -- unchanged from before this per-part work existed. A part's parent IS `object`,
-  // which may itself be rotated by the time the part is selected; Three.js's
-  // rotateOnWorldAxis only accounts for the target's OWN quaternion; it does not correct for
-  // a rotated parent, so using it on a part would spin it around the wrong axis whenever the
-  // whole assembly has already been turned. rotateOnAxis (local) is correct regardless of
-  // parent transform, at the cost of a part's spin/pitch/roll meaning relative to its OWN
-  // current orientation rather than a fixed world direction -- a deliberate, documented v1
-  // simplification, not an oversight.
+  // it. A part's parent IS `object`, which may itself be rotated; rotateOnWorldAxis does not
+  // correct for a rotated parent, so parts rotate about their own LOCAL axes instead (a
+  // deliberate, documented v1 simplification).
   function rotateTarget(target, axis, angle) {
     if (target === object) target.rotateOnWorldAxis(axis, angle);
     else target.rotateOnAxis(axis, angle);
@@ -402,36 +407,64 @@ export function createManipulator(object, camera) {
     }
   }
 
-  let lastExplodeSpan = null;
+  // Explode is global (not per target): one command/follow channel, its deadzone state, and
+  // which axis the hands last pulled along (stretch mode).
+  let explodeCh = newChannel();
+  let explodeSig = null;
+  let explodeAxis = 'x';
+  // Explode's limits (stretch floor = home scale, literal amount 0..1) are applied to an
+  // UNCLAMPED per-session value rather than by clamping each increment. Clamping increments
+  // is a ratchet: noise pressing down against the floor is thrown away while noise going up
+  // is kept, which is exactly how two still hands used to creep the stretch upward (BUGS
+  // #11). Re-synced to the real state at the start of every explode session.
+  let explodeV = { x: 0, y: 0 };
+  let explodeScale0 = { x: object.scale.x, y: object.scale.y };
+  let explodeLiteralV = 0;
   let explodeAmount = 0;
   let mode = MODE.IDLE;
   let lastUpdateTime = null;
+  let lastAdvanceTime = null;
 
   let clapArmed = true;
   let lastClapSpan = null;
   let lastClapTime = null;
   let pinchSince = null; // see checkClap -- how long pinching has read true, uninterrupted
 
-  function clearGrab() {
-    const s = stateFor(currentTarget());
+  const GRAB_CHANNELS = ['x', 'y', 'spin', 'pitch', 'roll', 'depth'];
+
+  // Letting go. The deadzone references are dropped (re-closing the fist measures from where
+  // the hand actually is, so it never jumps), and with momentum on each channel keeps its
+  // release speed as a coast.
+  function release(s) {
+    if (!s.holding) return;
+    s.holding = false;
     s.lastWrist = null;
-    s.lastTwist = null;
     s.lastPitchWrist = null;
-    s.lastPalm = null;
+    s.lastTwist = null;
     s.twistAccum = 0;
-    s.fast = null;
-    s.slow = null;
+    s.sig = {};
+    for (const k of GRAB_CHANNELS) {
+      const c = s.ch[k];
+      c.coast = settings.momentum ? c.vel : 0;
+    }
+  }
+
+  function clearGrab() {
+    release(stateFor(currentTarget()));
+    // Depth lives on the object's own state even while a part is the target.
+    const os = stateFor(object);
+    if (os.holding) release(os);
   }
 
   function clearTransform() {
-    stateFor(currentTarget()).lastSpan = null;
+    stateFor(currentTarget()).spanSig = null;
   }
 
   // Only clears the tracking reference, not explodeAmount or the applied transform itself
   // — releasing the gesture holds whatever shape it left, the same as letting go of grab
   // leaves the object wherever it was moved to, rather than snapping back.
   function clearExplode() {
-    lastExplodeSpan = null;
+    explodeSig = null;
   }
 
   function performReset() {
@@ -441,13 +474,17 @@ export function createManipulator(object, camera) {
     grab.reset();
     transform.reset();
     explode.reset();
-    // Wipes velocity/tracking state for every target at once -- object AND every part, not
-    // just whichever one was active -- so nothing keeps coasting or resumes mid-gesture
-    // after a reset.
+    // Wipes tracking and follow state for every target at once -- object AND every part --
+    // so nothing keeps coasting or resumes mid-gesture after a reset.
     targetStates.clear();
     clearExplode();
+    explodeCh = newChannel();
     explodeAmount = 0;
+    explodeV = { x: 0, y: 0 };
+    explodeScale0 = { x: home.scale.x, y: home.scale.y };
+    explodeLiteralV = 0;
     activePart = null;
+    lastAdvanceTime = null;
     if (literalMode) {
       for (const part of explodeParts) {
         part.position.copy(part.userData.explodeHome);
@@ -460,27 +497,12 @@ export function createManipulator(object, camera) {
 
   // A clap requires open hands, not pinching ones — both because that's what a real clap
   // physically is, and because scaling down aggressively (pinching hands closing fast) is
-  // otherwise indistinguishable from a clap by span alone. Found by testing: scaling all
-  // the way down to nearly-touching in one quick step triggered a false reset before this
-  // guard existed.
+  // otherwise indistinguishable from a clap by span alone.
   function checkClap(hands, aspect, timestampMs) {
-    // Reported live: clap "barely registered, had to try many times". Reproduced directly:
-    // a real clap's closing speed easily clears CLAP_MIN_CLOSING_SPEED on its own, even
-    // through landmark smoothing (measured ~6% speed loss there, nowhere near enough to
-    // explain it) -- but the whole in-progress measurement gets thrown away the instant
-    // EITHER hand reads as pinching for even a single frame, and fast clapping hand shapes
-    // are exactly the kind of pose that can transiently misread as a pinch. Combine that
-    // with a real, imperfect camera frame rate (documented risk since Phase 1) and there
-    // may only be 3-4 samples across the whole clap to begin with -- lose one to a false
-    // pinch reading and there often isn't enough left to reconstruct real speed before the
-    // hands finish closing. Simulated exactly this (12fps camera + a single glitched frame
-    // mid-clap) and it silently failed to fire at all.
-    //
-    // A genuine, sustained pinch (actually doing the scale gesture) still has to disqualify
-    // a clap -- that guard is real and stays. The fix is not treating a single bad frame as
-    // proof of that: require pinching to hold for a short PINCH_GLITCH_MS before it's
-    // trusted enough to discard the in-progress measurement. A momentary misread this frame
-    // just isn't used to update the measurement, rather than wiping out every prior sample.
+    // A genuine, sustained pinch (actually doing the scale gesture) disqualifies a clap, but
+    // a single glitched frame does not: pinching must hold for PINCH_GLITCH_MS before it's
+    // trusted enough to discard the in-progress measurement (a fast clapping hand can
+    // transiently misread as a pinch, and at a low frame rate there are only 3-4 samples).
     const anyPinching = hands.some((h) => h.pinch?.pinching);
     if (anyPinching) {
       if (pinchSince === null) pinchSince = timestampMs;
@@ -493,10 +515,12 @@ export function createManipulator(object, camera) {
     pinchSince = null;
 
     const span = handSpan(hands[0], hands[1], aspect);
+    // A degenerate hand (zero palm length) makes handSpan return 0, which would otherwise
+    // read as "hands together, closing infinitely fast" and fire a reset out of nothing.
+    if (!(span > 0)) return false;
     if (span > CLAP_ARM_SPAN) clapArmed = true;
 
-    // Velocity (span per real second), not a per-call delta — see the constant's comment
-    // for why a per-frame delta is the wrong thing to measure here.
+    // Velocity (span per real second), not a per-call delta.
     let closingSpeed = 0;
     if (lastClapSpan !== null && lastClapTime !== null) {
       const dtSeconds = (timestampMs - lastClapTime) / 1000;
@@ -511,15 +535,123 @@ export function createManipulator(object, camera) {
     return clapped;
   }
 
+  // Advances every follow spring to `timestampMs` and applies the change to the scene. Runs
+  // from update() (camera rate) and from tick() (display rate); a timestamp at or before the
+  // last one is ignored, so mixing the two clocks can never run time backwards.
+  function advance(timestampMs) {
+    if (lastAdvanceTime === null) { lastAdvanceTime = timestampMs; return; }
+    let dt = (timestampMs - lastAdvanceTime) / 1000;
+    // A clock that jumped far backwards was restarted (a caller reusing timestamps, a new
+    // session): resynchronise instead of freezing until it catches up.
+    if (dt < -1) { lastAdvanceTime = timestampMs; return; }
+    if (!(dt > 0)) return;
+    lastAdvanceTime = timestampMs;
+    dt = Math.min(dt, 0.25);
+    const decay = Math.exp((-dt / DAMPING_HALFLIFE) * Math.LN2);
+
+    const target = currentTarget();
+    const s = stateFor(target);
+    const os = stateFor(object);
+    const step = (c, key) => {
+      if (c.coast) {
+        c.cmd += c.coast * dt;
+        c.coast *= decay;
+        if (Math.abs(c.coast) < MIN_COAST_FRACTION * MAX_SPEED[key]) c.coast = 0;
+      }
+      if (c.out === c.cmd && c.vel === 0) return 0;
+      return follow(c, dt, MAX_SPEED[key]);
+    };
+
+    // Move. Clamped afterwards (frustum for the object, exploded-home range for a part); a
+    // clamp pulls the command back to where the model really is, so pushing against the edge
+    // never winds up slack that would have to be undone before it comes back.
+    const dx = step(s.ch.x, 'x');
+    const dy = step(s.ch.y, 'y');
+    if (dx || dy) {
+      const wantX = target.position.x + dx;
+      const wantY = target.position.y + dy;
+      target.position.x = wantX;
+      target.position.y = wantY;
+      if (target === object) clampToView(object, camera);
+      else clampPartOffset(target);
+      settleClamp(s.ch.x, target.position.x - wantX);
+      settleClamp(s.ch.y, target.position.y - wantY);
+    }
+
+    // Rotation. World axes for the object (pitch should mean "tip toward/away from the
+    // camera" however much it is already spun); local axes for a part (see rotateTarget).
+    const dSpin = step(s.ch.spin, 'spin');
+    if (dSpin) rotateTarget(target, AXIS_Y, dSpin);
+    const dPitch = step(s.ch.pitch, 'pitch');
+    if (dPitch) rotateTarget(target, AXIS_X, dPitch);
+    const dRoll = step(s.ch.roll, 'roll');
+    if (dRoll) rotateTarget(target, AXIS_Z, dRoll);
+
+    // Push/pull: always the whole object, along the real camera-to-object line (so it still
+    // behaves after the view has been orbited), in ln(distance) units.
+    const dDepth = step(os.ch.depth, 'depth');
+    if (dDepth) {
+      const current = camera.position.distanceTo(object.position);
+      const want = current * Math.exp(dDepth);
+      const next = THREE.MathUtils.clamp(want, home.distance * MIN_DEPTH_RATIO, home.distance * MAX_DEPTH_RATIO);
+      const direction = object.position.clone().sub(camera.position).normalize();
+      object.position.copy(camera.position).addScaledVector(direction, next);
+      settleClamp(os.ch.depth, Math.log(next / want));
+    }
+
+    // Two-hand scale, in ln(scale). Each axis multiplied independently so an explode stretch
+    // keeps its proportions (setScalar would flatten it back to uniform).
+    const dScale = step(s.ch.scale, 'scale');
+    if (dScale) {
+      const f = Math.exp(dScale);
+      const before = target.scale.x;
+      target.scale.x = THREE.MathUtils.clamp(target.scale.x * f, MIN_SCALE, MAX_SCALE);
+      target.scale.y = THREE.MathUtils.clamp(target.scale.y * f, MIN_SCALE, MAX_SCALE);
+      target.scale.z = THREE.MathUtils.clamp(target.scale.z * f, MIN_SCALE, MAX_SCALE);
+      settleClamp(s.ch.scale, Math.log(target.scale.x / before) - dScale);
+    }
+
+    // Explode.
+    const dExplode = step(explodeCh, 'explode');
+    if (dExplode) {
+      if (literalMode) {
+        explodeLiteralV += dExplode;
+        const next = THREE.MathUtils.clamp(explodeLiteralV, 0, 1);
+        if (next !== explodeAmount) {
+          explodeAmount = next;
+          for (const part of explodeParts) {
+            part.position.copy(part.userData.explodeHome).addScaledVector(part.userData.explodeDir, explodeAmount * MAX_EXPLODE_OFFSET);
+          }
+        }
+      } else {
+        const axis = explodeAxis;
+        const lo = Math.log(home.scale[axis] / explodeScale0[axis]);
+        const hi = Math.log(MAX_SCALE / explodeScale0[axis]);
+        const prev = THREE.MathUtils.clamp(explodeV[axis], lo, hi);
+        explodeV[axis] += dExplode;
+        const next = THREE.MathUtils.clamp(explodeV[axis], lo, hi);
+        if (next !== prev) object.scale[axis] *= Math.exp(next - prev);
+      }
+    }
+  }
+
+  // A limit was hit: move the command and output to where the model really is and stop,
+  // so no slack is stored beyond the limit.
+  function settleClamp(c, correction) {
+    if (Math.abs(correction) < 1e-12) return;
+    c.out += correction;
+    c.cmd = c.out;
+    c.vel = 0;
+    c.coast = 0;
+  }
+
   return {
     get mode() {
       return mode;
     },
 
     // For a HUD indicator: which explode behavior this object will actually use, decided
-    // once from its mesh count at creation. True only means a second scan happened to be
-    // multi-part — no manual override exists yet, since only one scan (single-mesh) exists
-    // to test against.
+    // once from its mesh count at creation.
     get explodeIsLiteral() {
       return literalMode;
     },
@@ -534,9 +666,7 @@ export function createManipulator(object, camera) {
 
     // Raycasts against the exploded parts and selects whichever one was hit (or deselects,
     // back to whole-object mode, on a miss). No-ops below EXPLODE_PART_SELECT_THRESHOLD or on
-    // a non-literalMode object -- there's nothing separate to select yet. ndcX/ndcY are
-    // normalized device coordinates in [-1, 1], the same convention THREE.Raycaster expects;
-    // converting a real pointer event into them is the caller's job.
+    // a non-literalMode object. ndcX/ndcY are normalized device coordinates in [-1, 1].
     selectPartAtScreenPoint(ndcX, ndcY) {
       if (!literalMode || explodeAmount <= EXPLODE_PART_SELECT_THRESHOLD) return null;
       raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
@@ -549,8 +679,10 @@ export function createManipulator(object, camera) {
     // since their durations are fixed at construction.
     configure(patch) {
       if (patch.channels) settings.channels = new Set(patch.channels);
-      if (patch.sensitivity !== undefined) settings.sensitivity = patch.sensitivity;
-      if (patch.momentum !== undefined) settings.momentum = patch.momentum;
+      if (patch.sensitivity !== undefined && Number.isFinite(patch.sensitivity) && patch.sensitivity >= 0) {
+        settings.sensitivity = patch.sensitivity;
+      }
+      if (patch.momentum !== undefined) settings.momentum = !!patch.momentum;
       if (patch.triggerFrames !== undefined && patch.triggerFrames !== settings.triggerFrames) {
         settings.triggerFrames = patch.triggerFrames;
         const enterMs = framesToMs(settings.triggerFrames);
@@ -564,14 +696,17 @@ export function createManipulator(object, camera) {
       return { ...settings, channels: [...settings.channels] };
     },
 
-    // timestampMs: defaults to performance.now() so existing callers (and every test in
-    // this file's history) that don't pass one keep working.
+    // Display-rate step: advances the follow springs without new hand input. hologram.js
+    // calls it every rendered frame so the model glides between camera frames.
+    tick(timestampMs = performance.now()) {
+      advance(timestampMs);
+    },
+
+    // timestampMs: the camera frame's time. Defaults to performance.now() so callers that
+    // don't pass one keep working.
     update(hands, aspect, timestampMs = performance.now()) {
-      // Real elapsed time since the last call -- the single number everything below is
-      // rewritten around. Clamped so a long pause (tab backgrounded, camera hiccup) can't
-      // produce a huge dt that reads as a wildly fast gesture the instant tracking resumes;
-      // 250ms already covers a very choppy real frame, and a genuine gap should just look
-      // like the hand "restarted" rather than lunging.
+      // Real elapsed time since the last call. Clamped so a long pause (tab backgrounded,
+      // camera hiccup) can't read as a wildly fast gesture the instant tracking resumes.
       let dt = lastUpdateTime !== null ? (timestampMs - lastUpdateTime) / 1000 : 1 / 60;
       if (!(dt > 0)) dt = 1 / 60;
       dt = Math.min(dt, 0.25);
@@ -579,38 +714,26 @@ export function createManipulator(object, camera) {
 
       if (on('clap') && hands.length === 2 && checkClap(hands, aspect, timestampMs)) {
         performReset();
+        lastAdvanceTime = timestampMs;
         return mode;
       }
 
       const twoHanded = hands.length === 2 && hands.every((h) => h.pinch?.pinching);
       // isFistLike trusts MediaPipe's own classifier when it has a confident opinion
-      // either way, and only falls back to geometric curl detection when it doesn't (see
-      // gestures.js) — a thumbs-up and a loosely-closed hand were both registering as a
-      // grab before that gating existed.
+      // either way, and only falls back to geometric curl detection when it doesn't.
       const fisted = hands.some((h) => isFistLike(h.gesture, h.landmarks, aspect));
       // Explode's trigger occupies a hand-shape space disjoint from both pinch (transform)
-      // and fist (grab) on purpose — two open hands, neither pinching nor fisted — so it
-      // can never fire from the same pose as either of those.
+      // and fist (grab) on purpose — two open hands, neither pinching nor fisted.
       const openHanded =
         hands.length === 2 && hands.every((h) => !isFistLike(h.gesture, h.landmarks, aspect) && !h.pinch?.pinching);
 
-      // Two-handed transform outranks grab and explode: with both hands up, a fist or
-      // open-hand reading on either one is far more likely to be a misclassification mid-
-      // pinch than a real change of gesture.
-      // Each mode is additionally gated on its channel being armed, so practice mode can
-      // silence a gesture completely rather than merely ignoring its effect -- a disarmed
-      // gesture must not even claim the mode, or it would still block the one being practised.
+      // Each mode is gated on its channel being armed, so practice mode can silence a
+      // gesture completely rather than merely ignoring its effect.
       const grabArmed = on('move') || on('spin') || on('tilt') || on('push');
 
       // Starting a gesture from IDLE and INTERRUPTING a different, already-active gesture
-      // are not the same decision, and treating them the same was a real source of
-      // "finicky" — reported as "two hands, it breaks out": mid-tilt, a single misread
-      // frame where the open second hand briefly looked like it was pinching was enough to
-      // yank control away into transform, using the exact same brief confirmation window a
-      // fresh gesture gets from idle. SWITCH_AWAY_MS raises that bar specifically for the
-      // interrupt case — a genuine, deliberate gesture change still gets through, just not
-      // off a single flicker — while leaving how quickly a gesture starts from idle alone,
-      // since that responsiveness was tuned separately and wasn't the complaint.
+      // are not the same decision: SWITCH_AWAY_MS raises the bar for the interrupt case so a
+      // single misread frame can't hijack an active gesture.
       const startingFromIdle = mode === MODE.IDLE;
       const enterFor = (targetMode) => (startingFromIdle || mode === targetMode ? undefined : SWITCH_AWAY_MS);
 
@@ -622,29 +745,22 @@ export function createManipulator(object, camera) {
         mode = MODE.TRANSFORM;
         clearGrab();
         clearExplode();
-        // Hysteresis can hold this mode true for a while after a hand drops out — that's
-        // the point of it, so a momentary tracking dropout doesn't cancel the gesture. But
-        // it means `hands` can still have fewer than 2 entries here. Skipping the write
-        // just holds the last scale until hysteresis resolves.
-        if (hands.length === 2) applyTransform(currentTarget(), hands, aspect);
+        // Hysteresis can hold this mode for a while after a hand drops out; skipping the
+        // command just holds the last scale until it resolves.
+        if (hands.length === 2) commandTransform(currentTarget(), hands, aspect, dt);
       } else if (exploding) {
         mode = MODE.EXPLODE;
         clearGrab();
         clearTransform();
-        if (hands.length === 2) applyExplode(hands, aspect, dt);
+        if (hands.length === 2) commandExplode(hands, aspect, dt);
       } else if (grabbing) {
         mode = MODE.GRAB;
         clearTransform();
         clearExplode();
         // Only steer while the fist is ACTUALLY closed, not merely while grab mode is still
-        // held open by hysteresis. The exit hysteresis exists so a dropped tracking frame
-        // cannot cancel a gesture — but it was also letting an opened hand keep driving the
-        // model for its whole exit window: measured, opening the hand and sweeping it away
-        // dragged the model a further 28cm, so releasing did not release. Now the velocity
-        // simply stops being written and existing momentum coasts out, which is what
-        // letting go should feel like. clearGrab() also drops the stale wrist reference, so
-        // re-closing the fist measures from where it actually is rather than jumping.
-        if (hands.length >= 1 && fisted) setGrabVelocity(currentTarget(), hands, aspect, dt);
+        // held open by exit hysteresis: opening the hand and sweeping it away once dragged
+        // the model a further 28cm, so releasing did not release.
+        if (hands.length >= 1 && fisted) commandGrab(currentTarget(), hands, aspect, dt);
         else clearGrab();
       } else {
         mode = MODE.IDLE;
@@ -653,36 +769,14 @@ export function createManipulator(object, camera) {
         clearExplode();
       }
 
-      applyMomentum(dt);
+      advance(timestampMs);
       return mode;
     }
   };
 
-  // A single closed fist both moves the object (from wrist position) and spins it (from
-  // twisting the wrist like turning a doorknob) — this replaced a two-hand pinch-and-twist
-  // rotate after live testing called it "janky and cluttered." Sets velocity rather than
-  // applying position/rotation directly; applyMomentum() below does the actual moving, so
-  // motion can keep coasting for a moment after the grab itself ends.
-  //
-  // If a second hand is also up, its raw position independently drives tilt — requested
-  // directly, both the original "rotate it vertically, not horizontally" and, after living
-  // with that, "have a move up to go up, down to go down, left and right to move left and
-  // right": vertical second-hand motion pitches the object (tip toward/away from camera),
-  // horizontal motion rolls it (tip side-to-side), matching how you'd actually steady and
-  // tilt a real object held in one hand with the other hand resting against it. The second
-  // hand doesn't need any particular shape; it just needs to not be the hand already doing
-  // the grabbing.
-  //
-  // The grabbing hand's own apparent size also drives push/pull: moving your fist closer
-  // to the camera makes it read bigger in frame, farther makes it read smaller, and that
-  // change is a genuine depth signal — see palmLength() in gestures.js for why it's used
-  // over MediaPipe's own (noisier) z-coordinate.
-  // Which hand is doing the grabbing has to be decided by CONTINUITY, not by taking the
-  // first match in the array. MediaPipe can reorder `hands` between frames, and it can also
-  // change its mind about which hands read as fists — so "the grabbing hand" could silently
-  // become the other hand, and its position would then be differenced against the previous
-  // frame's OTHER hand, producing a jump out of nothing. Nearest-to-last-known wins instead,
-  // the same reasoning smoothLandmarks.js uses — a hand cannot teleport between frames.
+  // Which hand is doing the grabbing is decided by CONTINUITY, not by taking the first match
+  // in the array: MediaPipe can reorder `hands` between frames and change its mind about
+  // which hands read as fists. Nearest-to-last-known wins — a hand cannot teleport.
   function nearestTo(pool, reference) {
     if (!reference || pool.length === 1) return pool[0];
     let best = pool[0];
@@ -698,16 +792,14 @@ export function createManipulator(object, camera) {
     return best;
   }
 
-  // `target` is whatever currentTarget() resolved to when the caller checked -- `object`
-  // itself for every existing single-mesh model, or a selected part post-explode. All the
-  // tracking/velocity state below lives in `s`, target's own entry in the state map, so
-  // grabbing one part and later a different one never mixes their history.
-  function setGrabVelocity(target, hands, aspect, dt) {
+  // One closed fist: its wrist moves the model (1:1 with the hand on screen), twisting it
+  // like a doorknob spins the model about its vertical axis (a lazy Susan, deliberately not
+  // a literal roll), and its apparent size pushes/pulls (bigger = nearer; see palmLength()
+  // for why that is used instead of MediaPipe's noisier z). A second hand, any shape, tilts:
+  // up/down pitches, left/right rolls.
+  function commandGrab(target, hands, aspect, dt) {
     const s = stateFor(target);
-    // Push/pull (depth) deliberately never retargets -- it always writes to `object`'s own
-    // depthVelocity, applied in applyMomentum, regardless of which part is selected. See the
-    // comment on `activePart` above for why.
-    const depthState = target === object ? s : stateFor(object);
+    const os = target === object ? s : stateFor(object); // depth always on the object
 
     const fists = hands.filter((h) => isFistLike(h.gesture, h.landmarks, aspect));
     const hand = nearestTo(fists.length ? fists : hands, s.lastWrist);
@@ -716,259 +808,119 @@ export function createManipulator(object, camera) {
     const others = hands.filter((h) => h !== hand);
     const pitchHand = others.length ? nearestTo(others, s.lastPitchWrist) : null;
 
-    // Twist has to be unwrapped into a continuous angle before it can be filtered, or the
-    // ±180° seam registers as a full-speed spin every time it is crossed.
+    // Twist unwrapped into a continuous angle, or the ±180° seam would read as a full spin.
     const rawTwist = handTwist(hand.landmarks, aspect);
     if (s.lastTwist !== null) {
-      let step = rawTwist - s.lastTwist;
-      if (step > Math.PI) step -= Math.PI * 2;
-      if (step < -Math.PI) step += Math.PI * 2;
-      s.twistAccum += step;
+      let turn = rawTwist - s.lastTwist;
+      if (turn > Math.PI) turn -= Math.PI * 2;
+      if (turn < -Math.PI) turn += Math.PI * 2;
+      s.twistAccum += turn;
     }
     s.lastTwist = rawTwist;
+    const logPalm = palm > 0 ? Math.log(palm) : null;
 
-    const pitchX = pitchHand ? wristOf(pitchHand).x : null;
-    const pitchY = pitchHand ? wristOf(pitchHand).y : null;
-
-    const sample = { x: wrist.x, y: wrist.y, twist: s.twistAccum, palm, pitchX, pitchY };
-
-    // First frame of a grab: seed both filters and produce no motion, so taking hold of the
-    // object never itself moves it.
-    if (!s.fast) {
-      s.fast = { ...sample };
-      s.slow = { ...sample };
+    // First frame of a hold: take the references and produce no motion, so taking hold of
+    // the object never itself moves it. Any coast still running stops: the hand has it now.
+    if (!s.holding) {
+      s.holding = true;
+      os.holding = true;
+      s.sig = { x: newSignal(wrist.x), y: newSignal(wrist.y), twist: newSignal(s.twistAccum) };
+      if (logPalm !== null) os.sig.palm = newSignal(logPalm);
+      for (const k of GRAB_CHANNELS) { s.ch[k].coast = 0; os.ch[k].coast = 0; }
       s.lastWrist = { x: wrist.x, y: wrist.y };
-      if (pitchY !== null) s.lastPitchWrist = { x: pitchX, y: pitchY };
-      return;
     }
 
-    // Per-call blend weight recomputed from real elapsed time -- see TAU_FAST for why a
-    // fixed weight was frame-rate-dependent.
-    const alphaFast = 1 - Math.exp(-dt / TAU_FAST);
-    const alphaSlow = 1 - Math.exp(-dt / TAU_SLOW);
-
-    const { fast, slow } = s;
-    for (const key of ['x', 'y', 'twist', 'palm']) {
-      fast[key] += (sample[key] - fast[key]) * alphaFast;
-      slow[key] += (sample[key] - slow[key]) * alphaSlow;
-    }
-    if (pitchY !== null) {
-      if (fast.pitchY === null || slow.pitchY === null) {
-        fast.pitchX = pitchX; slow.pitchX = pitchX;
-        fast.pitchY = pitchY; slow.pitchY = pitchY;
-      } else {
-        fast.pitchX += (pitchX - fast.pitchX) * alphaFast;
-        slow.pitchX += (pitchX - slow.pitchX) * alphaSlow;
-        fast.pitchY += (pitchY - fast.pitchY) * alphaFast;
-        slow.pitchY += (pitchY - slow.pitchY) * alphaSlow;
-      }
-    } else {
-      fast.pitchX = null; slow.pitchX = null;
-      fast.pitchY = null; slow.pitchY = null;
-    }
-
+    const sens = settings.sensitivity;
     const perUnit = worldPerScreenUnit(camera, targetWorldPosition(target));
 
-    // Landmark x runs left-to-right in the raw frame while the view is mirrored, so the sign
-    // is flipped to make the model follow the hand the user actually sees.
-    const vx = deadzone(-(fast.x - slow.x) * FILTER_GAIN, MOVE_DEADZONE);
-    const vy = deadzone((fast.y - slow.y) * FILTER_GAIN, MOVE_DEADZONE);
-    if (on('move') && Math.abs(vx) < MAX_MOVE_PER_SECOND && Math.abs(vy) < MAX_MOVE_PER_SECOND) {
-      s.linearVelocityX = vx * perUnit.x * settings.sensitivity;
-      s.linearVelocityY = -vy * perUnit.y * settings.sensitivity;
+    // Landmark x runs left-to-right in the raw frame while the view is mirrored, so x is
+    // flipped to make the model follow the hand the user actually sees; y is flipped because
+    // image y grows downward.
+    const mx = takeUpSlack(s.sig.x, wrist.x, MOVE_DEADZONE, MAX_MOVE_PER_SECOND, dt);
+    const my = takeUpSlack(s.sig.y, wrist.y, MOVE_DEADZONE, MAX_MOVE_PER_SECOND, dt);
+    if (on('move')) {
+      s.ch.x.cmd += -mx * perUnit.x * sens;
+      s.ch.y.cmd += -my * perUnit.y * sens;
     }
 
-    // Twisting your wrist is really a roll around the camera-viewing axis, but mapping that
-    // to spin the object around ITS vertical axis instead — like a lazy Susan — is what is
-    // actually useful for looking at the sides of something like a chair. Deliberate
-    // stylization, not a literal transfer of the physical motion.
-    const vTwist = deadzone((fast.twist - slow.twist) * FILTER_GAIN, TWIST_DEADZONE);
-    if (on('spin') && Math.abs(vTwist) < MAX_TWIST_PER_SECOND) {
-      s.angularVelocity = vTwist * settings.sensitivity;
-    }
+    const tw = takeUpSlack(s.sig.twist, s.twistAccum, TWIST_DEADZONE, MAX_TWIST_PER_SECOND, dt);
+    if (on('spin')) s.ch.spin.cmd += tw * sens;
 
-    if (fast.pitchY !== null) {
-      const vPitch = deadzone((fast.pitchY - slow.pitchY) * FILTER_GAIN, PITCH_DEADZONE);
-      if (on('tilt') && Math.abs(vPitch) * PITCH_SENSITIVITY < MAX_PITCH_PER_SECOND) {
-        s.pitchVelocity = -vPitch * PITCH_SENSITIVITY * settings.sensitivity;
+    if (pitchHand) {
+      const pw = wristOf(pitchHand);
+      if (!s.sig.px) {
+        // The second hand just appeared: take its reference, no motion.
+        s.sig.px = newSignal(pw.x);
+        s.sig.py = newSignal(pw.y);
+      } else {
+        const tx = takeUpSlack(s.sig.px, pw.x, TILT_DEADZONE, MAX_TILT_PER_SECOND, dt);
+        const ty = takeUpSlack(s.sig.py, pw.y, TILT_DEADZONE, MAX_TILT_PER_SECOND, dt);
+        if (on('tilt')) {
+          // Same signs as before the rewrite: raising the hand (image y falling) pitches
+          // positive about world X; moving it right in the image rolls positive about Z.
+          s.ch.pitch.cmd -= ty * PITCH_SENSITIVITY * sens;
+          s.ch.roll.cmd += tx * ROLL_SENSITIVITY * sens;
+        }
       }
-      // Second hand's horizontal position rolls the object left/right -- requested directly
-      // after living with pitch-only tilt ("have left and right to move left and right").
-      // Rotating about the camera's forward (world Z-ish, via rotateOnWorldAxis with the
-      // camera's own view axis would drift as the mouse orbits the scene; using world Z
-      // directly keeps "left/right" meaning the same thing regardless of hand height,
-      // matching how pitch already uses world X rather than the object's own local axis.
-      const vRoll = deadzone((fast.pitchX - slow.pitchX) * FILTER_GAIN, ROLL_DEADZONE);
-      if (on('tilt') && Math.abs(vRoll) * ROLL_SENSITIVITY < MAX_ROLL_PER_SECOND) {
-        s.rollVelocity = vRoll * ROLL_SENSITIVITY * settings.sensitivity;
-      }
-      s.lastPitchWrist = { x: pitchX, y: pitchY };
+      s.lastPitchWrist = { x: pw.x, y: pw.y };
     } else {
+      delete s.sig.px;
+      delete s.sig.py;
       s.lastPitchWrist = null;
     }
 
-    // Hand got bigger (closer to camera) -> pull the object closer; smaller -> push it away.
-    // Kept as a ratio, the same shape scale uses, rather than a screen-space delta. Always
-    // written to depthState (object's own entry), never the selected part's -- see above.
-    if (slow.palm > 0) {
-      const ratio = fast.palm / slow.palm;
-      const change = deadzone((ratio - 1) * FILTER_GAIN, DEPTH_DEADZONE);
-      if (on('push') && Math.abs(change) < MAX_DEPTH_RATIO_PER_SECOND) {
-        depthState.depthVelocity = change * settings.sensitivity;
-      }
+    // Hand bigger (closer to the camera) -> pull the object closer: distance falls in
+    // proportion, ln(distance) -= ln(palm growth).
+    if (logPalm !== null) {
+      if (!os.sig.palm) os.sig.palm = newSignal(logPalm);
+      const dp = takeUpSlack(os.sig.palm, logPalm, DEPTH_DEADZONE, MAX_DEPTH_RATIO_PER_SECOND, dt);
+      if (on('push')) os.ch.depth.cmd += -dp * PUSH_GAIN * sens;
     }
 
     s.lastWrist = { x: wrist.x, y: wrist.y };
-    s.lastPalm = palm;
   }
 
-  // Applies whatever velocity currently exists and decays it — runs every update() call
-  // regardless of mode, which is what lets a released grab keep coasting briefly instead
-  // of stopping dead the instant the gesture ends. Velocities are real per-second rates now
-  // (see the top of this file), so both the application and the decay are scaled by `dt`.
-  //
-  // Momentum off means no coasting: whatever velocity exists this instant is applied for
-  // this frame and then zeroed, so the object stops the moment the gesture does. Reported
-  // live that things 'keep accidentally moving around' -- coasting was a prime suspect,
-  // since a single jittery frame set a velocity that then kept being applied after the hand
-  // had already stopped.
-  //
-  // Must be a function declaration, not a const arrow: everything below here sits after
-  // createManipulator's `return`, so a const would never initialize and every call would
-  // throw "Cannot access 'damping' before initialization". The other helpers down here are
-  // function declarations for the same reason — they get hoisted, a const does not.
-  function damping(dt) {
-    if (!settings.momentum) return 0;
-    return Math.exp((-dt / DAMPING_HALFLIFE) * Math.LN2);
-  }
-
-  // Applies momentum only for the CURRENT target each frame (plus object's own depth
-  // velocity, always). A part's residual velocity from before it was deselected simply sits
-  // dormant in its state entry rather than continuing to coast in the background -- it never
-  // produces incorrect motion, just means a deselected part stops exactly where it was
-  // rather than coasting a little further, which if anything reads as more predictable.
-  function applyMomentum(dt) {
-    const decay = damping(dt);
-    const target = currentTarget();
-    const s = stateFor(target);
-
-    if (Math.abs(s.angularVelocity) > MIN_ANGULAR_VELOCITY) {
-      rotateTarget(target, new THREE.Vector3(0, 1, 0), s.angularVelocity * dt);
-    }
-    s.angularVelocity *= decay;
-
-    if (Math.abs(s.pitchVelocity) > MIN_ANGULAR_VELOCITY) {
-      // World X, not the object's own local X: yaw already changes what the object's
-      // local axes point in, and pitch should still mean "tip toward/away from the
-      // camera" regardless of however much it's currently spun — same reasoning as yaw
-      // using world Y rather than local Y. (For a part, rotateTarget uses the LOCAL axis
-      // instead -- see its own comment for why.)
-      rotateTarget(target, new THREE.Vector3(1, 0, 0), s.pitchVelocity * dt);
-    }
-    s.pitchVelocity *= decay;
-
-    if (Math.abs(s.rollVelocity) > MIN_ANGULAR_VELOCITY) {
-      rotateTarget(target, new THREE.Vector3(0, 0, 1), s.rollVelocity * dt);
-    }
-    s.rollVelocity *= decay;
-
-    // Depth (push/pull) always reads from and moves `object`, never a part -- see
-    // setGrabVelocity's comment on depthState for why.
-    const depthState = stateFor(object);
-    if (Math.abs(depthState.depthVelocity) > MIN_LINEAR_VELOCITY / 10) {
-      // Moves along the actual camera-to-object line (via the camera's current basis),
-      // not a fixed world axis, so this still behaves correctly after the view has been
-      // orbited with the mouse.
-      const currentDistance = camera.position.distanceTo(object.position);
-      const direction = object.position.clone().sub(camera.position).normalize();
-      // Divides rather than multiplies: depthVelocity is positive when the hand got
-      // BIGGER (closer to camera), and that should SHRINK the object's distance (pull it
-      // closer), not grow it. Multiplying here was backwards and sent the object away
-      // from the camera when the hand approached it -- caught by testing before shipping.
-      const targetDistance = THREE.MathUtils.clamp(
-        currentDistance / (1 + depthState.depthVelocity * dt),
-        home.distance * MIN_DEPTH_RATIO,
-        home.distance * MAX_DEPTH_RATIO
-      );
-      object.position.copy(camera.position).addScaledVector(direction, targetDistance);
-    }
-    depthState.depthVelocity *= decay;
-
-    const speedSq = s.linearVelocityX * s.linearVelocityX + s.linearVelocityY * s.linearVelocityY;
-    if (speedSq > MIN_LINEAR_VELOCITY * MIN_LINEAR_VELOCITY) {
-      target.position.x += s.linearVelocityX * dt;
-      target.position.y += s.linearVelocityY * dt;
-      // Whole-object framing clamp only applies to the object itself -- a part's position
-      // is local to `object` and bounded separately, by distance from its own exploded
-      // position (see clampPartOffset / PART_GRAB_RANGE), not by the camera frustum.
-      if (target === object) clampToView(object, camera);
-      else clampPartOffset(target);
-    }
-    s.linearVelocityX *= decay;
-    s.linearVelocityY *= decay;
-  }
-
-  function applyTransform(target, hands, aspect) {
+  // Two pinching hands: the change in their span, as a ratio, scales the target by that
+  // ratio (hands twice as far apart = twice the size).
+  function commandTransform(target, hands, aspect, dt) {
     const s = stateFor(target);
     const span = handSpan(hands[0], hands[1], aspect);
-
-    if (s.lastSpan && span > 0) {
-      const ratio = span / s.lastSpan;
-      if (ratio > 1 / MAX_SPAN_RATIO_PER_FRAME && ratio < MAX_SPAN_RATIO_PER_FRAME) {
-        // Multiplies each axis independently rather than setScalar-ing all three to one
-        // value. Found by testing: stretching the object with explode first, then
-        // scaling, silently flattened the stretch back to a uniform shape — setScalar
-        // discarded whatever proportions already existed. Multiplying preserves them,
-        // the same way scaling an already-non-uniform object works in any 3D tool.
-        target.scale.x = THREE.MathUtils.clamp(target.scale.x * ratio, MIN_SCALE, MAX_SCALE);
-        target.scale.y = THREE.MathUtils.clamp(target.scale.y * ratio, MIN_SCALE, MAX_SCALE);
-        target.scale.z = THREE.MathUtils.clamp(target.scale.z * ratio, MIN_SCALE, MAX_SCALE);
-      }
+    if (!(span > 0)) return;
+    const logSpan = Math.log(span);
+    if (!s.spanSig) {
+      s.spanSig = newSignal(logSpan);
+      s.ch.scale.coast = 0;
+      return;
     }
-
-    s.lastSpan = span;
+    const d = takeUpSlack(s.spanSig, logSpan, SCALE_DEADZONE, MAX_SPAN_RATIO_PER_SECOND, dt);
+    s.ch.scale.cmd += d * settings.sensitivity;
   }
 
-  // Two open hands pulling apart: on a multi-part object, each mesh slides outward from
-  // the group's centroid along its own direction (literal explode); on a single-mesh
-  // object like the chair, there's nothing separate to pull apart, so it stretches the
-  // whole hologram instead — deliberately non-uniform, so it doesn't look like the same
-  // uniform resize two-hand pinch already does.
-  //
-  // Both branches update incrementally from the span delta, the same pattern applyTransform
-  // uses for scale, rather than computing from a captured baseline — that avoids a
-  // real bug class: a baseline captured fresh each time explode mode is re-entered would
-  // compound with whatever amount was already applied from a previous session.
-  function applyExplode(hands, aspect, dt) {
+  // Two open hands pulling apart: on a multi-part object, each mesh slides outward from the
+  // group's centroid along its own direction (literal explode); on a single-mesh object like
+  // the chair it stretches along whichever axis the hands are separating on (hands apart
+  // left-right widens it, up-down heightens it), deliberately non-uniform so it doesn't look
+  // like pinch-scale. Commanded from the change in span with a deadzone, so a still pair of
+  // hands can no longer ratchet the stretch upward against its floor (BUGS #11).
+  function commandExplode(hands, aspect, dt) {
     const span = handSpan(hands[0], hands[1], aspect);
-
-    if (lastExplodeSpan !== null && dt > 0) {
-      const delta = span - lastExplodeSpan;
-      const rate = delta / dt; // palm-lengths of span-change per real second
-      if (Math.abs(rate) < MAX_EXPLODE_SPAN_RATE_PER_SECOND) {
-        if (literalMode) {
-          explodeAmount = THREE.MathUtils.clamp(explodeAmount + delta * EXPLODE_SENSITIVITY, 0, 1);
-          for (const part of explodeParts) {
-            part.position.copy(part.userData.explodeHome).addScaledVector(part.userData.explodeDir, explodeAmount * MAX_EXPLODE_OFFSET);
-          }
-        } else {
-          const stretchRatio = 1 + delta * EXPLODE_SENSITIVITY;
-          // Stretch whichever local axis the hands are actually pulling apart along,
-          // rather than a fixed vertical -- see MAX_EXPLODE_OFFSET's comment above for why.
-          const wristA = wristOf(hands[0]);
-          const wristB = wristOf(hands[1]);
-          const horizontal = Math.abs(wristA.x - wristB.x);
-          const vertical = Math.abs(wristA.y - wristB.y);
-          const axis = vertical > horizontal ? 'y' : 'x';
-          object.scale[axis] = THREE.MathUtils.clamp(
-            object.scale[axis] * stretchRatio,
-            home.scale[axis],
-            MAX_SCALE
-          );
-        }
-      }
+    if (!(span > 0)) return;
+    const wristA = wristOf(hands[0]);
+    const wristB = wristOf(hands[1]);
+    explodeAxis = Math.abs(wristA.y - wristB.y) > Math.abs(wristA.x - wristB.x) ? 'y' : 'x';
+    if (!explodeSig) {
+      explodeSig = newSignal(span);
+      explodeCh.coast = 0;
+      explodeV = { x: 0, y: 0 };
+      explodeScale0 = { x: object.scale.x, y: object.scale.y };
+      explodeLiteralV = explodeAmount;
+      return;
     }
-
-    lastExplodeSpan = span;
+    const d = takeUpSlack(explodeSig, span, EXPLODE_DEADZONE, MAX_EXPLODE_SPAN_RATE_PER_SECOND, dt);
+    explodeCh.cmd += d * EXPLODE_SENSITIVITY * settings.sensitivity;
   }
 }
+
+const AXIS_X = new THREE.Vector3(1, 0, 0);
+const AXIS_Y = new THREE.Vector3(0, 1, 0);
+const AXIS_Z = new THREE.Vector3(0, 0, 1);

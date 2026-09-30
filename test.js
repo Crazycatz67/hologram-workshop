@@ -643,6 +643,307 @@ async function main() {
       `pos off by ${posErr.toExponential(2)}, rot off by ${rotErr.toExponential(2)}, scale off by ${scaleErr.toExponential(2)}`);
   });
 
+  // ---- smoothing, accuracy and smoothness rewrite (2026-09-29) --------------------------
+  // One Euro landmark filter (smoothLandmarks.js), command -> deadzone -> critically damped
+  // follow in manipulator.js, platform mouse editing. Numbers are synthetic; see
+  // docs/lab/gestures/smoothing-lab.html for the before/after table these bounds come from.
+  const smoothing = await import(`./smoothLandmarks.js${V}`);
+  const RS = () => smoothing.resetLandmarkSmoothing();
+  const SM = (hands, t) => smoothing.smoothHandLandmarks(hands, t);
+
+  // Drives the real pipeline order (smooth -> manipulator.update) with a camera at `fps` and
+  // manipulator.tick at 60Hz between camera frames, the way hologram.js runs it.
+  function pipeline(m, specsAt, { fps = 30, totalS = 1, smooth = true, jitter = 0, onDisplay = null, t0 = 1000 } = {}) {
+    RS();
+    const camStep = 1000 / fps;
+    let nextCam = t0;
+    for (let t = t0; t <= t0 + totalS * 1000 + 1e-6; t += 1000 / 60) {
+      while (nextCam <= t + 1e-6) {
+        const ts = (nextCam - t0) / 1000;
+        const hands = specsAt(ts).map(([x, y, tw, kind, palm]) => hand(x, y, tw, kind, jitter, palm));
+        if (smooth) SM(hands, nextCam);
+        m.update(hands, 1.78, nextCam);
+        nextCam += camStep;
+      }
+      m.tick(t);
+      onDisplay?.((t - t0) / 1000);
+    }
+  }
+
+  group('Landmark smoothing — One Euro filter (BUGS #12)', () => {
+    // Rest jitter: a still hand with the realistic 0.002 per-landmark noise.
+    for (const fps of [30, 60]) {
+      seed = 5; RS();
+      let se = 0, seRaw = 0, n = 0;
+      for (let i = 0; i < fps * 3; i++) {
+        const h = hand(0.5, 0.5, 0, 'open', REALISTIC_JITTER);
+        const raw = h.landmarks[0].x;
+        SM([h], 1000 + (i * 1000) / fps);
+        if (i > fps / 2) { se += (h.landmarks[0].x - 0.5) ** 2; seRaw += (raw - 0.5) ** 2; n++; }
+      }
+      const ratio = Math.sqrt(se / n) / Math.sqrt(seRaw / n);
+      checkTrue(`rest jitter at ${fps}fps falls below 40% of raw (the old EMA kept ~54%)`, ratio < 0.4,
+        `RMS ${(ratio * 100).toFixed(0)}% of raw`);
+    }
+    // Lag on a moving hand, steady state: fast motion must lag LESS than a frame.
+    const lagMs = (speed, fps) => {
+      RS();
+      let sum = 0, k = 0;
+      const N = Math.round(fps * 0.4);
+      for (let i = 0; i < N; i++) {
+        const x = 0.3 + (speed * i) / fps;
+        const h = hand(x, 0.5, 0, 'open');
+        SM([h], 1000 + (i * 1000) / fps);
+        if (i >= N - 3) { sum += (x - h.landmarks[0].x) / speed; k++; }
+      }
+      return (sum / k) * 1000;
+    };
+    const fast30 = lagMs(1.35, 30), move30 = lagMs(0.3, 30);
+    checkTrue('a clap-speed hand (1.35/s) lags under 10ms at 30fps (old EMA: 33ms)', fast30 < 10, `${fast30.toFixed(1)}ms`);
+    checkTrue('a moving hand (0.3/s) lags under 20ms at 30fps', move30 < 20, `${move30.toFixed(1)}ms`);
+
+    // Lost-tracking recovery: a hand that blinks out for 150ms resumes its filter state (so
+    // its jitter stays smoothed and nothing jumps); one gone 400ms is a new hand, unfiltered.
+    RS();
+    for (let i = 0; i < 10; i++) SM([hand(0.3, 0.5, 0, 'open')], 1000 + i * 33);
+    const back = hand(0.303, 0.5, 0, 'open'); // a jitter-sized offset
+    SM([back], 1000 + 9 * 33 + 150);
+    checkTrue('a hand back after a 150ms dropout resumes its filter (offset partly absorbed, not raw)', back.landmarks[0].x < 0.3025,
+      `wrist x ${back.landmarks[0].x.toFixed(4)} (raw 0.3030)`);
+    RS();
+    for (let i = 0; i < 10; i++) SM([hand(0.3, 0.5, 0, 'open')], 1000 + i * 33);
+    const late = hand(0.303, 0.5, 0, 'open');
+    SM([late], 1000 + 9 * 33 + 400);
+    check('a hand back after 400ms starts fresh (raw passthrough)', late.landmarks[0].x, 0.303, 0);
+    RS();
+  });
+
+  group('Clap at low camera frame rates, through the landmark filter (BUGS #12)', () => {
+    const clapAt = (fps, phase, durS = 0.2) => {
+      const m = createManipulator(object, camera);
+      m.configure({ channels: ['clap'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+      object.scale.set(1.3, 1.3, 1.3);
+      let fired = false;
+      pipeline(m, (t) => {
+        const u = THREE.MathUtils.clamp((t - 0.6 - phase / fps) / durS, 0, 1);
+        const sep = 0.6 - 0.54 * u;
+        return [[0.5 - sep / 2, 0.5, 0, 'open'], [0.5 + sep / 2, 0.5, 0, 'open']];
+      }, { fps, totalS: 1.2, onDisplay: () => { if (object.scale.x === 1) fired = true; } });
+      m.reset();
+      return fired;
+    };
+    for (const fps of [12, 24, 60]) {
+      let hits = 0;
+      for (let p = 0; p < 8; p++) hits += clapAt(fps, p / 8) ? 1 : 0;
+      checkTrue(`a 200ms clap fires at ${fps}fps (8 frame phases)`, hits === 8, `${hits}/8 (old: 0/8 at 12fps)`);
+    }
+    let hits8 = 0;
+    for (let p = 0; p < 8; p++) hits8 += clapAt(8, p / 8) ? 1 : 0;
+    checkTrue('a 200ms clap mostly fires even at 8fps', hits8 >= 6, `${hits8}/8 (old: 0/8)`);
+    // Still guarded: a slow 2s bring-together must not fire.
+    const m = createManipulator(object, camera);
+    m.configure({ channels: ['clap'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    object.scale.set(1.3, 1.3, 1.3);
+    pipeline(m, (t) => {
+      const sep = 0.6 - 0.54 * THREE.MathUtils.clamp((t - 0.3) / 2, 0, 1);
+      return [[0.5 - sep / 2, 0.5, 0, 'open'], [0.5 + sep / 2, 0.5, 0, 'open']];
+    }, { fps: 30, totalS: 2.6 });
+    check('a slow 2s bring-together still does not reset', object.scale.x, 1.3, 0.001);
+    m.reset();
+  });
+
+  group('Model follow — a still hand holds the model exactly still (BUGS #11)', () => {
+    const cases = {
+      'fist + second open hand (move/spin/push/tilt)': [[0.35, 0.5, 0, 'fist'], [0.65, 0.5, 0, 'open']],
+      'two pinching hands (scale)': [[0.35, 0.5, 0, 'pinch'], [0.65, 0.5, 0, 'pinch']],
+      'two open hands (explode)': [[0.35, 0.5, 0, 'open'], [0.65, 0.5, 0, 'open']]
+    };
+    for (const [name, specs] of Object.entries(cases)) {
+      for (const smooth of [true, false]) {
+        seed = 11;
+        const m = createManipulator(object, camera);
+        m.configure({ channels: ALL_CHANNELS.filter((c) => c !== 'clap'), sensitivity: 1, momentum: true, triggerFrames: 3 });
+        pipeline(m, () => specs, { fps: 30, totalS: smooth ? 3 : 10, smooth, jitter: REALISTIC_JITTER });
+        const moved = object.position.length() * 100;
+        const turned = object.quaternion.angleTo(IDENT) * 180 / Math.PI;
+        const scaled = Math.max(...object.scale.toArray().map((v) => Math.abs(v - 1)));
+        checkTrue(`${name}, ${smooth ? '3s through the filter' : '10s raw (no filter)'}: drift is exactly 0`,
+          moved === 0 && turned === 0 && scaled === 0,
+          `${moved.toFixed(3)}cm, ${turned.toFixed(3)}°, scale off ${(scaled * 100).toFixed(2)}% (old raw explode: +10.9% after 10s)`);
+        m.reset();
+      }
+    }
+  });
+
+  group('Model follow — step response, top speed, frame-rate independence', () => {
+    const perUnitX = 2 * camera.position.distanceTo(new THREE.Vector3()) * Math.tan((camera.fov * Math.PI) / 360) * camera.aspect;
+    // A quick 0.2-frame-width slide inside 100ms, then hold.
+    const step = (fps) => {
+      const m = createManipulator(object, camera);
+      m.configure({ channels: ['move'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+      const series = [];
+      pipeline(m, (t) => [[0.4 + 0.2 * THREE.MathUtils.clamp((t - 0.5) / 0.1, 0, 1), 0.5, 0, 'fist']],
+        { fps, totalS: 1.6, onDisplay: (t) => series.push({ t, x: -object.position.x }) });
+      m.reset();
+      const final = series[series.length - 1].x;
+      let settle = 0, peak = 0;
+      for (const p of series) peak = Math.max(peak, p.x);
+      for (let i = series.length - 1; i >= 0; i--) if (Math.abs(series[i].x - final) > 0.02 * final) { settle = series[i].t - 0.6; break; }
+      return { final, settle, overshoot: (peak - final) / final, series };
+    };
+    const s30 = step(30);
+    checkTrue('a quick slide lands within 3% of the 1:1 hand mapping (old: 82%)', Math.abs(s30.final / (0.2 * perUnitX) - 1) < 0.03,
+      `${((s30.final / (0.2 * perUnitX)) * 100).toFixed(1)}% of ideal`);
+    checkTrue('it settles within 250ms of the hand stopping (old: 350ms)', s30.settle < 0.25, `${(s30.settle * 1000).toFixed(0)}ms`);
+    checkTrue('with no overshoot', s30.overshoot < 0.005, `${(s30.overshoot * 100).toFixed(2)}%`);
+    const s24 = step(24), s60 = step(60);
+    checkTrue('the same slide ends in the same place at 24fps and 60fps (within 1%)',
+      Math.abs(s24.final - s60.final) / s60.final < 0.01, `24fps ${(s24.final * 100).toFixed(1)}cm, 60fps ${(s60.final * 100).toFixed(1)}cm`);
+    const mid = (s) => s.series.find((p) => p.t >= 0.75).x;
+    checkTrue('and is at the same point along the way 150ms after the hand stops (within 5%)',
+      Math.abs(mid(s24) - mid(s60)) / s60.final < 0.05, `24fps ${(mid(s24) * 100).toFixed(1)}cm, 60fps ${(mid(s60) * 100).toFixed(1)}cm`);
+    const smooth30 = step(30).series.filter((p) => p.t > 0.5 && p.t < 0.9);
+    const maxSpeed = Math.max(...smooth30.slice(1).map((p, i) => Math.abs(p.x - smooth30[i].x) / (p.t - smooth30[i].t)));
+    checkTrue('the model never exceeds its 4 units/s top speed, even on a flick', maxSpeed <= 4.0001, `${maxSpeed.toFixed(2)} units/s`);
+    // Display-rate glide: with a 30fps camera, the model moves on every 60Hz display frame.
+    const m = createManipulator(object, camera);
+    m.configure({ channels: ['move'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    const xs = [];
+    pipeline(m, (t) => [[0.3 + 0.3 * THREE.MathUtils.clamp((t - 0.4) / 1.2, 0, 1), 0.5, 0, 'fist']],
+      { fps: 30, totalS: 1.6, onDisplay: (t) => { if (t > 0.8 && t < 1.5) xs.push(object.position.x); } });
+    m.reset();
+    const still = xs.slice(1).filter((v, i) => v === xs[i]).length;
+    checkTrue('a steady sweep moves the model on every display frame (old: every other frame)', still === 0, `${still} frozen frames of ${xs.length - 1}`);
+    // Momentum still coasts after a release mid-motion; without momentum it settles in place.
+    const release = (momentum) => {
+      const mm = createManipulator(object, camera);
+      mm.configure({ channels: ['move'], sensitivity: 1, momentum, triggerFrames: 3 });
+      let atRelease = null;
+      pipeline(mm, (t) => {
+        const x = 0.3 + 0.3 * THREE.MathUtils.clamp((t - 0.3) / 0.5, 0, 1);
+        return [[x, 0.5, 0, t < 0.7 ? 'fist' : 'open']];
+      }, { fps: 30, totalS: 2, onDisplay: (t) => { if (atRelease === null && t >= 0.7) atRelease = -object.position.x; } });
+      const end = -object.position.x;
+      mm.reset();
+      return end - atRelease;
+    };
+    const coast = release(true), stop = release(false);
+    checkTrue('momentum on: a release mid-slide coasts on further than momentum off', coast > stop + 0.05,
+      `coast ${(coast * 100).toFixed(1)}cm vs ${(stop * 100).toFixed(1)}cm`);
+  });
+
+  group('Slow deliberate motion registers (BUGS #5)', () => {
+    // The old per-second velocity deadzones ignored slow motion entirely: a 40° twist over
+    // 2 s did nothing. The backlash deadzone follows motion at any speed.
+    const m = createManipulator(object, camera);
+    m.configure({ channels: ['spin'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    pipeline(m, (t) => [[0.5, 0.5, 40 * THREE.MathUtils.clamp((t - 0.3) / 2, 0, 1), 'fist']], { fps: 30, totalS: 3 });
+    const deg = object.quaternion.angleTo(IDENT) * 180 / Math.PI;
+    m.reset();
+    checkTrue('a slow 40° wrist twist over 2s spins the model (old: 0°)', deg > 15, `${deg.toFixed(1)}°`);
+    const m2 = createManipulator(object, camera);
+    m2.configure({ channels: ['push'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    const d0 = camera.position.distanceTo(object.position);
+    pipeline(m2, (t) => [[0.5, 0.5, 0, 'fist', 0.10 + 0.03 * THREE.MathUtils.clamp((t - 0.3) / 1, 0, 1)]], { fps: 30, totalS: 1.8 });
+    const pulled = d0 - camera.position.distanceTo(object.position);
+    m2.reset();
+    checkTrue('a slow push (palm 0.10 -> 0.13 over 1s) pulls the model closer (old: nothing)', pulled > 0.1, `${(pulled * 100).toFixed(1)}cm closer`);
+  });
+
+  group('Clap ignores a degenerate (zero-size) hand', () => {
+    // handSpan returns 0 when a hand's palm length is 0, which read as "hands together and
+    // closing infinitely fast" and fired a reset out of nothing (BUGS #15).
+    const flat = (x) => ({ gesture: 'Open_Palm', handedness: 'Right', landmarks: Array.from({ length: 21 }, () => ({ x, y: 0.5, z: 0 })), pinch: { pinching: false } });
+    const m = createManipulator(object, camera);
+    m.configure({ channels: ['clap'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    let t = 1000;
+    for (let i = 0; i < 5; i++) { m.update([hand(0.2, 0.5, 0, 'open'), hand(0.8, 0.5, 0, 'open')], 1.78, t); t += 33; }
+    object.scale.set(1.3, 1.3, 1.3);
+    m.update([flat(0.2), flat(0.8)], 1.78, t);
+    check('a frame of zero-size hands does not reset the model', object.scale.x, 1.3, 0.001);
+    m.reset();
+  });
+
+  const om = await import(`./platform/objectmode.js${V}`);
+  group('Platform object mode — wheel steps, eased drag, exact history', () => {
+    const W = { deltaMode: 0, deltaX: 0 };
+    check('a 100px wheel notch reads 100px', om.wheelPixels({ ...W, deltaY: 100 }), 100);
+    check('a line-mode notch (Firefox, 3 lines) reads 120px', om.wheelPixels({ ...W, deltaMode: 1, deltaY: 3 }), 120);
+    check('Shift+wheel on macOS (deltaX only) is read', om.wheelPixels({ ...W, deltaY: 0, deltaX: -100 }), -100);
+    check('one burst event is capped at two notches', om.wheelPixels({ ...W, deltaY: 1000 }), 200);
+
+    const canvas = document.createElement('canvas');
+    canvas.style.cssText = 'position:fixed;left:0;top:0;width:400px;height:300px;opacity:0;pointer-events:none';
+    document.body.appendChild(canvas);
+    const cam = new THREE.PerspectiveCamera(50, 400 / 300, 0.01, 100);
+    cam.position.set(0, 2, 3);
+    cam.lookAt(0, 0, 0);
+    cam.updateMatrixWorld(true);
+    const scene = new THREE.Scene();
+    const root = new THREE.Group();
+    scene.add(root);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshBasicMaterial());
+    mesh.userData.partId = '1.1';
+    mesh.userData.itemId = 1;
+    root.add(mesh);
+    scene.updateMatrixWorld(true);
+    const edits = [];
+    const controls = { enabled: true };
+    const mode = om.createObjectMode({ camera: cam, canvas, controls, materialFor: () => mesh.material, edits, onChange: null });
+    mode.addParts([{ id: '1.1', mesh }]);
+    mode.addItem(1, root);
+    mode.setMode('object');
+    const rect = canvas.getBoundingClientRect();
+    const screenOf = (v) => { const p = v.clone().project(cam); return { x: rect.left + (p.x + 1) / 2 * rect.width, y: rect.top + (1 - p.y) / 2 * rect.height }; };
+    const fire = (type, x, y) => canvas.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, button: 0, pointerId: 1, bubbles: true }));
+
+    const before = om.snapshot(mesh);
+    const c = screenOf(new THREE.Vector3(0, 0, 0));
+    fire('pointerdown', c.x, c.y);
+    checkTrue('pressing on the part starts a drag', mode.dragging, `dragging=${mode.dragging}`);
+    let now = 5000;
+    for (let i = 1; i <= 6; i++) { fire('pointermove', c.x + 10 * i, c.y + 4 * i); mode.tick(now); now += 16.7; }
+    const eased = mesh.position.x;
+    fire('pointerup', c.x + 60, c.y + 24);
+    // Where the cursor ray actually meets the drag plane, computed independently.
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(new THREE.Vector2(((c.x + 60 - rect.left) / rect.width) * 2 - 1, -((c.y + 24 - rect.top) / rect.height) * 2 + 1), cam);
+    const hitEnd = new THREE.Vector3();
+    rc.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hitEnd);
+    rc.setFromCamera(new THREE.Vector2(((c.x - rect.left) / rect.width) * 2 - 1, -((c.y - rect.top) / rect.height) * 2 + 1), cam);
+    const hitStart = new THREE.Vector3();
+    rc.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hitStart);
+    const want = hitEnd.clone().sub(hitStart);
+    checkTrue('mid-drag the part eases toward the cursor (not yet all the way)', eased > 0 && eased < want.x,
+      `${(eased * 100).toFixed(1)}cm of ${(want.x * 100).toFixed(1)}cm`);
+    checkTrue('release lands exactly under the cursor', Math.abs(mesh.position.x - want.x) < 1e-9 && Math.abs(mesh.position.z - want.z) < 1e-9,
+      `off by ${Math.hypot(mesh.position.x - want.x, mesh.position.z - want.z).toExponential(1)}`);
+    checkTrue('one move edit is recorded with the true drop point', edits.length === 1 && edits[0].op === 'move' && JSON.stringify(edits[0].after) === JSON.stringify(om.snapshot(mesh)),
+      `${edits.length} edit(s), op ${edits[0]?.op}`);
+    checkTrue('controls are re-enabled after the drag', controls.enabled, '');
+
+    // Wheel: two notches of Shift+wheel coalesce into one rotate edit of exactly 15°.
+    mode.select('1.1');
+    const afterMove = om.snapshot(mesh);
+    for (let i = 0; i < 2; i++) canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, deltaMode: 0, shiftKey: true, cancelable: true }));
+    check('two Shift+wheel notches = one rotate edit', edits.length, 2);
+    check('…of exactly 15°', (edits[1].dy * 180) / Math.PI, 15, 1e-9);
+    canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, deltaMode: 0, altKey: true, cancelable: true }));
+    check('one Alt+wheel notch scales ×1.051', edits[2].factor, Math.exp(0.05), 1e-9);
+    const end = om.snapshot(mesh);
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    mode.replayTo(0);
+    checkTrue('replayTo(0) restores the loaded state bit-exactly', same(om.snapshot(mesh), before), '');
+    mode.replayTo(edits[0].seq);
+    checkTrue('replayTo(first edit) reproduces the move bit-exactly', same(om.snapshot(mesh), afterMove), '');
+    mode.replayTo(Infinity);
+    checkTrue('replayTo(end) reproduces the final state bit-exactly', same(om.snapshot(mesh), end), '');
+    mode.undo(); mode.undo(); mode.undo();
+    checkTrue('undoing all three edits is bit-exact', same(om.snapshot(mesh), before) && edits.length === 0, `${edits.length} edits left`);
+    mode.setMode('scene');
+    canvas.remove();
+  });
+
   // ---- saved notes survive panel construction and a carousel swap ----------------------
   // Found by the 2026-09-29 lab run: with ANY saved note, createMeasurePanel threw a TDZ
   // ReferenceError (annotations restored notes and called back into renderNotes before the

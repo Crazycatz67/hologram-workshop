@@ -26,10 +26,34 @@ import * as THREE from 'three';
 // Undo applies `before`, so it is exact, and replayTo(seq) rebuilds any point of the
 // history from the states alone. That is what a later timelapse plays back.
 
-const ROTATE_PER_WHEEL_UNIT = 0.005; // radians per wheel delta unit: one notch (~100) is ~0.5 rad
-const SCALE_PER_WHEEL_UNIT = 0.001;  // exp(-delta * k): one notch (~100) is about x1.1
+// Wheel steps, per 100 px of normalised wheel delta (one mouse-wheel notch in Chrome/Safari).
+// Were 0.5 rad (29°) and ×1.1 per notch, too coarse to line anything up. A trackpad sends
+// the same total as many small deltas, so a two-finger swipe of one notch's length turns
+// exactly as far as one notch does.
+const ROTATE_PER_NOTCH = Math.PI / 24;  // 7.5° per notch
+const SCALE_PER_NOTCH = 0.05;           // ×1.05 per notch (exp(0.05) = 1.051)
+const NOTCH_PX = 100;
+const LINE_PX = 40;                     // deltaMode 1 (Firefox mouse wheels report lines)
+const PAGE_PX = 800;                    // deltaMode 2
+const MAX_WHEEL_PX = 2 * NOTCH_PX;      // one event never turns more than two notches' worth
 const COALESCE_MS = 600;             // wheel ticks within this window are one rotate/scale edit
 const DRAG_THRESHOLD_PX = 3;         // below this a press is a click, not a move
+// Drag follow: the part eases toward the cursor with this time constant, applied once per
+// display frame from the newest pointer position. Trackpads and high-DPI mice deliver
+// pointermoves unevenly (0, 1 or 3 per frame), which made the dragged part step unevenly;
+// 25 ms evens that out without a visible lag, and release always lands exactly on the cursor.
+const DRAG_TAU_S = 0.025;
+// A drag ray within this angle (sin) of the horizontal drag plane is ignored: near the
+// horizon the plane hit runs off toward infinity and one pixel flung the part metres away.
+const MIN_RAY_PLANE_SIN = Math.sin((3 * Math.PI) / 180);
+
+// Wheel delta in pixels, whatever unit the browser reported it in.
+export function wheelPixels(e) {
+  const k = e.deltaMode === 1 ? LINE_PX : e.deltaMode === 2 ? PAGE_PX : 1;
+  // macOS turns Shift+wheel into a horizontal scroll, so take whichever axis carries it.
+  const d = (Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX) * k;
+  return Math.max(-MAX_WHEEL_PX, Math.min(MAX_WHEEL_PX, d || 0));
+}
 const SCALE_MIN = 0.05, SCALE_MAX = 20; // absolute scale limits, so a slip can't make a part vanish
 
 export const itemKey = (itemId) => `item:${itemId}`;
@@ -232,6 +256,8 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
     },
     endMove() {
       if (!drag) return;
+      // Finish any easing still in flight so the edit records where the cursor actually was.
+      if (drag.armed && drag.goal && (drag.goal.dx !== drag.dx || drag.goal.dz !== drag.dz)) api.moveBy(drag.goal.dx, drag.goal.dz);
       const { id, dx, dz, before } = drag;
       drag = null;
       controls.enabled = true;
@@ -418,8 +444,9 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
     get sessionStart() { return T0; },
 
     // Per frame: at most one raycast, however many pointermoves arrived.
-    tick() {
-      if (mode !== 'object' || drag || !pendingMove) return;
+    tick(now = performance.now()) {
+      if (drag) { stepDrag(now); return; }
+      if (mode !== 'object' || !pendingMove) return;
       const { x, y } = pendingMove;
       pendingMove = null;
       api.hover(pick(x, y));
@@ -440,11 +467,38 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
     const centre = worldBox(target(moveId)).getCenter(new THREE.Vector3());
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -centre.y);
     const start = new THREE.Vector3();
+    // Grazing the drag plane (camera near the part's own height): the hit is unreliable and
+    // would fling the part, so leave this press to orbit instead of starting a drag.
+    if (Math.abs(raycaster.ray.direction.dot(plane.normal)) < MIN_RAY_PLANE_SIN) return;
     if (!raycaster.ray.intersectPlane(plane, start)) return;
     api.beginMove(moveId, plane, start);
-    drag.px = e.clientX; drag.py = e.clientY; drag.armed = false;
-    canvas.setPointerCapture(e.pointerId);
+    drag.px = e.clientX; drag.py = e.clientY; drag.armed = false; drag.goal = null; drag.lastStep = null;
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
   }, true);
+
+  // Where the cursor's ray meets the drag plane, as a world offset from the grab point, or
+  // null when the ray is (nearly) parallel to the plane or points away from it.
+  function dragOffsetAt(clientX, clientY) {
+    const r = canvas.getBoundingClientRect();
+    ndc.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+    if (Math.abs(raycaster.ray.direction.dot(drag.plane.normal)) < MIN_RAY_PLANE_SIN) return null;
+    const hit = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(drag.plane, hit)) return null;
+    return { dx: hit.x - drag.startHit.x, dz: hit.z - drag.startHit.z };
+  }
+
+  // Once per display frame while dragging: ease toward the newest cursor offset.
+  function stepDrag(now) {
+    if (!drag || !drag.armed || !drag.goal) return;
+    const dt = drag.lastStep == null ? 1 / 60 : Math.min(0.1, Math.max(0, (now - drag.lastStep) / 1000));
+    drag.lastStep = now;
+    const a = 1 - Math.exp(-dt / DRAG_TAU_S);
+    let dx = drag.dx + (drag.goal.dx - drag.dx) * a;
+    let dz = drag.dz + (drag.goal.dz - drag.dz) * a;
+    if (Math.hypot(drag.goal.dx - dx, drag.goal.dz - dz) < 1e-5) { dx = drag.goal.dx; dz = drag.goal.dz; }
+    if (dx !== drag.dx || dz !== drag.dz) api.moveBy(dx, dz);
+  }
 
   canvas.addEventListener('pointermove', (e) => {
     if (mode !== 'object') return;
@@ -454,30 +508,34 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
       if (Math.hypot(e.clientX - drag.px, e.clientY - drag.py) < DRAG_THRESHOLD_PX) return;
       drag.armed = true;
     }
-    const r = canvas.getBoundingClientRect();
-    ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
-    raycaster.setFromCamera(ndc, camera);
-    const hit = new THREE.Vector3();
-    if (raycaster.ray.intersectPlane(drag.plane, hit)) {
-      api.moveBy(hit.x - drag.startHit.x, hit.z - drag.startHit.z);
-    }
+    const off = dragOffsetAt(e.clientX, e.clientY);
+    if (off) drag.goal = off;
   });
 
-  const release = () => api.endMove();
-  canvas.addEventListener('pointerup', release);
-  canvas.addEventListener('pointercancel', release);
+  // Release lands exactly where the cursor is (not wherever the easing had got to), so the
+  // recorded edit is the true drop point.
+  canvas.addEventListener('pointerup', (e) => {
+    if (drag?.armed) {
+      const off = dragOffsetAt(e.clientX, e.clientY);
+      if (off) drag.goal = off;
+    }
+    api.endMove();
+  });
+  // A cancelled pointer has no trustworthy position: keep the last one seen.
+  canvas.addEventListener('pointercancel', () => api.endMove());
   canvas.addEventListener('pointerleave', () => { pendingMove = null; if (!drag) api.hover(null); });
 
-  // Shift+wheel rotates the selection, Alt/Option+wheel scales it. macOS turns Shift+wheel
-  // into a horizontal scroll (deltaX), so read whichever axis carries the motion. Capture +
-  // stop so it never zooms the camera.
+  // Shift+wheel rotates the selection, Alt/Option+wheel scales it. Deltas are normalised to
+  // pixels (wheelPixels) so wheels, trackpads and line-mode browsers turn the same amount for
+  // the same gesture. Capture + stop so it never zooms the camera.
   canvas.addEventListener('wheel', (e) => {
     if (mode !== 'object' || selectedId == null || !(e.shiftKey || e.altKey)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    const d = e.deltaY || e.deltaX;
-    if (e.shiftKey) api.rotateSelected(d * ROTATE_PER_WHEEL_UNIT);
-    else api.scaleSelected(Math.exp(-d * SCALE_PER_WHEEL_UNIT), { coalesce: true });
+    const notches = wheelPixels(e) / NOTCH_PX;
+    if (!notches) return;
+    if (e.shiftKey) api.rotateSelected(notches * ROTATE_PER_NOTCH);
+    else api.scaleSelected(Math.exp(-notches * SCALE_PER_NOTCH), { coalesce: true });
   }, { capture: true, passive: false });
 
   window.addEventListener('keydown', (e) => {

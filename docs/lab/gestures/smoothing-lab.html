@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Smoothing Lab</title>
+  <style>
+    html, body { margin: 0; background: #05070a; color: #c9dcec; }
+    body { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 16px; }
+    #status { color: #4fd1ff; margin-bottom: 12px; }
+    pre { white-space: pre-wrap; }
+  </style>
+  <script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.161.0/build/three.module.js" } }
+  </script>
+</head>
+<body>
+  <div id="status">running… (synthetic hands, no camera; before = ./baseline/, after = root modules)</div>
+  <pre id="out"></pre>
+  <script type="module">
+    const V = `?v=${Date.now()}`;
+    const load = async (dir, name) => {
+      const man = await import(`${dir}manipulator.js${V}`);
+      const g = await import(`${dir}gestures.js${V}`);
+      const s = await import(`${dir}smoothLandmarks.js${V}`);
+      return { name, createManipulator: man.createManipulator, pinch: g.pinch, isFistLike: g.isFistLike,
+        smooth: (h, t) => s.smoothHandLandmarks(h, t), resetSmoothing: s.resetLandmarkSmoothing };
+    };
+    try {
+      const { runMetrics } = await import(`./metrics.js${V}`);
+      const which = new URLSearchParams(location.search).get('which') ?? 'before,after';
+      const res = {};
+      if (which.includes('before')) res.before = runMetrics(await load('./baseline/', 'before'));
+      if (which.includes('after')) res.after = runMetrics(await load('../../../', 'after'));
+      window.__smoothingReport = res;
+      // Flat before | after table (also window.__smoothingTable for the gesture-tester).
+      const flat = (o, p = '', acc = {}) => {
+        for (const [k, v] of Object.entries(o ?? {})) {
+          if (k === 'name') continue;
+          if (v && typeof v === 'object' && !Array.isArray(v)) {
+            if (p.startsWith('drift')) acc[`${p}${k}`] = `${v.cm}cm ${v.deg}° scale ${v.scalePct}% stretch ${v.stretchPct}%`;
+            else flat(v, `${p}${k} · `, acc);
+          } else acc[`${p}${k}`] = v;
+        }
+        return acc;
+      };
+      const B = flat(res.before), A = flat(res.after);
+      const rows = [...new Set([...Object.keys(B), ...Object.keys(A)])].map((k) => `| ${k} | ${B[k] ?? ''} | ${A[k] ?? ''} |`);
+      window.__smoothingTable = ['| metric | before | after |', '|---|---|---|', ...rows].join('\n');
+      document.getElementById('out').textContent = window.__smoothingTable;
+      document.getElementById('status').textContent = 'done';
+    } catch (err) {
+      document.getElementById('status').textContent = 'lab crashed: ' + err;
+      console.error(err);
+    }
+  </script>
+</body>
+</html>

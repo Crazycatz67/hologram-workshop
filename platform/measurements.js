@@ -531,15 +531,19 @@ export function createMeasurements({ mount, toggleBtn, objectMode, getItems }) {
       if (rec.kind === 'part' ? now - rec.measuredAt >= PART_THROTTLE_MS : now - rec.changedAt >= WHOLE_SETTLE_MS) measure(rec);
     }
   }
-  let lastVis = '';
+  let lastVis = null;
   function tick() {
     // A new part list (a re-split) rebuilds that item's rows.
     for (const sec of sections.values()) {
       if (sec.item.parts !== sec.partsRef || sec.item.parts.length !== sec.partsLen) buildRows(sec);
     }
     flush(false);
-    // Visibility only changes the tags; recheck it cheaply.
-    const vis = [...recs.values()].map((r) => (r.kind === 'item' ? r.item.root.visible : shown(r.part.mesh)) ? 1 : 0).join('');
+    // Visibility only changes the tags; recheck it cheaply -- a rolling hash instead of
+    // building an array and a string every frame (this runs at display rate).
+    let vis = recs.size;
+    for (const r of recs.values()) {
+      vis = (vis * 31 + ((r.kind === 'item' ? r.item.root.visible : shown(r.part.mesh)) ? 1 : 2)) | 0;
+    }
     if (vis !== lastVis) { lastVis = vis; for (const r of recs.values()) if (r.current || r.row) render(r); }
   }
 

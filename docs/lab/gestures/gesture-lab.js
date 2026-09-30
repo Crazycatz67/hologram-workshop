@@ -18,9 +18,12 @@
 import * as THREE from 'three';
 
 const V = `?v=${Date.now()}`;
-const { createManipulator, CHANNELS } = await import(`../../../manipulator.js${V}`);
-const { pinch, isFistLike } = await import(`../../../gestures.js${V}`);
-const { smoothHandLandmarks, resetLandmarkSmoothing } = await import(`../../../smoothLandmarks.js${V}`);
+// ?code=baseline runs the frozen pre-2026-09-29-rewrite copies in ./baseline/ instead of the
+// live root modules, so a before/after report pair comes from the same harness.
+const CODE = new URLSearchParams(location.search).get('code') === 'baseline' ? './baseline/' : '../../../';
+const { createManipulator, CHANNELS } = await import(`${CODE}manipulator.js${V}`);
+const { pinch, isFistLike } = await import(`${CODE}gestures.js${V}`);
+const { smoothHandLandmarks, resetLandmarkSmoothing } = await import(`${CODE}smoothLandmarks.js${V}`);
 
 const ASPECT = 1.78;
 
@@ -99,7 +102,7 @@ function runTrial({
     // glitch(i) -> true turns hand 0 into a pinch shape for this one frame, SAME position.
     const specs = motion(u).map((s, k) => (k === 0 && glitch && glitch(i) ? { ...s, shape: 'pinch' } : s));
     const hands = specs.map((s) => makeHand(s, jitter));
-    if (smoothing) smoothHandLandmarks(hands);
+    if (smoothing) smoothHandLandmarks(hands, t);
     for (const h of hands) {
       h.pinch = pinch(h.landmarks, ASPECT, { gesture: h.gesture });
       h.fistLike = isFistLike(h.gesture, h.landmarks, ASPECT);
@@ -107,6 +110,8 @@ function runTrial({
     const before = object.position.lengthSq() !== 0 || object.scale.x !== 1; // snap-to-home = clap
     const mode = m.update(hands, ASPECT, t);
     if (before && object.position.lengthSq() === 0 && object.scale.x === 1 && object.scale.y === 1) clapFired = true;
+    // Display-rate follow steps between camera frames, the way hologram.js calls tick().
+    for (let d = 1000 / 60; d < step - 1e-6; d += 1000 / 60) m.tick?.(t + d);
     if (motionT !== null) {
       modeFrames[mode] = (modeFrames[mode] || 0) + 1;
       if (mode !== 'idle' && firstActiveMs === null) firstActiveMs = motionT;
@@ -205,7 +210,7 @@ const NULLS = {
 
 // ---- experiments ----------------------------------------------------------------------
 const only = new URLSearchParams(location.search).get('only')?.split(',') ?? Object.keys(MOTIONS);
-const report = { generated: new Date().toISOString(), synthetic: true, aspect: ASPECT, gestures: {}, nulls: {}, jitter: {}, notes: [] };
+const report = { generated: new Date().toISOString(), code: CODE === './baseline/' ? 'baseline (before 2026-09-29 smoothing rewrite)' : 'live root modules', synthetic: true, aspect: ASPECT, gestures: {}, nulls: {}, jitter: {}, notes: [] };
 
 for (const name of Object.keys(MOTIONS).filter((g) => only.includes(g))) {
   const G = MOTIONS[name];
@@ -287,7 +292,7 @@ for (const jit of [0.002, 0.004, 0.008, 0.012]) {
 const yes = (b) => (b ? 'yes' : '**no**');
 const md = [];
 md.push('# Gesture lab report (synthetic)', '');
-md.push(`Generated ${report.generated} by \`docs/lab/gestures/gesture-lab.html\`. Synthetic hands through the shipped pipeline (smoothLandmarks → pinch/isFistLike → manipulator.update), aspect ${ASPECT}, triggerFrames 3, sensitivity 1. **Not a webcam** — see the gesture-tester skill.`, '');
+md.push(`Code: **${report.code}**. Generated ${report.generated} by \`docs/lab/gestures/gesture-lab.html\`. Synthetic hands through the shipped pipeline (smoothLandmarks → pinch/isFistLike → manipulator.update), aspect ${ASPECT}, triggerFrames 3, sensitivity 1. **Not a webcam** — see the gesture-tester skill.`, '');
 md.push('"Fires" = visible effect: move >1cm lateral, push >1cm depth, spin/tilt >2°, scale >3% uniform, explode >3% stretch, clap = exact reset.', '');
 md.push('## Summary', '', '| gesture | canonical motion | isolated | all armed: also fired (bleed) | slowest duration that fires | smallest amplitude that fires | fps 10→60 |', '|---|---|---|---|---|---|---|');
 for (const [name, g] of Object.entries(report.gestures)) {
