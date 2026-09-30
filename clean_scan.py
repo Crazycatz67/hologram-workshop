@@ -290,7 +290,11 @@ def find_symmetry_plane(v, rng):
                     best = (theta, float(offset), s)
         return best
 
-    proj_range = lambda normal: np.linspace((v @ normal).min() + 0.1, (v @ normal).max() - 0.1, 30)
+    # Offsets at most 1 cm apart. A fixed 30 steps was fine on a chair but 6 cm apart on a
+    # 2 m sofa, coarser than the 2 cm voxel tolerance, so the true plane was skipped (BUGS.md #22).
+    def proj_range(normal):
+        lo, hi = (v @ normal).min() + 0.1, (v @ normal).max() - 0.1
+        return np.linspace(lo, hi, max(30, int(abs(hi - lo) / 0.01) + 1))
     theta, offset, overlap = search(np.linspace(0, np.pi, 46, endpoint=False), proj_range)
 
     # refine locally around the coarse winner

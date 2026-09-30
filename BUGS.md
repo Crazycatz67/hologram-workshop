@@ -342,7 +342,7 @@ synthetic 2.1 m sofa (`completion/truths.py`).
 
 ## 22. [B] Symmetry search misses the mirror plane on objects over ~1 m (clean_scan.py)
 
-**Status: OPEN** (2026-09-30). Found by Debbie on the synthetic sofa; the fix is in `clean_scan.py`,
+**Status: FIXED (verified offline)** (2026-09-30, owner approved). Offsets are now at most 1 cm apart (`clean_scan.py` `find_symmetry_plane`). Sofa: 61.5° / 56.4% (wrong plane, mirroring refused) → **152.6° / 76.0%** (true plane, mirroring on), 2.5 → 12.6 s. Chair: 164.3° both before and after (99.8% → 99.7%, sampling noise), 2.5 → 3.7 s. Benchmark `complete` after the fix: chair unchanged (98/99/100%); sofa underside 24%/21% real (was 24/13), wall 68%/33% (was 74/35), holes 100%/22% (was 96/12). The plane is right now, but mirroring is not the sofa's bottleneck: slab_fill's 8 cm probe (#23) and Poisson (#24) are. The angle grid (3.9°) was not changed; 76% is still short of the 92% the exact plane scores.
 which is shared with v1 and was not in her assignment.
 - **Symptom:** a perfectly mirror-symmetric 2.1 m sofa scores 56.4% overlap (trust threshold
   60%) at 61.5° — the wrong (front/back) plane — so `mirror_gaps` refuses to mirror. The true
