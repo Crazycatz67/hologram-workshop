@@ -291,3 +291,19 @@ test.js: "Platform object mode — wheel steps, eased drag, exact history" (repl
 end) and full undo are bit-exact). Also checked on platform/index.html with the sample loaded:
 3 Shift+wheel notches → one 22.5° edit, one Alt notch → ×1.0513, undo restores bit-exactly.
 
+
+## 19. [A-v1] measure.js ignored part transforms — multi-part models measured wrong
+
+**Status: FIXED (verified offline)** (2026-09-29). Found when the gesture demo switched
+to `assets/chair/chair_detail.glb`, which has 8 named parts. Each part sits at its own node
+offset, with its geometry centred on its own origin (trimesh GLB output). `measure.js` read
+raw vertex positions, so all eight parts were measured stacked at one spot. The panel said
+**51.3 cm tall** for a 79.6 cm chair, and volume and seat height were also wrong. Any
+multi-part GLB from any tool would hit this. Fix: `partMatrix()` / `readVertex()` place
+every part's vertices by its transform relative to the measured object. The object's own
+transform stays excluded, so scaling the hologram still doesn't change the real size. The
+first version of the fix froze the page because its variable `e` clashed with
+`horizontalSurfaces`'s own `e` (a temporal-dead-zone error inside the panel build); it was
+renamed. Now: detailed chair 57.7 × 50.3 × 79.6 cm, 16.1 L, seat 44.8 cm (the clean mesh
+gives 57.7 × 50.3 × 79.5 cm and 15.98 L). There are 3 new regression checks in test.html
+(119/0).

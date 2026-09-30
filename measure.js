@@ -20,6 +20,29 @@
 
 const RAD = Math.PI / 180;
 
+// A part's placement RELATIVE TO THE MEASURED OBJECT, as a column-major 4x4 array, or null
+// when it is the identity (a single mesh, every existing scan). Multi-part GLBs (e.g.
+// bake_parts.py / trimesh output) put each part at its own node offset with its geometry
+// centred on its own origin; reading raw vertices ignored that and measured all eight chair
+// parts stacked at one spot (51 cm tall instead of 80, 2026-09-29). The object's OWN
+// transform stays excluded, as before: scaling the hologram must not change the real size.
+function partMatrix(object, child) {
+  if (child === object) return null;
+  const e = object.matrixWorld.clone().invert().multiply(child.matrixWorld).elements;
+  const id = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  return e.every((v, i) => Math.abs(v - id[i]) < 1e-9) ? null : e;
+}
+
+// Vertex i of `position`, placed by `e` (partMatrix), written into out[0..2].
+function readVertex(position, i, e, out) {
+  const x = position.getX(i), y = position.getY(i), z = position.getZ(i);
+  if (!e) { out[0] = x; out[1] = y; out[2] = z; return out; }
+  out[0] = e[0] * x + e[4] * y + e[8] * z + e[12];
+  out[1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+  out[2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+  return out;
+}
+
 function collectVertices(object) {
   const points = [];
   object.updateWorldMatrix(true, true);
@@ -27,9 +50,8 @@ function collectVertices(object) {
     if (!child.isMesh) return;
     const position = child.geometry?.getAttribute('position');
     if (!position) return;
-    for (let i = 0; i < position.count; i++) {
-      points.push([position.getX(i), position.getY(i), position.getZ(i)]);
-    }
+    const pm = partMatrix(object, child);
+    for (let i = 0; i < position.count; i++) points.push(readVertex(position, i, pm, [0, 0, 0]));
   });
   return points;
 }
@@ -149,6 +171,7 @@ function volumeAndArea(object) {
   const bx = [0, 0, 0];
   const cx = [0, 0, 0];
 
+  object.updateWorldMatrix(true, true);
   object.traverse((child) => {
     if (!child.isMesh) return;
     const geometry = child.geometry;
@@ -156,14 +179,15 @@ function volumeAndArea(object) {
     if (!position) return;
     const index = geometry.getIndex();
     const triangles = index ? index.count / 3 : position.count / 3;
+    const pm = partMatrix(object, child);
 
     for (let t = 0; t < triangles; t++) {
       const i0 = index ? index.getX(t * 3) : t * 3;
       const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
       const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
-      ax[0] = position.getX(i0); ax[1] = position.getY(i0); ax[2] = position.getZ(i0);
-      bx[0] = position.getX(i1); bx[1] = position.getY(i1); bx[2] = position.getZ(i1);
-      cx[0] = position.getX(i2); cx[1] = position.getY(i2); cx[2] = position.getZ(i2);
+      readVertex(position, i0, pm, ax);
+      readVertex(position, i1, pm, bx);
+      readVertex(position, i2, pm, cx);
 
       volume += (
         ax[0] * (bx[1] * cx[2] - bx[2] * cx[1]) -
@@ -318,20 +342,23 @@ export function horizontalSurfaces(object) {
     minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity
   }));
 
+  object.updateWorldMatrix(true, true);
   object.traverse((child) => {
     if (!child.isMesh) return;
     const position = child.geometry?.getAttribute('position');
     if (!position) return;
     const index = child.geometry.getIndex();
     const count = index ? index.count / 3 : position.count / 3;
+    const pm = partMatrix(object, child);
+    const va = [0, 0, 0], vb = [0, 0, 0], vc = [0, 0, 0];
 
     for (let t = 0; t < count; t++) {
       const i0 = index ? index.getX(t * 3) : t * 3;
       const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
       const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
-      const ax = position.getX(i0), ay = position.getY(i0), az = position.getZ(i0);
-      const bx = position.getX(i1), by = position.getY(i1), bz = position.getZ(i1);
-      const cx = position.getX(i2), cy = position.getY(i2), cz = position.getZ(i2);
+      const [ax, ay, az] = readVertex(position, i0, pm, va);
+      const [bx, by, bz] = readVertex(position, i1, pm, vb);
+      const [cx, cy, cz] = readVertex(position, i2, pm, vc);
 
       const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
       const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;

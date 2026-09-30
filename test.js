@@ -138,6 +138,21 @@ async function main() {
 
   const IDENT = new THREE.Quaternion();
 
+  // Regression for the multi-part GLB bug (2026-09-29): measure.js read raw vertices and
+  // ignored each part's node transform, so chair_detail.glb's eight parts were measured
+  // stacked at one spot (51 cm tall instead of 80). Two unit boxes, one 2 m above the other.
+  group('Measurement honours part transforms (multi-part models)', () => {
+    const g = new THREE.Group();
+    const a = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)); a.position.set(0, 0.5, 0);
+    const b = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)); b.position.set(0, 2.5, 0);
+    g.add(a, b);
+    const d = measure.measureObject(g);
+    check('height spans both parts', d.height, 3, 1e-9);
+    check('volume sums both parts', d.volume, 2, 1e-9);
+    g.scale.setScalar(2);   // the object's OWN transform must still be ignored
+    check('scaling the whole object does not change its real size', measure.measureObject(g).height, 3, 1e-9);
+  });
+
   group('Gesture isolation — the practice-mode guarantee', () => {
     const m = createManipulator(object, camera);
     const cfg = (channels) => m.configure({ channels, sensitivity: 1, momentum: false, triggerFrames: 3 });

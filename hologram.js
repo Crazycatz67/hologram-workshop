@@ -127,7 +127,10 @@ async function loadModelById(id) {
     // reference to every mesh (see the traverse below) and has to survive to serve the next
     // model too.
     oldObject.traverse((child) => {
-      if (child.isMesh) child.geometry.dispose();
+      if (!child.isMesh) return;
+      child.geometry.dispose();
+      // Per-mesh colour variants (see below) are this model's own; the shared one survives.
+      if (child.material !== hologramMaterial) child.material.dispose();
     });
   }
   // createManipulator has no rebind -- it closes over one object for its whole lifetime -- so
@@ -135,8 +138,15 @@ async function loadModelById(id) {
   manipulator = null;
   window.hologram.manipulator = null;
 
+  // Meshes that carry real colour (a texture or vertex colours, e.g. the detailed chair)
+  // get a variant of the shared material: same look uniforms, plus their own colour source,
+  // so the Realism slider can blend the real scan back in. Everything else shares one.
   object.traverse((child) => {
-    if (child.isMesh) child.material = hologramMaterial;
+    if (!child.isMesh) return;
+    const src = child.material;
+    const map = src?.map ?? null;
+    const vertexColors = !!(src?.vertexColors && child.geometry.attributes.color);
+    child.material = map || vertexColors ? hologramMaterial.variant({ map, vertexColors }) : hologramMaterial;
   });
   // Smooth the shading normals on rough scans (stops rim sparkle; no vertex moves).
   prepareHologram(object);
@@ -481,6 +491,22 @@ const sensValEl = document.getElementById('sensVal');
 const trigEl = document.getElementById('trig');
 const trigValEl = document.getElementById('trigVal');
 const momentumEl = document.getElementById('momentum');
+
+// Realism: 0 = pure hologram, 1 = the scan's real colours (see HolographicMaterial). Shared
+// uniform, so every mesh and variant follows the one slider. Remembered per browser.
+const realismEl = document.getElementById('realism');
+if (realismEl) {
+  const setRealism = (v) => {
+    hologramMaterial.uniforms.realism.value = v;
+    document.getElementById('realismVal').textContent = `${Math.round(v * 100)}%`;
+    try { localStorage.setItem('hologram-demo-realism', String(v)); } catch { /* private mode */ }
+  };
+  let saved = 0;
+  try { saved = parseFloat(localStorage.getItem('hologram-demo-realism')) || 0; } catch { /* default */ }
+  realismEl.value = saved;
+  setRealism(saved);
+  realismEl.addEventListener('input', () => setRealism(+realismEl.value));
+}
 
 function applyTuning() {
   const sensitivity = Number(sensEl.value);
