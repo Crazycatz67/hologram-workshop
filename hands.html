@@ -82,6 +82,13 @@
   <pre id="readout"></pre>
 
   <script type="module">
+    // Shadow site (docs/testing/README.md): only on this machine, record this session (numbers and
+    // events only, never camera frames). The public site never downloads sessionrec.js.
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      import(`./sessionrec.js?v=${Date.now()}`).then((m) => m.startSession({ name: 'hands' })).catch(() => {});
+    }
+  </script>
+  <script type="module">
     // Cache-bust every module on load. This page may itself be served from cache, but the
     // stamp is computed at runtime, so the code it pulls in is always current — which is
     // what matters when the machine that tests this is not the machine that edits it.

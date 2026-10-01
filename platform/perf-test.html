@@ -28,5 +28,31 @@
   <table id="out"></table>
 </div>
 <div id="stage"></div>
-<script type="module" src="./perf-test.js"></script>
+<script type="module">
+  // Test recorder: saves this run to docs/testing/runs/ on localhost (docs/testing/README.md).
+  // If it can't load, the benchmark runs exactly as before. Each scan gets its own page id so
+  // timings only ever compare against the same scan.
+  const q = new URLSearchParams(location.search);
+  const scan = q.get('scan');
+  const page = scan ? `perf-test-${scan.split('/').pop().replace(/\.[^.]*$/, '')}` : 'perf-test';
+  const rec = await import('../testrec.js').then((m) => m.startRun({ page, tolerances: { '*': 0.5 }, timingSensitive: true,
+    settings: { scan, n: q.get('n'), pr: q.get('pr'), modes: q.get('modes'), flash: q.get('flash') } })).catch(() => null);
+  import('./perf-test.js').then(() => {
+    const r = window.perfResult;
+    if (!rec) return;
+    if (!r || r.error) { rec.flag('crashed', r?.error ?? 'no perfResult'); return rec.end('crashed'); }
+    for (const row of r.rows ?? []) {
+      for (const k of ['median', 'p95', 'gpuMedian', 'triangles', 'calls']) {
+        if (typeof row[k] === 'number') rec.metric(`${row.mode}@pr${row.pr}.${k}`, row[k]);
+      }
+    }
+    rec.metric('parts', r.parts);
+    for (const f of r.flash ?? []) {
+      rec.result(`photosafe, LOD ${f.toggleEvery ? `forced on/off every ${f.toggleEvery} frames` : 'normal'}`, f.flashesPerSecond, { pass: f.verdict === 'PASS' });
+    }
+    rec.result('LOD vs full, same frame', r.swap ?? null);
+    rec.attach('perfResult', r);
+    rec.end();
+  }).catch((e) => { console.error(e); rec?.end('crashed'); });
+</script>
 </body></html>

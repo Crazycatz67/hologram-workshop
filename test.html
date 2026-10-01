@@ -46,7 +46,14 @@
 
   <script type="module">
     const stamp = Date.now();
-    import(`./test.js?v=${stamp}`);
+    // Test recorder: saves this run to docs/testing/runs/ on localhost (docs/testing/README.md).
+    // If it can't load, the suite runs exactly as before.
+    const rec = await import('./testrec.js').then((m) => m.startRun({ page: 'test' })).catch(() => null);
+    import(`./test.js?v=${stamp}`).then((m) => m.finished).then((out) => {
+      if (!out) return rec?.end('crashed');
+      for (const g of out.groups) for (const c of g.cases) rec?.result(`${g.name} › ${c.name}`, c.detail ?? '', { pass: !!c.pass });
+      rec?.end();
+    }).catch((err) => { console.error(err); rec?.end('crashed'); });
   </script>
 </body>
 </html>

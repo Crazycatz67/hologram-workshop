@@ -16,9 +16,16 @@
   <div id="status">running… (scripted frames, no camera)</div>
   <pre id="out"></pre>
   <script type="module">
-    import(`./holdgate-lab.js?v=${Date.now()}`).catch((err) => {
+    // Test recorder: saves this run to docs/testing/runs/ on localhost (docs/testing/README.md).
+    // If it can't load, the lab runs exactly as before.
+    const rec = await import('../../../testrec.js').then((m) => m.startRun({ page: 'holdgate-lab' })).catch(() => null);
+    import(`./holdgate-lab.js?v=${Date.now()}`).then(() => {
+      for (const r of window.__holdGateReport ?? []) rec?.result(r.name, r.detail, { pass: !!r.pass });
+      rec?.end();
+    }).catch((err) => {
       document.getElementById('status').textContent = 'lab crashed: ' + err;
       console.error(err);
+      rec?.end('crashed');
     });
   </script>
 </body>

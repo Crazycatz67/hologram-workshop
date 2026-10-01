@@ -24,6 +24,12 @@ import { splitMeshIntoParts } from './parts.js';
 const logEl = document.getElementById('log');
 const log = (s) => { logEl.textContent = s; };
 const which = new URLSearchParams(location.search).get('model') || 'obj';
+// Test recorder: saves this run to docs/testing/runs/ on localhost (docs/testing/README.md).
+// If it can't load, the test runs exactly as before. obj and glb split different meshes, so
+// each has its own page id; a change in part count is always flagged.
+const rec = await import('../testrec.js')
+  .then((m) => m.startRun({ page: which === 'glb' ? 'parts-test-glb' : 'parts-test', tolerances: { parts: { abs: 0 }, ms: 1 } }))
+  .catch(() => null);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(devicePixelRatio);
@@ -133,7 +139,17 @@ async function run() {
   }
   log(text);
   window.partsResult = summary;
+  if (rec) {
+    rec.metric('parts', summary.parts);
+    rec.metric('ms', summary.ms);
+    if ('pass' in summary) {
+      rec.result('matches the Python reference', `${summary.parts} parts vs ${summary.reference.parts}`, { pass: summary.pass });
+      for (const r of summary.match) rec.result(`reference part ${r.ref}`, r, { pass: !!r.ok });
+    } else rec.result('parts', summary.parts);
+    rec.attach('summary', summary);
+    rec.end();
+  }
 }
-run().catch((e) => { log('ERROR ' + e.stack); console.error(e); window.partsResult = { error: String(e) }; });
+run().catch((e) => { log('ERROR ' + e.stack); console.error(e); window.partsResult = { error: String(e) }; rec?.end('crashed'); });
 </script>
 </body></html>

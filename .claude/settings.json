@@ -5,9 +5,20 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd /Users/farhanamin/Developer/hologram-workshop && s=$(git status --porcelain 2>/dev/null); if [ -n \"$s\" ]; then git add -A && git commit -m 'WIP checkpoint (auto)' --quiet; fi; exit 0",
-            "statusMessage": "Checkpointing uncommitted work...",
-            "timeout": 15
+            "command": "/Users/farhanamin/Developer/hologram-workshop/.claude/hooks/backup.sh",
+            "statusMessage": "Backing up uncommitted work (local, no commit)...",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/farhanamin/Developer/hologram-workshop/.claude/hooks/session-brief.sh",
+            "timeout": 10
           }
         ]
       }

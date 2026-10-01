@@ -19,6 +19,12 @@
   <pre id="out"></pre>
   <script type="module">
     const V = `?v=${Date.now()}`;
+    // Test recorder: saves this run to docs/testing/runs/ on localhost (docs/testing/README.md).
+    // If it can't load, the lab runs exactly as before. The lab is deterministic, so any number
+    // moving more than 1% means the pipeline changed (intended or not): flagged for a look.
+    const which0 = new URLSearchParams(location.search).get('which') ?? 'before,after';
+    const rec = await import('../../../testrec.js')
+      .then((m) => m.startRun({ page: 'smoothing-lab', settings: { which: which0 }, tolerances: { '*': 0.01 } })).catch(() => null);
     const load = async (dir, name) => {
       const man = await import(`${dir}manipulator.js${V}`);
       const g = await import(`${dir}gestures.js${V}`);
@@ -49,9 +55,23 @@
       window.__smoothingTable = ['| metric | before | after |', '|---|---|---|', ...rows].join('\n');
       document.getElementById('out').textContent = window.__smoothingTable;
       document.getElementById('status').textContent = 'done';
+      // Every number in the shipped ('after') pipeline is tracked run to run; 'before' is a
+      // frozen baseline copy, so it is attached but not tracked.
+      const nums = (o, p, out) => {
+        for (const [k, v] of Object.entries(o ?? {})) {
+          if (k === 'name') continue;
+          if (typeof v === 'number') out[`${p}${k}`] = v;
+          else if (v && typeof v === 'object' && !Array.isArray(v)) nums(v, `${p}${k}.`, out);
+        }
+        return out;
+      };
+      for (const [k, v] of Object.entries(nums(res.after, 'after.', {}))) rec?.metric(k, v);
+      rec?.attach('report', res);
+      rec?.end();
     } catch (err) {
       document.getElementById('status').textContent = 'lab crashed: ' + err;
       console.error(err);
+      rec?.end('crashed');
     }
   </script>
 </body>

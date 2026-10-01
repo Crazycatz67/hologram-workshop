@@ -19,9 +19,16 @@ The canvas shows each frame as it renders; the look is static-hatched and dim, n
 <div id="view"></div>
 </div>
 <script type="module">
-  import('./p5-test.js?v=' + Date.now()).catch((e) => {
+  // Test recorder: saves this run to docs/testing/runs/ on localhost (docs/testing/README.md).
+  // If it can't load, the test runs exactly as before.
+  const rec = await import('../testrec.js').then((m) => m.startRun({ page: 'p5-test' })).catch(() => null);
+  import('./p5-test.js?v=' + Date.now()).then(() => {
+    for (const r of window.p5Results?.results ?? []) rec?.result(r.name, r.detail ?? '', { pass: !!r.ok });
+    rec?.end();
+  }).catch((e) => {
     document.getElementById('out').textContent += '\nERROR ' + (e.stack || e);
     console.error(e);
+    rec?.end('crashed');
   });
 </script>
 </body></html>

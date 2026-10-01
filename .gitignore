@@ -19,3 +19,11 @@ completion/out/
 __pycache__/
 .DS_Store
 Thumbs.db
+
+# Test recorder runs (serve.py writes them; see docs/testing/README.md). Raw runs and
+# FLAGS.md are machine-local: they hold this browser/machine's details and churn on every
+# run. Timmy curates what matters into the committed docs/testing/LEDGER.md instead.
+docs/testing/runs/
+
+# Local crash-safe backups of uncommitted work (Stop hook, .claude/hooks/backup.sh)
+.backups/

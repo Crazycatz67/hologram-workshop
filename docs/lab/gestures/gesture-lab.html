@@ -23,9 +23,29 @@
   <div id="status">running… (synthetic hands, no camera)</div>
   <pre id="out"></pre>
   <script type="module">
-    import(`./gesture-lab.js?v=${Date.now()}`).catch((err) => {
+    // Test recorder: saves this run to docs/testing/runs/ on localhost (docs/testing/README.md).
+    // If it can't load, the lab runs exactly as before. ?only= runs are a different set of
+    // sweeps, so they get their own page id and never compare against the full run.
+    const only = new URLSearchParams(location.search).get('only');
+    const rec = await import('../../../testrec.js')
+      .then((m) => m.startRun({ page: only ? 'gesture-lab-only' : 'gesture-lab', settings: { only } })).catch(() => null);
+    import(`./gesture-lab.js?v=${Date.now()}`).then(() => {
+      const rep = window.__gestureReport;
+      if (rec && rep) {
+        for (const [name, g] of Object.entries(rep.gestures ?? {})) {
+          rec.result(`${name} fires isolated`, g.isolated?.magnitude ?? null, { pass: !!g.isolated?.fires });
+          rec.metric(`bleed.${name}`, g.bleed?.length ?? 0);
+        }
+        for (const [name, n] of Object.entries(rep.nulls ?? {})) {
+          rec.result(`no false fire: ${name}`, n.unexpected ?? [], { pass: !(n.unexpected ?? []).length });
+        }
+        rec.attach('report', rep);
+      }
+      rec?.end();
+    }).catch((err) => {
       document.getElementById('status').textContent = 'lab crashed: ' + err;
       console.error(err);
+      rec?.end('crashed');
     });
   </script>
 </body>

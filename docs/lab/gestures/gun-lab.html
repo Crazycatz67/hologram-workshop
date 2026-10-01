@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Finger-gun Lab</title>
+  <title>Pointer Lab</title>
   <style>
     html, body { margin: 0; background: #05070a; color: #c9dcec; }
     body { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 16px; }
@@ -41,22 +41,29 @@
     th { color: #9db4d0; font-weight: normal; }
     #verdict { margin-top: 10px; padding: 8px 10px; border: 1px solid #243444; max-width: 900px; line-height: 1.5; }
     #json { max-height: 240px; overflow: auto; background: rgba(0, 0, 0, 0.45); border: 1px solid #1a2633; padding: 8px; margin-top: 8px; }
+    h3 { font-size: 12px; color: #9db4d0; margin: 14px 0 4px; font-weight: normal; }
+    .snippet { background: rgba(0, 0, 0, 0.45); border: 1px solid #1a2633; padding: 8px; max-width: 900px; color: #dff6ff; }
     .pass { color: #9fe0b8; } .fail { color: #ff8a80; } .info { color: #e6c48a; }
     .scroll { max-width: 100%; overflow-x: auto; }
   </style>
 </head>
 <body>
-  <h1>Finger-gun lab: is a thumb drop steady enough to be a click?</h1>
-  <p>Measures how far the hand moves when the thumb drops (the proposed "click"), compared with a
-    one-hand pinch and with the hand's resting jitter. The decision rule is printed with the results.
-    One hand in view. About 2 minutes. Nothing here changes the hologram pages.</p>
+  <h1>Pointer lab: why does the pointer pose fail, which thresholds work, and does the other-hand pinch move the aim?</h1>
+  <p>The pointer ("finger gun") is index straight, middle/ring/pinky curled; the thumb does not matter.
+    The click is a pinch with the OTHER hand (decided 2026-10-01). The guided probe records four 5-second holds
+    (pointer side-on, pointer at the camera, open hand, fist), then five other-hand pinches while you aim.
+    About 1.5 minutes. "Calibrate only" runs just the four holds. Suggested thresholds can be applied live here
+    but are never saved to gunPose.js. Nothing here changes the hologram pages.</p>
   <div id="status">loading…</div>
 
   <div class="row">
     <button id="start">start camera</button>
     <button id="run" disabled>run guided probe</button>
+    <button id="calibrate" disabled>calibrate only</button>
     <button id="skip" disabled>skip step</button>
     <button id="copy" disabled>copy results JSON</button>
+    <button id="apply" disabled>apply suggested thresholds</button>
+    <button id="reset" disabled>use default thresholds</button>
     <span id="fps">— fps</span>
   </div>
 
@@ -73,8 +80,8 @@
     </div>
     <div id="live">
       <div class="row" style="margin-bottom: 8px">
-        <span class="badge" id="gunBadge">gun: —</span>
-        <span class="badge" id="thumbBadge">thumb: —</span>
+        <span class="badge" id="gunBadge">pointer: —</span>
+        <span class="badge" id="thrBadge">thresholds: gunPose.js defaults</span>
         <span class="badge" id="fistBadge">grab (isFistLike): —</span>
       </div>
       <pre id="readout">camera off</pre>
@@ -86,15 +93,45 @@
   <pre id="json" hidden></pre>
 
   <h2>Synthetic self-test (no camera)</h2>
-  <p>Constructed 3D hands fed through gunPose.js. These checks should move into test.js once it is free.</p>
+  <p>Constructed 3D hands fed through gunPose.js, plus the lab's drift/jitter, hand-assignment and calibration maths.
+    These checks should move into test.js once it is free.</p>
   <pre id="selftest">running…</pre>
 
   <script type="module">
-    import(`./gun-lab.js?v=${Date.now()}`).catch((err) => {
+    // Test recorder: saves runs to docs/testing/runs/ on localhost (docs/testing/README.md).
+    // Two records: the synthetic self-test on every load ('gun-lab'), and each live guided
+    // probe ('gun-lab-probe', numbers only: phase summaries, never video). If the recorder
+    // can't load, the lab runs exactly as before.
+    const testrec = await import('../../../testrec.js').catch(() => null);
+    const rec = testrec?.startRun({ page: 'gun-lab' });
+    let probe = null;
+    addEventListener('gunlab:run-start', (e) => {
+      probe?.end('superseded');
+      probe = testrec?.startRun({ page: 'gun-lab-probe', fpsFloor: 20, timingSensitive: true, timeoutMs: 0,
+        settings: { steps: e.detail.steps } });
+    });
+    addEventListener('gunlab:run-abort', (e) => { probe?.end(String(e.detail.why || 'aborted')); probe = null; });
+    addEventListener('gunlab:run-done', (e) => {
+      const r = e.detail.results;
+      if (probe && r) {
+        if (typeof r.fps === 'number') probe.metric('fps', r.fps);
+        probe.attach('results', { run: r.run, video: r.video, fps: r.fps, thresholdsUsed: r.thresholdsUsed,
+          phases: r.phases, calibration: r.calibration, verdict: r.verdict });
+      }
+      probe?.end();
+      probe = null;
+    });
+    import(`./gun-lab.js?v=${Date.now()}`).then(() => {
+      for (const r of window.__gunSelfTest?.rows ?? []) {
+        rec?.result(r.name, r.detail ?? null, typeof r.pass === 'boolean' ? { pass: r.pass } : {});
+      }
+      rec?.end();
+    }).catch((err) => {
       const s = document.getElementById('status');
       s.textContent = 'lab crashed: ' + err;
       s.classList.add('error');
       console.error(err);
+      rec?.end('crashed');
     });
   </script>
 </body>

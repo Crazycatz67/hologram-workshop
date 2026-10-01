@@ -31,7 +31,11 @@ renderer.setAnimationLoop(() => renderer.render(scene, cam));
 
 const log = document.getElementById('log');
 let cur = null;
+// Test recorder: one run per photo, saved to docs/testing/runs/ on localhost
+// (docs/testing/README.md). Numbers only: never the file name or the image.
+const testrec = await import('../testrec.js').catch(() => null);
 async function run(file) {
+  const rec = testrec?.startRun({ page: 'photo-test', timeoutMs: 0 });
   const lines = [];
   const p = (s) => { lines.push(s); log.textContent = lines.join('\n'); };
   const stage = {};
@@ -49,7 +53,14 @@ async function run(file) {
     p(`triangles: ${g.index.count / 3}  vertices: ${g.attributes.position.count}`);
     p(`size m: ${bb.x.toFixed(2)} x ${bb.y.toFixed(2)} x ${bb.z.toFixed(2)}  minY ${g.boundingBox.min.y.toFixed(3)}`);
     p(mesh.userData.sizeNote);
-  } catch (e) { p('ERROR: ' + e.message); console.error(e); }
+    if (rec) {
+      rec.record.settings = { device: mesh.userData.device };
+      for (const [k, v] of Object.entries({ modelMs: t.modelMs, depthMs: t.depthMs, meshMs: t.meshMs, triangles: g.index.count / 3,
+        vertices: g.attributes.position.count, sizeX: bb.x, sizeY: bb.y, sizeZ: bb.z, minY: g.boundingBox.min.y })) rec.metric(k, v);
+      rec.result('photo -> mesh', `${g.index.count / 3} triangles`, { pass: g.index.count > 0 });
+      rec.end();
+    }
+  } catch (e) { p('ERROR: ' + e.message); console.error(e); rec?.end('crashed'); }
 }
 window.runPhoto = run;
 document.getElementById('f').addEventListener('change', (e) => e.target.files[0] && run(e.target.files[0]));

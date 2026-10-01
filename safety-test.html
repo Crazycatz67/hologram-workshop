@@ -26,8 +26,16 @@
   <pre id="out">running…
 </pre>
   <script type="module">
-    import('./safety-test.js?v=' + Date.now()).catch((e) => {
+    // Test recorder: saves this run to docs/testing/runs/ on localhost (docs/testing/README.md).
+    // If it can't load, the test runs exactly as before.
+    const rec = await import('./testrec.js').then((m) => m.startRun({ page: 'safety-test' })).catch(() => null);
+    import('./safety-test.js?v=' + Date.now()).then(() => {
+      for (const r of window.safetyResults ?? []) rec?.result(r.label, r.flashesPerSecond, { pass: r.verdict === 'PASS' });
+      rec?.attach('results', window.safetyResults ?? []);
+      rec?.end();
+    }).catch((e) => {
       document.getElementById('out').textContent += 'ERROR ' + e.message + '\n';
+      rec?.end('crashed');
     });
   </script>
 </body>
