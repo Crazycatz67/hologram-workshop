@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex" />
+  <link rel="icon" href="data:," />
   <title>Hologram Workshop — Guided test (shadow site)</title>
   <link rel="stylesheet" href="theme.css" />
   <style>
@@ -45,12 +46,14 @@
       add a note if useful, then Next. Your answers are kept on this computer as you go, across pages and reloads.
       The page's own session recording carries on as usual; a Fail is flagged in it straight away.</p>
     <div class="bar">
-      <button id="startBtn">Start guided run</button>
+      <button id="tourBtn" title="Friendly walk-through for someone new to the project">Tester tour (~20 min)</button>
+      <button id="startBtn" class="ghost">Full dev checklist</button>
       <button id="endBtn" class="ghost" hidden>End run (hide the guide box)</button>
       <button id="resetBtn" class="ghost">Clear all answers</button>
       <span id="progress" class="muted"></span>
     </div>
-    <p class="muted">Kinds:
+    <p class="muted" id="modeNote"></p>
+    <p class="muted" id="kindsNote">Kinds:
       <span class="chip k-live">needs live</span> never confirmed with real hands or eyes ·
       <span class="chip k-known">known issue</span> say whether you still see it ·
       <span class="chip k-regress">regression check</span> worked before, check it still does ·
@@ -96,6 +99,7 @@
         return e;
       };
       const save = () => g.saveState(localStorage, state);
+      const modeNow = () => (state.mode === 'tour' ? 'tour' : 'dev');
       const verdictLabel = { pass: 'Pass', fail: 'Fail', unsure: 'Unsure' };
 
       // Start (or jump to) a step: mark the run active, put the cursor there, open its page.
@@ -103,42 +107,71 @@
         const step = g.stepById(id);
         state = { ...state, active: true, cursor: id, minimised: false, startedAt: state.startedAt || new Date().toISOString(), endedAt: null };
         save();
-        location.href = new URL(g.PAGES[step.page].url, location.href).href;
+        const target = g.PAGES[step.page];
+        const url = new URL(target.url, location.href).href;
+        // Pages without the guide box open in a new tab so this tab (with the guide box) stays put.
+        if (target.dock === false) { window.open(url, '_blank', 'noopener'); render(); } else location.href = url;
+      }
+
+      // Begin (or continue) a run in a mode. Tour: this page shows the guide box; steps open pages in tabs.
+      function begin(mode) {
+        if (modeNow() !== mode) state = g.setMode({ ...state, active: false }, mode);
+        const open = g.RUN_STEPS.find((s) => !state.results[s.id]) || g.RUN_STEPS[0];
+        const first = state.active ? state.cursor : open.id;
+        if (mode === 'tour') {
+          state = { ...state, active: true, cursor: first, minimised: false, startedAt: state.startedAt || new Date().toISOString(), endedAt: null };
+          save(); render(); mountDock();
+          const step = g.stepById(first);
+          if (step.page) go(first);
+        } else go(first);
+      }
+      async function mountDock() {
+        if (modeNow() !== 'tour' || !state.active || window.__testguide) return;
+        const m = await import(`./testguide.js?v=${Date.now()}`);
+        m.mountGuide({ page: null });
       }
 
       function render() {
+        const tour = modeNow() === 'tour';
         const c = g.counts(state);
         const firstOpen = g.RUN_STEPS.find((s) => !state.results[s.id]) || g.RUN_STEPS[0];
-        $('startBtn').textContent = state.active ? `Continue at ${state.cursor}` : (c.notRun < c.total ? `Continue at ${firstOpen.id}` : 'Start guided run');
-        $('endBtn').hidden = !state.active;
-        $('progress').textContent = `Pass ${c.pass} · Fail ${c.fail} · Unsure ${c.unsure} · Not run ${c.notRun} of ${c.total}` + (state.active ? ' · run is on' : '');
+        const running = state.active;
+        $('tourBtn').textContent = running && tour ? `Continue the tour (at ${state.cursor})` : 'Tester tour (~20 min)';
+        $('startBtn').textContent = running && !tour ? `Continue the checklist at ${state.cursor}` : 'Full dev checklist';
+        $('tourBtn').className = tour ? '' : 'ghost'; $('startBtn').className = tour ? 'ghost' : '';
+        $('endBtn').hidden = !running;
+        $('kindsNote').hidden = tour;
+        $('modeNote').textContent = tour
+          ? 'Tester tour: a friendly walk through the whole project. A small guide box shows each step (what to do, what you should see, a tip if it does not work). Answer Pass, Fail or Unsure; rate each part 1-5; finish with a few words. Some steps open a new tab: come back to this tab for the next step.'
+          : 'Full dev checklist: the owner\'s detailed run, with known-bug wording.';
+        $('progress').textContent = `Pass ${c.pass} · Fail ${c.fail} · Unsure ${c.unsure} · Not run ${c.notRun} of ${c.total}` + (running ? ' · run is on' : '');
 
         const host = $('sections');
         host.replaceChildren();
-        for (const sec of g.SECTIONS) {
-          const steps = g.STEPS.filter((s) => s.section === sec.id);
+        for (const sec of g.sectionsFor(modeNow())) {
+          const steps = g.stepsFor(modeNow()).filter((s) => s.section === sec.id);
           if (!steps.length) continue;
           const pagesUrl = [...new Set(steps.map((s) => s.page).filter(Boolean))].map((p) => g.PAGES[p].url).join(', ');
           host.append(el('h2', {}, sec.label, pagesUrl ? el('span', { class: 'muted', text: `  · ${pagesUrl}` }) : null));
           for (const s of steps) {
             const r = state.results[s.id];
             const v = r?.verdict;
-            const det = el('details', { class: 'step' + (state.active && state.cursor === s.id ? ' current' : '') },
+            const answered = s.kind === 'rate' ? (r?.rating ? `${r.rating} / 5` : 'not rated') : s.kind === 'free' ? (r?.note ? 'written' : 'empty') : (v ? verdictLabel[v] : 'not run');
+            const rows = tour
+              ? [['What to do', s.action], ['✓ You should see', s.correct, 'correct'], ["Tip if it doesn't work", s.tell]]
+              : [['Do this', s.action], ['✓ Correct looks like', s.correct, 'correct'], ['✗ The bug looks like', s.bug, 'bug'], ['How to tell them apart', s.tell]];
+            const det = el('details', { class: 'step' + (running && state.cursor === s.id ? ' current' : '') },
               el('summary', {},
                 el('span', { class: 'id', text: s.id }),
-                el('span', { class: 'title', text: s.title }),
-                el('span', { class: `chip k-${s.kind}`, title: g.KINDS[s.kind].hint, text: g.KINDS[s.kind].label }),
-                el('span', { class: 'chip', title: 'Where this comes from', text: s.ref }),
-                s.kind === 'info' ? null : el('span', { class: v ? `v-${v}` : 'v-none', text: v ? verdictLabel[v] : 'not run' }),
-                s.kind === 'info' ? null : el('button', { class: 'ghost', title: `Open ${g.PAGES[s.page].label} at this step`, onclick: (e) => { e.preventDefault(); go(s.id); } }, 'Go')
+                el('span', { class: 'title', text: s.title + (s.optional ? ' (if available)' : '') }),
+                tour ? null : el('span', { class: `chip k-${s.kind}`, title: g.KINDS[s.kind].hint, text: g.KINDS[s.kind].label }),
+                tour ? null : el('span', { class: 'chip', title: 'Where this comes from', text: s.ref }),
+                s.kind === 'info' ? null : el('span', { class: v || r?.rating || r?.note ? (v ? `v-${v}` : 'v-pass') : 'v-none', text: answered }),
+                s.kind === 'info' || !s.page ? null : el('button', { class: 'ghost', title: `Open ${g.PAGES[s.page].label} at this step`, onclick: (e) => { e.preventDefault(); go(s.id); } }, 'Go')
               ),
               el('div', { class: 'body' },
-                el('dl', {},
-                  el('dt', { text: 'Do this' }), el('dd', { text: s.action }),
-                  el('dt', { text: '✓ Correct looks like' }), el('dd', { class: 'correct', text: s.correct }),
-                  el('dt', { text: '✗ The bug looks like' }), el('dd', { class: 'bug', text: s.bug }),
-                  el('dt', { text: 'How to tell them apart' }), el('dd', { text: s.tell })),
-                r?.note ? el('div', { class: 'note', text: `Your note: ${r.note}` }) : null)
+                el('dl', {}, ...rows.filter((x) => x[1]).flatMap(([dt, dd, cls]) => [el('dt', { text: dt }), el('dd', { class: cls, text: dd })])),
+                r?.note && s.kind !== 'free' ? el('div', { class: 'note', text: `Your note: ${r.note}` }) : null)
             );
             if (v === 'fail') det.open = true;
             host.append(det);
@@ -147,14 +180,13 @@
         $('summary').value = g.summaryText(state);
       }
 
-      $('startBtn').addEventListener('click', () => {
-        const firstOpen = g.RUN_STEPS.find((s) => !state.results[s.id]) || g.RUN_STEPS[0];
-        go(state.active ? state.cursor : firstOpen.id);
-      });
-      $('endBtn').addEventListener('click', () => { state = { ...state, active: false, endedAt: new Date().toISOString() }; save(); render(); });
+      $('tourBtn').addEventListener('click', () => begin('tour'));
+      $('startBtn').addEventListener('click', () => begin('dev'));
+      $('endBtn').addEventListener('click', () => { state = { ...state, active: false, endedAt: new Date().toISOString() }; save(); window.__testguide?.dock.destroy(); render(); });
       $('resetBtn').addEventListener('click', () => {
         if (!confirm('Clear every answer and note from this guided run?')) return;
-        state = g.freshState(); save(); $('saveOut').textContent = ''; render();
+        window.__testguide?.dock.destroy();
+        state = g.setMode(g.freshState(), 'dev'); save(); $('saveOut').textContent = ''; render();
       });
       $('copyBtn').addEventListener('click', async () => {
         try { await navigator.clipboard.writeText($('summary').value); $('copyOut').textContent = 'Copied.'; }
@@ -170,10 +202,10 @@
         try {
           const { startRun } = await import('./testrec.js');
           const c = g.counts(state);
-          const rec = startRun({ page: 'guide', title: 'Guided owner test', settings: { steps: c.total, startedAt: state.startedAt }, timeoutMs: 0 });
+          const rec = startRun({ page: 'guide', title: state.mode === 'tour' ? 'Tester tour' : 'Guided owner test', settings: { mode: state.mode || 'dev', steps: c.total, startedAt: state.startedAt }, timeoutMs: 0 });
           for (const s of g.RUN_STEPS) {
             const r = state.results[s.id];
-            const value = (r?.verdict || 'not run') + (r?.note ? `: ${r.note}` : '');
+            const value = (r?.rating ? `rating ${r.rating}/5` : r?.verdict || 'not run') + (r?.note ? `: ${r.note}` : '');
             const name = `${s.id} ${s.title} [${g.KINDS[s.kind].label}]`;
             if (r?.verdict === 'fail') rec.result(name, value, { pass: false }); else rec.result(name, value);
           }
@@ -194,8 +226,10 @@
 
       // The dock on another tab changes the same state: keep this page current.
       addEventListener('storage', (e) => { if (e.key === g.STATE_KEY) { state = g.loadState(localStorage); render(); } });
+      addEventListener('testguide:changed', () => { state = g.loadState(localStorage); render(); });
       addEventListener('pageshow', (e) => { if (e.persisted) { state = g.loadState(localStorage); render(); } });
       render();
+      mountDock();
       window.__guideHub = { state: () => state, render };
     }
   </script>

@@ -27,7 +27,7 @@
 // ---------------------------------------------------------------------------------------
 
 import {
-  PAGES, KINDS, SECTIONS, RUN_STEPS, STATE_KEY, stepById, loadState, saveState, setVerdict, move, counts
+  PAGES, KINDS, SECTIONS, TOUR_SECTIONS, RUN_STEPS, STATE_KEY, stepById, loadState, saveState, setVerdict, setAnswer, move, counts
 } from './testguide-steps.js';
 
 const LOCAL_HOSTS = ['localhost', '127.0.0.1'];
@@ -101,7 +101,8 @@ export function mountGuide({ page = null } = {}) {
   // from text fields; stopping here as well covers any handler that forgets to.
   for (const ev of ['keydown', 'keyup', 'keypress']) dock.addEventListener(ev, (e) => { if (e.target.matches?.('textarea')) e.stopPropagation(); });
 
-  const persist = () => saveState(localStorage, state);
+  // 'testguide:changed' lets a host page that shows the same answers (guide.html in tour mode) refresh.
+  const persist = () => { const ok = saveState(localStorage, state); window.dispatchEvent(new CustomEvent('testguide:changed')); return ok; };
   let noteTimer = 0;
 
   function announce(id, verdict) {
@@ -132,9 +133,10 @@ export function mountGuide({ page = null } = {}) {
       return;
     }
 
-    const section = SECTIONS.find((s) => s.id === step.section)?.label || '';
+    const tourMode = state.mode === 'tour';
+    const section = (tourMode ? TOUR_SECTIONS : SECTIONS).find((s) => s.id === step.section)?.label || '';
     dock.append(el('div', { class: 'tg-head' },
-      el('strong', { text: `Guided test · step ${idx + 1} of ${RUN_STEPS.length} · ${section}` }),
+      el('strong', { text: `${tourMode ? 'Tester tour' : 'Guided test'} · step ${idx + 1} of ${RUN_STEPS.length} · ${section}` }),
       el('a', { href: hubUrl, title: 'All steps and the end summary' }, 'Hub'),
       el('button', {
         title: 'Make the guide small', 'aria-expanded': 'true',
@@ -147,47 +149,54 @@ export function mountGuide({ page = null } = {}) {
       ' ', el('span', { class: 'tg-chip', title: 'Where this comes from' }, `${step.id} · ${step.ref}`)
     ));
     dock.append(el('h3', { text: step.title }));
-    dock.append(el('dl', {},
-      el('dt', { text: 'Do this' }), el('dd', { text: step.action }),
-      el('dt', { text: '✓ Correct looks like' }), el('dd', { class: 'tg-correct', text: step.correct }),
-      el('dt', { text: '✗ The bug looks like' }), el('dd', { class: 'tg-bug', text: step.bug }),
-      el('dt', { text: 'How to tell them apart' }), el('dd', { text: step.tell })
-    ));
+    const rows = tourMode
+      ? [['What to do', step.action], ['✓ You should see', step.correct, 'tg-correct'], ["Tip if it doesn't work", step.tell]]
+      : [['Do this', step.action], ['✓ Correct looks like', step.correct, 'tg-correct'], ['✗ The bug looks like', step.bug, 'tg-bug'], ['How to tell them apart', step.tell]];
+    dock.append(el('dl', {}, ...rows.filter((r) => r[1]).flatMap(([dt, dd, cls]) => [el('dt', { text: dt }), el('dd', { class: cls, text: dd })])));
 
     if (step.page && step.page !== page) {
       const target = PAGES[step.page];
       dock.append(el('div', { class: 'tg-away' },
         `This step is on the ${target.label} page. `,
-        el('a', { href: new URL(target.url, root).href }, `Open ${target.label}`)
+        el('a', { href: new URL(target.url, root).href, target: target.dock === false ? '_blank' : null, rel: target.dock === false ? 'noopener' : null }, `Open ${target.label}${target.dock === false ? ' in a new tab' : ''}`)
       ));
     }
 
-    const verdictBtn = (v, label, cls) => el('button', {
-      class: cls, 'aria-pressed': String(res?.verdict === v),
-      title: res?.verdict === v ? 'Press again to clear' : `Mark ${step.id} as ${label}`,
-      onclick: act(() => {
-        const next = res?.verdict === v ? null : v;
-        state = setVerdict(state, step.id, next, note.value);
-        persist(); announce(step.id, next); render();
-      })
-    }, label);
-    dock.append(el('div', { class: 'tg-row' },
-      verdictBtn('pass', 'Pass', 'tg-pass'), verdictBtn('fail', 'Fail', 'tg-fail'), verdictBtn('unsure', 'Unsure', 'tg-unsure')));
-
-    const note = el('textarea', { placeholder: 'Note (optional): what you saw, numbers, how it felt', 'aria-label': `Note for ${step.id}` });
-    note.value = res?.note || state.drafts?.[step.id] || '';
-    // Notes are saved as you type (a draft until a verdict is pressed), so a reload or a page
-    // hop never loses them.
-    note.addEventListener('input', () => {
-      clearTimeout(noteTimer);
-      noteTimer = setTimeout(() => {
-        const r = state.results[step.id];
-        state = r ? { ...state, results: { ...state.results, [step.id]: { ...r, note: note.value.slice(0, 1000) } } }
-          : { ...state, drafts: { ...(state.drafts || {}), [step.id]: note.value.slice(0, 1000) } };
-        persist();
-      }, NOTE_SAVE_MS);
-    });
-    dock.append(note);
+    const note = el('textarea', { placeholder: step.kind === 'free' ? 'What was confusing? What did you love?' : 'Note (optional): what you saw, numbers, how it felt', 'aria-label': `Note for ${step.id}` });
+    if (step.kind === 'rate') {
+      // One tap, 1 (hard) to 5 (easy). Pressing the chosen number again clears it.
+      dock.append(el('div', { class: 'tg-row' }, ...[1, 2, 3, 4, 5].map((n) => el('button', {
+        'aria-pressed': String(res?.rating === n), title: `${n} of 5`,
+        onclick: act(() => { state = setAnswer(state, step.id, { rating: res?.rating === n ? null : n }); persist(); render(); })
+      }, String(n)))));
+      dock.append(el('div', { class: 'tg-foot', text: '1 = very hard · 5 = very easy' }));
+    } else {
+      note.value = res?.note || state.drafts?.[step.id] || '';
+      const verdictBtn = (v, label, cls) => el('button', {
+        class: cls, 'aria-pressed': String(res?.verdict === v),
+        title: res?.verdict === v ? 'Press again to clear' : `Mark ${step.id} as ${label}`,
+        onclick: act(() => {
+          const next = res?.verdict === v ? null : v;
+          state = setVerdict(state, step.id, next, note.value);
+          persist(); announce(step.id, next); render();
+        })
+      }, label);
+      if (step.kind !== 'free') dock.append(el('div', { class: 'tg-row' },
+        verdictBtn('pass', 'Pass', 'tg-pass'), verdictBtn('fail', 'Fail', 'tg-fail'), verdictBtn('unsure', 'Unsure', 'tg-unsure')));
+      // Notes are saved as you type (a draft until a verdict is pressed), so a reload or a page
+      // hop never loses them. The closing free-text answer is saved as the answer itself.
+      note.addEventListener('input', () => {
+        clearTimeout(noteTimer);
+        noteTimer = setTimeout(() => {
+          const r = state.results[step.id];
+          if (step.kind === 'free') state = setAnswer(state, step.id, { note: note.value });
+          else state = r ? { ...state, results: { ...state.results, [step.id]: { ...r, note: note.value.slice(0, 1000) } } }
+            : { ...state, drafts: { ...(state.drafts || {}), [step.id]: note.value.slice(0, 1000) } };
+          persist();
+        }, NOTE_SAVE_MS);
+      });
+      dock.append(note);
+    }
 
     const last = idx === RUN_STEPS.length - 1;
     dock.append(el('div', { class: 'tg-row' },

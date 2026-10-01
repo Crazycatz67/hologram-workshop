@@ -34,6 +34,21 @@
 //   move(state, delta) -> state     cursor to the next / previous RUN_STEPS entry (clamped).
 //   counts(state) -> { pass, fail, unsure, notRun, total }
 //   summaryText(state, now) -> string   the copyable end summary (fails first, with notes).
+//
+// TESTER TOUR (added 2026-10-01; additions only, the dev contract above is unchanged)
+//   A second run mode for an outside tester: plain words, no bug numbers. Chosen at Start in
+//   guide.html and kept in state.mode ('dev' | 'tour', default 'dev').
+//   TOUR_SECTIONS / TOUR_STEPS   same shape as SECTIONS / STEPS. Step kinds: 'tour' (a step:
+//            action = what to do, correct = what you should see, tell = tip if it doesn't
+//            work, bug = ''), 'rate' (one 1-5 "how easy was this?" per section) and 'free'
+//            (the closing free-text question). A step with optional:true is "if available".
+//   RUN_STEPS (live binding) follows the mode: dev = STEPS minus info rows, tour = TOUR_STEPS.
+//            setMode(state, mode) switches it; loadState() restores it from the saved state.
+//   setAnswer(state, id, { rating, note }, now)  stores a 1-5 rating or the free text for a
+//            'rate' / 'free' step as results[id] = { rating?, note, at, page }.
+//   counts() only tallies Pass/Fail/Unsure steps (not rate/free); answered rating/free steps are
+//            listed in summaryText. stepsFor(mode) / sectionsFor(mode) give the lists by mode.
+//   PAGES landing + demos have dock:false (no guide box there): the hub opens them in a new tab.
 // ---------------------------------------------------------------------------------------
 
 export const STATE_KEY = 'testguide:v1';
@@ -41,13 +56,19 @@ export const STATE_KEY = 'testguide:v1';
 export const PAGES = {
   hologram: { label: 'Gesture demo', url: 'hologram.html' },
   platform: { label: 'Platform', url: 'platform/index.html' },
-  hands: { label: 'Hands page', url: 'hands.html' }
+  hands: { label: 'Hands page', url: 'hands.html' },
+  // Tester tour only: pages that do not load the guide box.
+  landing: { label: 'Landing page', url: 'index.html', dock: false },
+  demos: { label: 'Games hub', url: 'demos/index.html', dock: false }
 };
 
 export const KINDS = {
   live: { label: 'needs live', hint: 'Never confirmed with real hands or eyes. Your answer is the first real result.' },
   known: { label: 'known issue', hint: 'A known problem. Tell us whether you still see it.' },
   regress: { label: 'regression check', hint: 'This worked before. Check it still does.' },
+  tour: { label: 'tour step', hint: 'Do what it says, then say whether it worked.' },
+  rate: { label: 'rating', hint: 'One tap: how easy was this part, 1 (hard) to 5 (easy).' },
+  free: { label: 'your words', hint: 'Free text, a sentence or two is plenty.' },
   info: { label: 'info only', hint: 'Python side, nothing to click. Listed so you know it is still open.' }
 };
 
@@ -203,6 +224,50 @@ export const STEPS = [
     correct: 'The click-pinch only selects what you are pointing at. The selected part is never dragged by that pinch.',
     bug: 'The part jumps or drags when the other hand pinches, or the pinch starts a resize.',
     tell: 'A deliberate pinch with BOTH hands held for a moment is the resize gesture, not a click: pinch fast and let go.' },
+  // Hands on the page (Track B, Cody-2 / Cody-2b, 2026-10-01): synthetic checks pass
+  // (handui-test, platform/hands-test section I); none of these has been seen on real hands yet.
+  { id: 'HA8', section: 'hands', page: 'platform', kind: 'live', ref: 'Track B: hands on the page (handUI.js)',
+    title: 'Platform: the hand cursor works the top bar and side panels',
+    action: 'Camera on. Point at a top-bar button (for example Help) and pinch with your OTHER hand. Then point at the Items list, pinch and hold, and move your hand up and down to scroll it.',
+    correct: 'The button presses as if clicked. Holding the pinch over a list scrolls it. While the cursor is over a panel nothing in the 3D view lights up.',
+    bug: 'The cursor stops at the edge of the 3D view, the pinch does nothing on a button, or a part behind the panel gets selected.',
+    tell: 'A same-hand pinch or holding still also clicks, but the other-hand pinch is the most reliable.' },
+  { id: 'HA9', section: 'hands', page: 'platform', kind: 'live', ref: 'Track B: ring by hand',
+    title: 'Platform: spin the Library ring with a fist, open a card with a pinch',
+    action: 'Open the Library ring. Make a fist and slide it left and right, then open your hand. Point at a card and pinch with your other hand.',
+    correct: 'The ring follows your fist card by card and coasts a little after a quick flick. The pinch opens the card you point at. Nothing in the scene behind moves.',
+    bug: 'The ring does not move, spins the opposite way to your hand, or the scene behind it orbits.',
+    tell: 'The Chair card should be first, and each stock sample card names its maker (the credit line).' },
+  { id: 'HA10', section: 'hands', page: 'platform', kind: 'live', ref: 'Track B: polygon lens by hand',
+    title: 'Platform: the polygon lens follows your hand and resizes',
+    action: 'Turn on Polygon mode. Point around the model. Pinch with your other hand and keep holding, move your hand up, then down, then let go. Then pinch once quickly.',
+    correct: 'The lens circle follows your pointing finger. Pinch-hold and up makes it bigger, down makes it smaller. A quick pinch selects the faces inside it.',
+    bug: 'The lens stays where the mouse left it, jumps when you pinch, or a resize also selects faces.',
+    tell: 'Moving about one hand-width up doubles the lens.' },
+  { id: 'HA11', section: 'hands', page: 'platform', kind: 'live', ref: 'Track B: push-zoom, tilt, clap',
+    title: 'Platform: fist zoom and tilt with nothing selected, clap resets the view',
+    action: 'Click empty space so nothing is selected. Make a fist and push it slowly away from you, then pull it back. Raise your other open hand while the fist holds. Open both hands, pause, then clap once.',
+    correct: 'Pushing away zooms in, pulling back zooms out. Raising the second hand tips the view. The clap puts the view back to show everything, and the status line says View reset.',
+    bug: 'The zoom goes the wrong way for you, the view jumps, or the clap does nothing (or moves an item).',
+    tell: 'If push = zoom in feels backwards, mark Fail and say so: the direction is a design choice we can flip.' },
+  { id: 'HA12', section: 'hands', page: 'platform', kind: 'live', ref: 'Track B: camera remember / auto-start',
+    title: 'Platform and Gesture demo: the camera comes back on by itself',
+    action: 'Turn the camera on, then reload the page. Then open Help, untick "Remember the camera", and reload again.',
+    correct: 'After the first reload the camera starts by itself (no extra click). After unticking, it stays off until you press Camera.',
+    bug: 'You have to press Camera every time even with the box ticked, or it starts even when unticked.',
+    tell: 'The browser must already allow the camera for this site; the first time it always asks.' },
+  { id: 'GD13', section: 'gesture', page: 'hologram', kind: 'live', ref: 'Debbie-G #7 / #9 (host wiring)',
+    title: 'Gesture demo: selected part outline, thumb-tap trial, tape by other-hand pinch',
+    action: 'Select a part with the other-hand pinch. Then in Tools, open Pointer & feel and tick "Thumb-tap click (trial)" and press Shift+P to practise. Finally turn on the tape and place two points.',
+    correct: 'The selected part keeps a steady outline. Shift+P starts the thumb-tap practice rounds and 🎯 reads Stop while it runs. Tape points are placed only by the other hand\'s pinch.',
+    bug: 'No outline on the selected part, Shift+P does nothing, or a same-hand pinch or thumb tap drops a tape point.',
+    tell: 'Thumb-tap is a trial, off by default; untick it after the test if you did not like it.' },
+  { id: 'GD14', section: 'gesture', page: 'hologram', kind: 'regress', ref: 'calibration card click-through fix',
+    title: 'Gesture demo: nothing invisible blocks the mouse at the top centre',
+    action: 'Without starting calibration, drag the model with the mouse starting just under the top bar in the middle of the page.',
+    correct: 'The model orbits as anywhere else.',
+    bug: 'The drag does nothing there (an invisible calibration card used to sit on that spot).',
+    tell: '' },
   { id: 'GD5b', section: 'gesture', page: 'hologram', kind: 'live', ref: 'GD5/GD6 re-test (owner marked unsure, no notes)',
     title: 'Re-test: other-hand select, then same-hand pinch (short note please)',
     action: 'Point at a part and pinch with your OTHER hand. Then point at a different part and pinch with the SAME hand, holding about 2 seconds. Then press Unsure, Pass or Fail and type one short note.',
@@ -305,9 +370,171 @@ export const STEPS = [
     tell: 'Only seen in Python room completion output.' }
 ];
 
-export const RUN_STEPS = STEPS.filter((s) => s.kind !== 'info');
-const byId = new Map(STEPS.map((s) => [s.id, s]));
+// ---- Tester tour (plain words for someone who has never seen the project) ----------------
+export const TOUR_SECTIONS = [
+  { id: 'landing', label: '1. The landing page' },
+  { id: 'camera', label: '2. Camera and calibration' },
+  { id: 'gesture', label: '3. Gesture demo' },
+  { id: 'platform', label: '4. The platform' },
+  { id: 'games', label: '5. Games' },
+  { id: 'upload', label: '6. Your own photo or scan' },
+  { id: 'end', label: 'Last: your thoughts' }
+];
+
+const tour = (id, section, page, title, action, correct, tell, extra = {}) =>
+  ({ id, section, page, kind: 'tour', ref: 'Tester tour', title, action, correct, bug: '', tell, ...extra });
+const rate = (id, section, label) =>
+  ({ id, section, page: null, kind: 'rate', ref: 'Tester tour', title: `How easy was ${label}?`, action: 'Tap a number: 1 = very hard, 5 = very easy.', correct: '', bug: '', tell: 'There is no wrong answer. Go with your first feeling.' });
+
+export const TOUR_STEPS = [
+  // 1. Landing page
+  tour('TL1', 'landing', 'landing', 'Look around the home page',
+    'Open the home page (new tab) and scroll down slowly. Read the first screen, then glance at the feature cards.',
+    'A 3D chair at the top that you can drag to turn, then cards that explain what you can do.',
+    'If the chair stays blank, wait a few seconds for it to load, then refresh the page.'),
+  tour('TL2', 'landing', 'landing', 'Find the two big buttons',
+    'Find the buttons that open the gesture demo and the platform. Do not click them yet.',
+    'You can tell, in your own words, what each one is for.',
+    'Not sure what a button does? Say so in the note. That is useful to hear.'),
+  rate('TLR', 'landing', 'the home page'),
+  // 2. Camera + calibration
+  tour('TC1', 'camera', 'hologram', 'Open the gesture demo',
+    'Open the gesture demo. Do not start the camera yet. Look at the 3D object in the middle.',
+    'A glowing blue chair, and a bar of buttons across the top.',
+    'Blank screen? Refresh once. If it is still blank, mark Fail and say what you see.'),
+  tour('TC2', 'camera', 'hologram', 'Turn the camera on',
+    'Press the Camera button (top bar) and click Allow when your browser asks. Hold one hand up where the camera can see it.',
+    'You see a see-through glowing hand following your real hand.',
+    'No permission box? Check the camera icon in the address bar. The picture stays on this Mac; nothing is sent anywhere.'),
+  tour('TC3', 'camera', 'hologram', 'Follow the setup card',
+    'A small card walks you through 3 short steps (open hand, trace a rectangle with your pointing finger, aim at rings). Follow it.',
+    'A bar fills at each step, then the card goes away.',
+    'Bar not filling? Hold your hand a bit further from the camera and make sure the room is well lit. You can press Esc to skip.'),
+  rate('TCR', 'camera', 'turning on the camera and setting up'),
+  // 3. Gesture demo
+  tour('TG1', 'gesture', 'hologram', 'Point at a part',
+    'Point with your index finger (other three fingers curled) at the chair. Move your finger around.',
+    'A small dot or ring follows your finger and the part under it lights up.',
+    'Dot jumps around? Keep your hand steady and a little closer to the camera.'),
+  tour('TG2', 'gesture', 'hologram', 'Select a part',
+    'Point at one part and hold still for about a second. Then try again by pointing and pinching with your OTHER hand.',
+    'A ring fills up and the part is selected. The pinch selects it straight away.',
+    'Nothing selected? Move more slowly and hold really still. The mouse works too: just click the part.'),
+  tour('TG3', 'gesture', 'hologram', 'Grab and move',
+    'Make a fist and move it slowly across the screen.',
+    'The chair follows your fist. Opening your hand lets go.',
+    'It does not grab? Open your hand fully for a moment, then close it again.'),
+  tour('TG4', 'gesture', 'hologram', 'Tilt',
+    'Fist with one hand, then raise your other open hand about 20 cm and lower it again.',
+    'The chair leans forward and back as your other hand goes up and down.',
+    'No tilt? Make sure both hands are in view of the camera.'),
+  tour('TG5', 'gesture', 'hologram', 'Make it bigger and smaller',
+    'Pinch with both hands, then move your hands apart, then together.',
+    'The chair grows as your hands move apart and shrinks as they come together.',
+    'Nothing happens? Pinch more firmly (thumb and index tips touching) with both hands.'),
+  tour('TG6', 'gesture', 'hologram', 'Explode it',
+    'Hold both hands open, side by side, and pull them slowly apart.',
+    'The chair slides apart into its separate parts so you can see inside.',
+    'Not exploding? Pull slowly and keep your palms toward the camera.'),
+  tour('TG7', 'gesture', 'hologram', 'Clap to put it back',
+    'Rest your hands for a moment, then clap once, gently.',
+    'The chair snaps back together and returns to where it started.',
+    'Clap not seen? Bring your hands in a little closer to the camera, or press the Reset button (R).'),
+  tour('TG8', 'gesture', 'hologram', 'Measure with the tape',
+    'Press T on the keyboard, then click two points on the chair (point and pinch with the other hand also works).',
+    'A line appears between the points with a length in centimetres or inches.',
+    'No line? Press T again to turn the tape on, then try two clicks.'),
+  tour('TG9', 'gesture', 'hologram', 'Try other objects',
+    'Use the picker in the top bar (the name with ◂ ▸ arrows) to switch to the Tool chest, the Desk lamp and the Teapot. Explode the tool chest.',
+    'Each object appears; the tool chest and lamp split into several parts.',
+    'An object is missing? Tell us which one in the note.'),
+  tour('TG10', 'gesture', 'hologram', 'Press the buttons with your hand',
+    'With the camera on, point at a button in the top bar and pinch with your other hand, like a mouse click.',
+    'The button works the same as if you had clicked it.',
+    'Buttons are small. Point slowly and wait for the highlight before you pinch.'),
+  tour('TG11', 'gesture', 'hologram', 'Open the tool wheel',
+    'Hold up a peace sign (✌) for about a second. A ring of tools appears. Point at "Next model" (bottom left) and pinch your other hand.',
+    'The wheel opens where your hand was, the tool you point at lights up, and the pinch switches to the next object.',
+    'Hold the ✌ still until the wheel shows. To close it without picking, show ✌ again or press Esc. Keyboard: W opens it.'),
+  rate('TGR', 'gesture', 'moving the objects with your hands'),
+  // 4. Platform
+  tour('TP1', 'platform', 'platform', 'Open the platform and the Library',
+    'Open the platform. Press the Library button (or L). Move through the cards with the arrow keys, the mouse wheel, or by pointing and moving your hand.',
+    'A ring of saved scenes you can turn like a TV menu.',
+    'The ring is empty? Close it and add a sample object in the next step.'),
+  tour('TP2', 'platform', 'platform', 'Open a sample',
+    'Pick one of the sample objects and open it.',
+    'It appears on the workbench as a glowing hologram.',
+    'Nothing opens? Press Enter on the highlighted card, or double-click it.'),
+  tour('TP3', 'platform', 'platform', 'Grab, twist and resize',
+    'Select a piece of it, then move it, turn it and make it bigger or smaller (by hand or with mouse and keys).',
+    'The piece follows you. Everything else stays where it was.',
+    'Piece will not move? Click it first so it is selected. The U key (or Ctrl+Z) takes a move back.'),
+  tour('TP4', 'platform', 'platform', 'Pin a piece',
+    'Select a piece you moved and press K.',
+    'A small pin mark shows. Later changes leave that piece alone.',
+    'No mark? Click the piece first so it is selected, then press K again.'),
+  tour('TP5', 'platform', 'platform', 'Polygon lens',
+    'Press the Polygon button. The model turns into a wire of triangles. Move the mouse over it and scroll to change the lens size.',
+    'A circular lens follows the mouse and highlights faces. Esc leaves the mode.',
+    'Button greyed out? Open an object first.'),
+  tour('TP6', 'platform', 'platform', 'Reload and see it all come back',
+    'Refresh the page (Cmd+R).',
+    'Your moved pieces, pins and view are all as you left them.',
+    'Something is missing? Tell us what in the note. That matters a lot.'),
+  rate('TPR', 'platform', 'the platform'),
+  // 5. Games
+  tour('TA1', 'games', 'demos', 'Open the games hub',
+    'Open the games hub (new tab).',
+    'A few game cards, each with a short description.',
+    'Page looks empty? Refresh it once.'),
+  tour('TA2', 'games', 'demos', 'Light painting',
+    'Open Light painting and draw glowing light in the air (point with your finger, or use the mouse). Light the sparks in their colours.',
+    'Glowing lines follow your finger or mouse. Sparks light up as you touch them.',
+    'Not drawing? Make sure the camera is on, or use the mouse.'),
+  tour('TA3', 'games', 'demos', 'Rebuild the chair',
+    'Open Rebuild the chair. Move and twist each scrambled part until it snaps into place.',
+    'A part clicks home when it is close and the right way round.',
+    'Part will not snap? Turn it a little and move it closer to its faint outline.'),
+  tour('TA4', 'games', 'demos', 'Block tower (if available)',
+    'If the Block tower card is there, open it and stack three blocks.',
+    'The blocks stack and wobble like real ones.',
+    'No such card? Just mark this Pass and move on.', { optional: true }),
+  tour('TA5', 'games', 'demos', 'Marble maze (if available)',
+    'If the Marble maze card is there, tilt the board to roll the marble home.',
+    'The marble rolls as you tilt the board.',
+    'No such card? Just mark this Pass and move on.', { optional: true }),
+  rate('TAR', 'games', 'the games'),
+  // 6. Upload
+  tour('TU1', 'upload', 'platform', 'Add a photo or a scan',
+    'On the platform, drop a photo (JPG or PNG) or a scan file (GLB, OBJ or PLY) onto the page, or press Add files.',
+    'Your file shows up in the library. A photo is a flat preview, marked as such; a scan appears as a hologram.',
+    'Nothing happened? Try a different file. If it still fails, tell us the file type in the note.'),
+  rate('TUR', 'upload', 'adding your own file'),
+  // Last
+  { id: 'TFREE', section: 'end', page: null, kind: 'free', ref: 'Tester tour',
+    title: 'What was confusing? What did you love?',
+    action: 'Type a few lines in the note box below. Anything at all.', correct: '', bug: '',
+    tell: 'Short is fine. There are no wrong answers.' }
+];
+
+export const MODES = ['dev', 'tour'];
+export const stepsFor = (mode) => (mode === 'tour' ? TOUR_STEPS : STEPS);
+export const sectionsFor = (mode) => (mode === 'tour' ? TOUR_SECTIONS : SECTIONS);
+const RATED_KINDS = ['rate', 'free'];
+const isVerdictStep = (s) => !RATED_KINDS.includes(s.kind);
+
+// RUN_STEPS follows the run mode (live binding; testguide.js and guide.html import it by name).
+// Pages that load this file fresh pick the mode up from the saved state in loadState().
+export let RUN_STEPS = STEPS.filter((s) => s.kind !== 'info');
+const ALL = [...STEPS, ...TOUR_STEPS];
+const byId = new Map(ALL.map((s) => [s.id, s]));
 export const stepById = (id) => byId.get(id) || null;
+export function setMode(state, mode) {
+  const m = mode === 'tour' ? 'tour' : 'dev';
+  RUN_STEPS = stepsFor(m).filter((s) => s.kind !== 'info');
+  return { ...state, mode: m };
+}
 
 export function pageOf(pathname = '') {
   const p = String(pathname);
@@ -318,15 +545,16 @@ export function pageOf(pathname = '') {
 }
 
 export function freshState() {
-  return { v: 1, active: false, startedAt: null, endedAt: null, cursor: RUN_STEPS[0].id, minimised: false, results: {}, savedAt: null, savedPath: null };
+  return { v: 1, mode: 'dev', active: false, startedAt: null, endedAt: null, cursor: RUN_STEPS[0].id, minimised: false, results: {}, savedAt: null, savedPath: null };
 }
 
 export function loadState(storage) {
   try {
     const s = JSON.parse(storage.getItem(STATE_KEY) || 'null');
     if (!s || s.v !== 1 || typeof s.results !== 'object' || !s.results) return freshState();
-    if (!byId.has(s.cursor) || stepById(s.cursor).kind === 'info') s.cursor = RUN_STEPS[0].id;
-    return { ...freshState(), ...s };
+    setMode(s, s.mode);   // sets RUN_STEPS for this page
+    if (!RUN_STEPS.some((x) => x.id === s.cursor)) s.cursor = RUN_STEPS[0].id;
+    return { ...freshState(), ...s, mode: s.mode === 'tour' ? 'tour' : 'dev' };
   } catch { return freshState(); }
 }
 
@@ -338,10 +566,25 @@ const VERDICTS = ['pass', 'fail', 'unsure'];
 
 export function setVerdict(state, id, verdict, note = '', now = new Date()) {
   const step = stepById(id);
-  if (!step || step.kind === 'info') return state;
+  if (!step || step.kind === 'info' || !isVerdictStep(step)) return state;
   const results = { ...state.results };
   if (verdict === null) delete results[id];
   else if (VERDICTS.includes(verdict)) results[id] = { verdict, note: String(note || '').slice(0, 1000), at: now.toISOString(), page: step.page };
+  return { ...state, results };
+}
+
+// Rating (1-5) for a 'rate' step, or free text for a 'free' step. rating null/undefined clears a rating.
+export function setAnswer(state, id, { rating = null, note = '' } = {}, now = new Date()) {
+  const step = stepById(id);
+  if (!step || !RATED_KINDS.includes(step.kind)) return state;
+  const results = { ...state.results };
+  const r = Number(rating);
+  const text = String(note || '').slice(0, 2000);
+  if (step.kind === 'rate') {
+    if (Number.isInteger(r) && r >= 1 && r <= 5) results[id] = { rating: r, note: '', at: now.toISOString(), page: step.page };
+    else delete results[id];
+  } else if (text.trim()) results[id] = { note: text, at: now.toISOString(), page: step.page };
+  else delete results[id];
   return { ...state, results };
 }
 
@@ -353,7 +596,8 @@ export function move(state, delta) {
 
 export function counts(state) {
   const c = { pass: 0, fail: 0, unsure: 0, notRun: 0, total: RUN_STEPS.length };
-  for (const s of RUN_STEPS) {
+  c.total = RUN_STEPS.filter(isVerdictStep).length;
+  for (const s of RUN_STEPS.filter(isVerdictStep)) {
     const v = state.results[s.id]?.verdict;
     if (v) c[v]++; else c.notRun++;
   }
@@ -374,9 +618,10 @@ export function summaryText(state, now = new Date()) {
     const note = r?.note ? ` — note: ${r.note.replace(/\s+/g, ' ').trim()}` : '';
     return `  ${s.id} ${s.title} [${KINDS[s.kind].label}; ${s.ref}]${note}`;
   };
-  const group = (v) => RUN_STEPS.filter((s) => (state.results[s.id]?.verdict || 'not run') === v);
+  const group = (v) => RUN_STEPS.filter(isVerdictStep).filter((s) => (state.results[s.id]?.verdict || 'not run') === v);
+  const tourMode = state.mode === 'tour';
   const out = [
-    `Guided test run, shadow site (localhost), ${stamp(state.startedAt)} to ${stamp(state.endedAt || now.toISOString())} (local time)`,
+    `${tourMode ? 'Tester tour' : 'Guided test run'}, shadow site (localhost), ${stamp(state.startedAt)} to ${stamp(state.endedAt || now.toISOString())} (local time)`,
     `Pass ${c.pass} · Fail ${c.fail} · Unsure ${c.unsure} · Not run ${c.notRun} (of ${c.total})`
   ];
   for (const [v, label] of [['fail', 'FAIL'], ['unsure', 'UNSURE'], ['pass', 'PASS'], ['not run', 'NOT RUN']]) {
@@ -389,6 +634,15 @@ export function summaryText(state, now = new Date()) {
       out.push('  ' + g.map((s) => s.id).join(', '));
       withNotes.forEach((s) => out.push(line(s)));
     } else g.forEach((s) => out.push(line(s)));
+  }
+  if (tourMode) {
+    out.push('', 'RATINGS (1 hard - 5 easy)');
+    for (const s of RUN_STEPS.filter((x) => x.kind === 'rate')) {
+      const sec = TOUR_SECTIONS.find((x) => x.id === s.section)?.label || s.section;
+      out.push(`  ${sec}: ${state.results[s.id]?.rating ?? 'not rated'}`);
+    }
+    const free = state.results.TFREE?.note;
+    out.push('', 'WHAT WAS CONFUSING / WHAT DID YOU LOVE?', '  ' + (free ? free.replace(/\s+/g, ' ').trim() : '(nothing written)'));
   }
   if (state.savedPath) out.push('', `Saved run: ${state.savedPath}`);
   return out.join('\n');
