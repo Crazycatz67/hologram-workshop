@@ -1,33 +1,49 @@
-// Finger-gun pose: pure geometry for the "point, then drop the thumb to click" probe.
-// STATUS: probe only (2026-09-30). Nothing in the live pages calls this yet; the lab page
-// docs/lab/gestures/gun-lab.html uses it to measure whether a thumb drop is steady enough to be
-// a click, before anyone wires it into gestures.js / manipulator.js.
+// Pointer ("finger gun") pose: pure geometry for the aim-with-one-hand gesture.
+// STATUS: probe only. Nothing in the live pages calls this yet; the lab page
+// docs/lab/gestures/gun-lab.html uses it to measure and calibrate the pose on a real hand
+// before anyone wires it into gestures.js / manipulator.js.
+//
+// DECISION 2026-10-01 (owner + overseer, from the live probe): the click is a pinch with the
+// OTHER hand. The thumb is no longer a trigger, and the pose has no thumb condition: the
+// thumb may be up, resting on the index or tucked. thumbState() stays exported for
+// diagnostics only (the lab still reports the thumb gap).
 //
 // CONTRACT
-//   gunFeatures(worldLandmarks) -> GunFeatures | null
+//   GUN_DEFAULTS: { indexBendMaxDeg, indexReachMin, curlBendMinDeg, curlReachMax,
+//     separationMin, vetoLabels }. The thresholds isGun() uses when none are passed. A caller
+//     (the lab's calibrate step) may pass any subset to override them; missing keys fall back.
+//   gunFeatures(worldLandmarks, thresholds = GUN_DEFAULTS) -> GunFeatures | null
 //     worldLandmarks: MediaPipe hand.worldLandmarks (21 x {x,y,z}, metres, origin near the hand
 //       centre; handTracker.js toHands() already carries them). Returns null for anything that is
 //       not 21 finite points or has a (near) zero palm, so callers never see NaN.
 //     All distances are in WORLD PALM LENGTHS (wrist 0 -> middle MCP 9), all angles in DEGREES.
-//     Because every value is a ratio or an angle of the 3D hand, features do not change when the
+//     Every value is a ratio or an angle of the 3D hand, so features do not change when the
 //     hand is moved, turned or scaled (the lab's self-test checks that).
-//   isGun(features, { gesture }) -> { gun, rejectedBy, supported }
-//     Geometry decides; the canned MediaPipe label only vetoes (Open_Palm / Victory /
-//     Closed_Fist) or supports (Pointing_Up). rejectedBy: null | 'no-hand' | 'label:<name>' |
-//     'index-bent' | 'index-short' | 'fingers-open' | 'no-separation'.
-//   thumbState(features, prev) -> { state, gap, angleDeg, angleAgrees }
-//     state: 'cocked' | 'dropped' | 'unknown'. Hysteresis: between the two thresholds the
-//     previous state is kept (prev may be the previous result object or its state string).
-//     features === null -> 'unknown' (tracking lost; the caller decides whether to hold).
+//     `thresholds` only affects the convenience fields indexExtended and curledCount; the raw
+//     measurements never depend on it.
+//   isGun(features, { gesture, thresholds }) -> { gun, rejectedBy, failed, supported }
+//     The pointer: index extended (both upper joints nearly straight, tip far from the wrist),
+//     middle/ring/pinky curled (PIP bent AND tip pulled in), index reach clearly above the
+//     other three. No thumb condition. The canned MediaPipe label only vetoes
+//     (thresholds.vetoLabels) or supports (Pointing_Up); it never makes a pointer on its own.
+//     failed: EVERY check that failed, in this order: 'label:<name>', 'index-bent',
+//       'index-short', 'curl-pip' (some other finger's PIP not bent enough), 'curl-reach'
+//       (some other finger's tip too far out), 'no-separation'. rejectedBy = failed[0] ?? null,
+//       or 'no-hand' when features is null. The full list is what lets a live run say which
+//       check real hands fail, rather than only the first one.
+//   thumbState(features, prev) -> { state, gap, angleDeg, angleAgrees }   (DIAGNOSTIC ONLY)
+//     state: 'cocked' | 'dropped' | 'unknown', with hysteresis between the two thresholds.
 //
-// Why world landmarks and not the 2D image ones gestures.js uses: a finger gun is USED pointing
+// Why world landmarks and not the 2D image ones gestures.js uses: the pointer is USED aiming
 // at the camera, where the index finger foreshortens to almost nothing in 2D and reads as
 // curled. That is the same foreshortening trap that sank the old 2D "reach" pinch check (see
 // gestures.js pinch()). World landmarks are metric 3D, so a straight finger stays straight from
-// any viewing angle.
+// any viewing angle, at least in principle; MediaPipe's world depth is itself estimated.
 //
-// Every threshold below is a design guess (Ricky's design, 2026-09-30), not measured on a real
-// hand yet. The lab exists to measure them; expect them to move.
+// The default thresholds are still the 2026-09-30 design guesses, tuned on a synthetic hand.
+// On 2026-10-01 a real hand (MacBook webcam, 1280x720) passed them on 0% of frames, so they
+// are known to be wrong for real hands. They are kept as defaults only until the lab's
+// calibrate step produces measured values for the overseer to commit here.
 
 export const GUN_LANDMARK = {
   WRIST: 0,
@@ -39,30 +55,49 @@ export const GUN_LANDMARK = {
   PINKY: [17, 18, 19, 20]
 };
 
-// Index "extended": both upper joints nearly straight and the tip well out from the wrist.
-export const INDEX_BEND_MAX_DEG = 35;
-export const INDEX_REACH_MIN = 1.1;
+// Calibrated 2026-10-01 on the owner's hand (gun-lab calibrate, 50 fps webcam; side 254 / camera 229 /
+// open 252 / fist 200 frames). Each value sits midway between the pointer's p10/p90 edge and the
+// class it rejects; every gap was "clean" (docs/testing/LEDGER.md has the numbers).
+// Index "extended": both upper joints nearly straight and the tip well out from the wrist
+// (pointer 17-25° bend, 1.81-1.91 reach; fist 97-109°, 0.60-0.88). The bend limit is 45°, not the
+// calibration midpoint 61°: it keeps 20° of margin over the real pointer and still rejects a
+// half-hooked index (~60°), which the midpoint would have let through.
+export const INDEX_BEND_MAX_DEG = 45;
+export const INDEX_REACH_MIN = 1.35;
 // Middle/ring/pinky "curled": PIP clearly bent and the tip pulled back toward the wrist.
-// 0.9 matches gestures.js's CURL_THRESHOLD (measured on a real hand in 2D); the 3D value may differ.
-export const CURL_BEND_MIN_DEG = 70;
-export const CURL_REACH_MAX = 0.9;
+// (pointer: others bent 66-81°, reach 0.76-0.85; open hand 21-22°, 1.94-1.95).
+export const CURL_BEND_MIN_DEG = 44;
+export const CURL_REACH_MAX = 1.39;
 // The index must stand out from the other three by this much reach, so a loosely half-open
-// hand that scrapes past both thresholds does not count.
-export const INDEX_SEPARATION_MIN = 0.3;
-// Thumb tip distance to the index's first bone (MCP 5 -> PIP 6), in palm lengths.
-// Above COCKED = hammer up; below DROPPED = thumb resting on the index; between = keep state.
-// The gap between them is the hysteresis band that stops a trembling thumb double-clicking.
+// hand that scrapes past both thresholds does not count (pointer 0.99-1.13; open/fist -0.13-0.05).
+export const INDEX_SEPARATION_MIN = 0.52;
+// DIAGNOSTIC ONLY (not part of the pose): thumb tip distance to the index's first bone
+// (MCP 5 -> PIP 6), in palm lengths. Above COCKED = thumb up; below DROPPED = resting on the
+// index; between = keep the previous state.
 export const THUMB_COCKED_MIN = 0.55;
 export const THUMB_DROPPED_MAX = 0.30;
-// Cross-check only (reported, not used to decide): angle between the thumb (MCP 2 -> tip 4)
-// and the index bone (5 -> 6). Cocked is roughly an L, dropped roughly parallel.
+// Cross-check for the diagnostic: angle between the thumb (MCP 2 -> tip 4) and the index bone.
 export const THUMB_ANGLE_COCKED_MIN_DEG = 40;
 export const THUMB_ANGLE_DROPPED_MAX_DEG = 35;
 
-// Labels that mean "definitely not a gun". Pointing_Up is the label MediaPipe gives a gun seen
-// from the side often enough to count as support, but it never forces a gun on its own.
-export const GUN_VETO_LABELS = ['Open_Palm', 'Victory', 'Closed_Fist'];
+// Labels that mean "definitely not a pointer". Pointing_Up is the label MediaPipe gives a
+// pointer seen from the side often enough to count as support, but it never decides alone.
+// Thumb_Up is deliberately NOT a veto: the live probe labelled a pointer aimed at the camera
+// Thumb_Up on 100% of frames. Open_Palm is not a veto either: an earlier probe labelled a side-on
+// pointer Open_Palm on 28-100% of frames, and geometry separates the real open hand cleanly.
+export const GUN_VETO_LABELS = ['Victory', 'Closed_Fist'];
 export const GUN_SUPPORT_LABELS = ['Pointing_Up'];
+
+export const GUN_DEFAULTS = Object.freeze({
+  indexBendMaxDeg: INDEX_BEND_MAX_DEG,
+  indexReachMin: INDEX_REACH_MIN,
+  curlBendMinDeg: CURL_BEND_MIN_DEG,
+  curlReachMax: CURL_REACH_MAX,
+  separationMin: INDEX_SEPARATION_MIN,
+  vetoLabels: GUN_VETO_LABELS
+});
+
+const withDefaults = (t) => (t && t !== GUN_DEFAULTS ? { ...GUN_DEFAULTS, ...t } : GUN_DEFAULTS);
 
 const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
 const len = (v) => Math.hypot(v.x, v.y, v.z);
@@ -97,9 +132,10 @@ function valid(lm) {
     lm.every((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z));
 }
 
-export function gunFeatures(worldLandmarks) {
+export function gunFeatures(worldLandmarks, thresholds = GUN_DEFAULTS) {
   const lm = worldLandmarks;
   if (!valid(lm)) return null;
+  const T = withDefaults(thresholds);
   const wrist = lm[GUN_LANDMARK.WRIST];
   const palm = dist(wrist, lm[GUN_LANDMARK.MIDDLE[0]]);
   // 1 mm: MediaPipe world palms are ~7-10 cm, so anything this small is a degenerate frame.
@@ -115,11 +151,16 @@ export function gunFeatures(worldLandmarks) {
   const middle = finger(GUN_LANDMARK.MIDDLE);
   const ring = finger(GUN_LANDMARK.RING);
   const pinky = finger(GUN_LANDMARK.PINKY);
+  const others = [middle, ring, pinky];
 
-  const curled = (f) => f.pipDeg > CURL_BEND_MIN_DEG && f.reach < CURL_REACH_MAX;
   const [i5, i6] = GUN_LANDMARK.INDEX;
   const thumbGap = distToSegment(lm[GUN_LANDMARK.THUMB_TIP], lm[i5], lm[i6]) / palm;
   const thumbAngleDeg = angleDeg(sub(lm[GUN_LANDMARK.THUMB_TIP], lm[GUN_LANDMARK.THUMB_MCP]), sub(lm[i6], lm[i5]));
+  // The three summary values isGun() actually compares against thresholds. Exposed so the
+  // lab can calibrate one number per check instead of re-deriving the logic.
+  const indexBendDeg = Math.max(index.pipDeg, index.dipDeg);
+  const othersMinPipDeg = Math.min(...others.map((f) => f.pipDeg));
+  const othersMaxReach = Math.max(...others.map((f) => f.reach));
 
   return {
     palmM: round(palm, 4),
@@ -127,27 +168,35 @@ export function gunFeatures(worldLandmarks) {
     middle,
     ring,
     pinky,
-    indexExtended: index.pipDeg < INDEX_BEND_MAX_DEG && index.dipDeg < INDEX_BEND_MAX_DEG && index.reach >= INDEX_REACH_MIN,
-    curledCount: [middle, ring, pinky].filter(curled).length,
-    separation: round(index.reach - Math.max(middle.reach, ring.reach, pinky.reach)),
+    indexBendDeg,
+    othersMinPipDeg,
+    othersMaxReach,
+    indexExtended: indexBendDeg < T.indexBendMaxDeg && index.reach >= T.indexReachMin,
+    curledCount: others.filter((f) => f.pipDeg > T.curlBendMinDeg && f.reach < T.curlReachMax).length,
+    separation: round(index.reach - othersMaxReach),
     thumbGap: round(thumbGap),
     thumbAngleDeg: round(thumbAngleDeg, 1)
   };
 }
 
-export function isGun(features, { gesture = null } = {}) {
+export function isGun(features, { gesture = null, thresholds = GUN_DEFAULTS } = {}) {
   const supported = GUN_SUPPORT_LABELS.includes(gesture);
-  if (!features) return { gun: false, rejectedBy: 'no-hand', supported };
-  if (GUN_VETO_LABELS.includes(gesture)) return { gun: false, rejectedBy: `label:${gesture}`, supported };
+  if (!features) return { gun: false, rejectedBy: 'no-hand', failed: ['no-hand'], supported };
+  const T = withDefaults(thresholds);
   const f = features;
-  let rejectedBy = null;
-  if (f.index.pipDeg >= INDEX_BEND_MAX_DEG || f.index.dipDeg >= INDEX_BEND_MAX_DEG) rejectedBy = 'index-bent';
-  else if (f.index.reach < INDEX_REACH_MIN) rejectedBy = 'index-short';
-  else if (f.curledCount < 3) rejectedBy = 'fingers-open';
-  else if (f.separation < INDEX_SEPARATION_MIN) rejectedBy = 'no-separation';
-  return { gun: rejectedBy === null, rejectedBy, supported };
+  const failed = [];
+  if (T.vetoLabels.includes(gesture)) failed.push(`label:${gesture}`);
+  if (f.indexBendDeg >= T.indexBendMaxDeg) failed.push('index-bent');
+  if (f.index.reach < T.indexReachMin) failed.push('index-short');
+  // "All three curled" == "the least-bent one is bent enough AND the furthest-out one is
+  // pulled in enough", split in two so a live run can tell which half real hands miss.
+  if (f.othersMinPipDeg <= T.curlBendMinDeg) failed.push('curl-pip');
+  if (f.othersMaxReach >= T.curlReachMax) failed.push('curl-reach');
+  if (f.separation < T.separationMin) failed.push('no-separation');
+  return { gun: failed.length === 0, rejectedBy: failed[0] ?? null, failed, supported };
 }
 
+// DIAGNOSTIC ONLY since 2026-10-01: the thumb is not a trigger and not part of the pose.
 export function thumbState(features, prev = 'unknown') {
   const prevState = typeof prev === 'string' ? prev : prev?.state ?? 'unknown';
   if (!features) return { state: 'unknown', gap: null, angleDeg: null, angleAgrees: null };

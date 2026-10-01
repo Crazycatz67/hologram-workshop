@@ -412,28 +412,32 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
     }
   }
 
-  function pickAt(clientX, clientY) {
-    const rect = renderer.domElement.getBoundingClientRect();
-    pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
-    pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  // Picking works in normalized device coordinates so the finger-gun pointer (hologram.js),
+  // which has no mouse event, places points through exactly the same code as a mouse click.
+  function pickAtNdc(ndcX, ndcY) {
+    pointer.set(ndcX, ndcY);
     raycaster.setFromCamera(pointer, camera);
     return raycaster.intersectObject(object, true)[0] ?? null;
   }
 
-  let downAt = null;
-  const onDown = (e) => { downAt = { x: e.clientX, y: e.clientY }; };
-  const onUp = (e) => {
-    if (mode === 'off' || !downAt) return;
-    if (Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > DRAG_TOLERANCE) return; // orbiting
-    const hit = pickAt(e.clientX, e.clientY);
-    if (!hit) return;
-    const local = object.worldToLocal(hit.point.clone());
+  function pickAt(clientX, clientY) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    return pickAtNdc(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+  }
+
+  // Places a tape point (or a note) where a pick landed. `point` (world) overrides the hit
+  // point, for a pointer that snapped to a vertex near it. Returns false on a miss or when
+  // neither tape nor note mode is on.
+  function placeHit(hit, point = null) {
+    if (mode === 'off' || !hit) return false;
+    const world = point ?? hit.point;
+    const local = object.worldToLocal(world.clone());
 
     if (mode === 'note') {
       annotations.add(local, '');
       const inputs = noteList.querySelectorAll('input');
       inputs[inputs.length - 1]?.focus();
-      return;
+      return true;
     }
 
     if (picks.length === 2) clearTape();
@@ -442,12 +446,21 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
       new THREE.SphereGeometry(0.012, 12, 12),
       new THREE.MeshBasicMaterial({ color: MARKER_COLOR })
     );
-    marker.position.copy(hit.point);
+    marker.position.copy(world);
     scene.add(marker);
     markers.push(marker);
     refreshTapeGeometry();
     reportTape();
     renderCalibration();
+    return true;
+  }
+
+  let downAt = null;
+  const onDown = (e) => { downAt = { x: e.clientX, y: e.clientY }; };
+  const onUp = (e) => {
+    if (mode === 'off' || !downAt) return;
+    if (Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > DRAG_TOLERANCE) return; // orbiting
+    placeHit(pickAt(e.clientX, e.clientY));
   };
   renderer.domElement.addEventListener('pointerdown', onDown);
   renderer.domElement.addEventListener('pointerup', onUp);
@@ -564,6 +577,18 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
     base,
     surfaces,
     report: currentReport,
+    // 'off' | 'tape' | 'note': whether a click on the model belongs to this panel.
+    get mode() {
+      return mode;
+    },
+    // How many tape points are placed (0-2), for the pointer's status line.
+    get tapePoints() {
+      return picks.length;
+    },
+    // The pointer's click (hologram.js): same placement as a mouse click, at NDC coordinates.
+    placeAtNdc(ndcX, ndcY, point = null) {
+      return placeHit(pickAtNdc(ndcX, ndcY), point);
+    },
     dispose() {
       // Without this the panel's own animation frame kept running after disposal, holding
       // the object, scene and every note alive with it.

@@ -470,8 +470,157 @@ new tracker on every start and `stop()` never closed it.
 
 ## 30. [A] The single-layer depth pre-pass is wiped by the background clear, so surfaces add up (photosafety #14 guard inactive)
 
-**Status: OPEN** (2026-09-30, found by Cody-2 building P5; the mechanism was confirmed by the overseer reading the code).
-- **Symptom:** two stacked scanned planes add their brightness, 16,129,203 alone → 32,255,255 stacked (Cody-2's measurement). #14's "draw only the front layer" guard isn't taking effect.
-- **Cause:** `scene.js:9` sets a `THREE.Color` `scene.background`. In three r161 a Color background makes WebGLBackground **force-clear** colour and depth at the start of every `renderer.render()`, even with `autoClear = false`. `hologramLook.renderSingleLayer` (hologramLook.js ~:59-69) and `platform/lod.js` (~:176-189) render a depth pre-pass and then a colour pass, and the second render's forced clear erases the pre-pass depth.
-- **Likely fix:** keep `autoClearDepth` false (or null the background and clear to the colour manually) for the colour pass. Re-run `safety-test.html` and the P5 photosafety check afterwards. `platform/p5-test.js` section B works around this with a null background.
-- **Risk until fixed:** inferred and scanned layers glow additively where they overlap. It was still measured at 0 flashes/s on the P5 check, so this is brightness stacking, not flashing.
+**Status: FIXED (verified offline)** (2026-10-01). Found by Cody-2 building P5 (2026-09-30); fixed by Debbie.
+- **Symptom:** two stacked scanned planes add their brightness: centre pixel 16,132,207 alone → 32,255,255 stacked (luminance 0.2211 → 0.7858), in both v1 `hologramLook` and Platform `lod`.
+- **Reproduction:** `platform/p5-test.html`, section B30 (Color background, two stacked planes, read pixels). It failed 2/2 before the fix and was deterministic.
+- **Root cause:** in three r161, `WebGLBackground.render` sets `forceClear = true` for a `THREE.Color` background and then calls `renderer.clear(autoClearColor, autoClearDepth, autoClearStencil)` even with `autoClear = false`. The background comes from `scene.js:9`. The colour pass in `hologramLook.renderSingleLayer` and `platform/lod.js` `render` was erasing the pre-pass depth.
+- **Fix:** a new `hologramLook.renderColourPass()` turns `autoClearDepth` and `autoClearStencil` off for the colour pass only, so the background colour still gets painted. `renderSingleLayer` and `lod.js` both use it. `scene.js` is unchanged.
+- **Regression check:** p5-test section B30, 4 checks (stacked = front alone; a single layer matches a plain one-pass render byte for byte, max diff 0), run on both renderers. p5-test 22/2 → 24/0.
+- **Numbers:** in safety-test, chess + comfort blown pixels went 0.81% → 0.60% and v1 + comfort 3.85% → 3.25%. Every row is still 0–1 flashes/s. The 2026-09-29 #14 figures were taken with this bug present. In perf-test, Platform blown 2.26% → 2.00% and render time is unchanged (pr1 median 0.9 ms both runs).
+- **Still to confirm:** whether the owner thinks the look is right where layers overlap (overlaps are now dimmer, as #14 intended).
+
+## 31. [A-v1] Two-hand scale feels sticky on small motions and at every direction change (not a regression from f439528)
+
+**Status: FIXED, awaiting live check** (2026-10-01: owner chose the "smarter fix"; built by Cody. Reported in the owner's webcam test as "not as smooth as it was, depends on the range of motion"; investigated by Debbie).
+- **Symptom:** the model ignores the first part of a pinch-scale move and freezes for a while each time the hands change direction. Small moves feel dead, big moves feel fine.
+- **Reproduction:** a synthetic pipeline with two pinching hands (smoothLandmarks → `pinch()` → `update()`, `tick()` at 60 Hz), jitter 0.002-0.004, 30 and 49 fps, 4-5 seeds, moving out and back with an eased sweep. Small move (span ×1.27), 1.5 s per leg: scale starts **598 ms** after the hands start (pre-2026-09-29 code: 55 ms) and holds still for **809 ms** after they reverse (old: 39 ms). It reaches 82% of the intended size. Large move (×3.3): 250 ms to start and 439 ms after a reversal (old: 33 and 41 ms).
+- **Not f439528:** current code and `f439528^` give **bit-identical scale traces** in every realistic case: pinch ratio 0.15, 0.21 and 0.23 × 4 motions × 30/49 fps × jitter 0.002/0.004 × 5 seeds. They differ only when one pinch is so loose that it fails 71% of frames, where both versions are broken. With a sustained misread (pinch read as a fist or as open hands for 400 ms or more), the new neutral gap *helps*: the old code jumped to grab (moved 0.22-0.52, rotated 14-29°) or to explode (stretched 0.37 ln). The new code just holds the scale. Pinch flicker (single threshold, `gestures.js:15`) is not the cause: a firm pinch (ratio 0.15) misses under 2% of frames and causes 0.07 mode-drop frames per trial. The 2.5 clamp, the speed cap (`MAX_SPEED.scale` 3 → 8 changed nothing) and the One Euro settings (unchanged since 2026-09-29) are also ruled out.
+- **Root cause:** the backlash deadzone on ln(hand span) from the 2026-09-29 rewrite (fa343f2): `SCALE_DEADZONE = 0.05` (`manipulator.js:50`, applied by `takeUpSlack` in `commandTransform`). A start costs 5% of span and a reversal costs 10% (2 × width) before anything moves. On a ×1.27 move, 10% is about 40% of the return stroke, which is why it "depends on the range of motion". The old velocity code had no deadzone, but a still pair of hands drifted the scale by up to 6.6%.
+- **Trade-off (measured; rest drift = worst over 10 s with still pinching hands, 12 trials per jitter level):**
+
+  | `SCALE_DEADZONE` | start / reversal delay, small slow move | rest drift at jitter 0.002 / 0.003 / 0.004 |
+  |---|---|---|
+  | 0.05 (now) | 598 / 809 ms | 0 / 0 / 0 |
+  | 0.04 | not measured | 0 / 0 / 0.19% (1 of 12) |
+  | 0.035 | not measured | 0 / 0 / 0.69% (5 of 12) |
+  | 0.03 | 484 / 627 ms | 0 / 0.10% / 1.19% |
+  | 0.02 | 436 / 551 ms | 0.04% / 1.01% / 1.75% |
+
+  0.05 is the smallest width that keeps still hands at exactly zero drift up to 0.004 jitter, so a pure retune trades stickiness for drift. A structural option that could get both: about half to three-quarters of the ln(span) noise comes from the palm-length normaliser in `handSpan` (smoothed noise peak-to-peak 0.020-0.053 for the span vs 0.005-0.024 for the wrist distance alone). Normalising by a palm length smoothed much more heavily, or frozen when the pinch engages, should let the deadzone drop to about 0.025 with zero drift. That is untested and is a design change for the owner.
+- **Fix:** `manipulator.js` `commandTransform` (constants and reasoning at `SCALE_DEADZONE` / `PALM_REF_DEADZONE`). While a pinch is held, the span is divided by a **held palm length** (captured at engage, re-normalised only past a 4% backlash of its own) instead of the live, noisy one (`gestures.js` `handSpan` gained an optional `{ palm }`). The deadzone moved from ln(span) to **0.12 palm lengths of span**, because the noise left is wrist-position noise, a fixed size in the image. It costs 3.2% of span with the hands 3.7 palms apart (was 5%), 2.3% at 5.2 palms, and 5.7% at 2.1 palms. Measured (same synthetic pipeline, medians of 5 seeds, start / reversal / reached):
+
+  | case (30 fps, jitter 0.002) | before | after |
+  |---|---|---|
+  | small x1.27, 1.5 s, from 3.7 palms | 533 / 783 ms / 82% | 450 / 583 ms / 90% |
+  | small x1.27, 1.5 s, from 5.2 palms | 533 / 783 ms / 82% | 400 / 517 ms / 93% |
+  | small x1.27, 1.5 s, from 2.1 palms | 533 / 783 ms / 83% | 583 / 783 ms / 82% |
+  | small x1.27, 0.3 s | 150 / 200 ms / 82% | 133 / 167 ms / 91% |
+  | large x3.3, 1.5 s | 233 / 417 ms | 233 / 300 ms |
+  | still hands 10 s, 1.5-4.5 palms apart, jitter 0.002 / 0.003 / 0.004 (120 trials each) | 0 / 0.41% / 2.36% worst drift | 0 / 0 / 0 |
+
+  It helps, but it is not the old code's 30-50 ms: the first ~3% of a slow eased move is still slack, and an eased start takes ~400 ms to cover it. **Trade-off taken:** leaning toward or away from the camera mid-pinch now leaks a one-off 3.5-5% scale (0.8x to 1.25x leans; was 0). A fully frozen palm length leaked the whole lean (24% for a 25% lean), so it is not used.
+- **Regression check:** `test.html` group "Scale responsiveness (BUGS #31)": mean start under 500 ms, reversal under 700 ms, at least 85% reached, zero drift for still hands 1.8 palms apart at jitter 0.004, and a 25% lean leaking under 8%. The old code gives 533 ms / 817 ms / 77% / 5 of 6 drifting, so the first four checks fail on it. The simulator is in Cody's scratchpad (`s31/`).
+- **Possible next step (not built):** sliding the slack window back onto the hands after they rest 150 ms cut the reversal from 583 to 433 ms in the simulator with zero drift. The cost is that carrying on in the same direction after a pause would also cost one deadzone width. Needs the owner's decision.
+- **Still to confirm:** on the webcam, a slow small pinch-spread should now start sooner and pause less at each reversal, still hands should hold the size exactly, and leaning in or out mid-pinch should change it only slightly. If the owner feels it mostly on *large* fast moves instead, the cause is something else (real pinch loosening at full arm span, which synthetic hands can't show).
+
+## 32. [A] A pointer (finger gun) is read as a grabbing fist on every frame
+
+**Status: FIXED (verified offline)** (2026-10-01: found by the owner's gun-lab probe on the webcam; fixed by Cody).
+- **Symptom:** a pointer pose (index out, middle/ring/pinky curled; side-on or aimed at the camera) made `isFistLike` say "grab" on 100% of frames. Wiring the pointer would have dragged the model whenever you aimed, and the pointing hand's own pinch was blocked as `'fist'`.
+- **Root cause:** `gestures.js` `isFistLike` falls back to `isFistShape` when MediaPipe's label is `None`, and `isFistShape` counts curled fingertips in 2D. A pointer has three curled fingers, which is enough. Aimed at the camera the index also foreshortens and counts as a fourth. A 2D image cannot tell the two poses apart.
+- **Fix:** per-hand arbitration. `gestures.js` gains `pointerState(worldLandmarks, gesture)` (gunPose.js `isGun` on the 3D world landmarks) and `annotateHand(hand, aspect)`. `hologram.js` calls `annotateHand` once per hand per frame, which sets `hand.pointer = { gun, rejectedBy }` and passes it to `isFistLike` / `pinch` through a new optional `{ pointer, worldLandmarks }` argument. A pointer is never a fist. `Closed_Fist` still wins, and `isGun` vetoes that label anyway. Callers that pass neither argument (hands.js, labs, older tests) keep the exact old rule. A real fist cannot pass as a pointer: on the owner's hand a fist's index bends 97-109° (reach 0.60-0.88), against a pointer's ≤ 25° / ≥ 1.81 and limits of 45° / 1.35. `manipulator.js` now reads fists through `hand.pointer` (`fistOf`) and adds two rules:
+  - **Post-pointer gap:** `POINTER_GAP_MS` = 300. Curling the index to leave the pointer *is* a fist, so for 300 ms after the pointer ends, from rest, no gesture may start. This is a timer only. It deliberately does not reuse the neutral gap's 100 ms relaxed-hands rule, which would stop "point, then hold a fist" from ever grabbing without opening the hand first.
+  - **A pointer is not an open hand:** it no longer counts toward explode or clap. Without this, "pointer + relaxed other hand" turned from a false grab into a false explode.
+- **Measured** (`test.html` replay: owner-shaped world + image hands, 50 fps, through smoothLandmarks → annotateHand → manipulator; old code vs new):
+
+  | case | old | new |
+  |---|---|---|
+  | pointer side-on, label None: read as fist / in grab | 100% / 97% | 0% / 0% |
+  | pointer at the camera, label None: read as fist / in grab | 100% / 97% | 0% / 0% |
+  | real fist (palm, side, camera, label None; palm, Closed_Fist): fist / grab after 100 ms | 100% / 100% | 100% / 100% |
+  | pointing hand's pinch rejected as `'fist'` | 100% | 0% |
+  | other hand's pinch while the pointer aims | 100% | 100% |
+  | pointer + open other hand, moving apart: not idle | 96% (grab) | 0% |
+  | grab, then extend the index and sweep 0.15: model moves | 0.384 | 0 |
+  | pointer → fist: first grab after the pointer ends | 0 ms | 360 ms |
+  | rest → fist (control): first grab | 60 ms | 60 ms |
+  | pointer with a misread (fist) frame every 200 ms: in grab | 97% | 0% |
+
+- **Regression check:** `test.html` group "Pointer is never a grab (live probe 2026-10-01)", 21 checks. On the pre-fix gestures.js/manipulator.js/hologram.js, 10 of them fail and nothing else does. Gesture lab and smoothing lab output is byte-identical before and after. gun-lab self-test 45/0.
+- **Still to confirm (live):** on hologram.html (Everything on or the Move drill), hold the pointer side-on and then aimed at the camera: the chair must not move. Make a fist: it must grab. Point, then curl the index into a fist and hold: it grabs after a short beat (~⅓ s), not instantly.
+- **Not changed (next round):** while a pointer is held, the *other* hand's fist still grabs, and the pointing hand then works as the tilt hand. The cursor and click wiring is a later round.
+
+## 33. [Library] An edit followed at once by opening another project is lost
+
+**Status: FIXED (verified offline)** (2026-10-01). Debbie's Library ring break-test.
+- **Symptom:** move a part, then choose another project within the 2 s autosave debounce: the move is gone when you come back.
+- **Root cause:** `openProject` set `lib.opening` before flushing, and `saveWorkingNow` skips saves while opening, so the pending edit was dropped (`platform/main.js` flushAutosave/saveWorkingNow).
+- **Fix:** `flushAutosave({ whileOpening: true })` from openProject (`platform/main.js` ~870).
+- **Regression check:** `platform/library-test.html` B22.
+
+## 34. [Library] Two copies of the same file in one scene reopen as one
+
+**Status: FIXED (verified offline)** (2026-10-01). Break-test.
+- **Symptom:** a scene with the same scan twice (or the same bytes under another name) reopened with fewer items and lost one copy's edits.
+- **Root cause:** sources were deduplicated by sha, so the saved list had one entry for both items.
+- **Fix:** `currentSources()` keeps one entry per item's main file; only shared sidecars are deduped (`platform/main.js:620`).
+- **Regression check:** library-test B24.
+
+## 35. [Library] An edit made while another project is loading is lost
+**Status: FIXED (verified offline)** (2026-10-01). Break-test.
+- **Symptom:** during load-then-swap the old scene stays interactive; an edit made then vanished.
+- **Root cause:** nothing saved the old scene between the start of the load and the swap.
+- **Fix:** `replaceScene(..., beforeClear)` saves the old project just before the swap clears it (`platform/main.js:798-817`, called from openProject).
+- **Regression check:** library-test B23.
+
+## 36. [Library] Two tabs on one project overwrite each other
+**Status: FIXED (verified offline)** (2026-10-01). Break-test.
+- **Symptom:** the same project open in two tabs: the staler tab's autosave silently replaced the other tab's work.
+- **Root cause:** working-copy writes had no revision check.
+- **Fix:** `store.js` working copy carries `rev`; `saveWorking`/`saveVersion` take `baseRev` and throw code `conflict` (or `gone` if deleted elsewhere). `main.js` `keepConflictAsCopy()` (:686) continues the stale tab's scene as a new project titled "... (edits from another tab)".
+- **Regression check:** library-test A34-A36, B28.
+
+## 37. [Library] An edit made just before a reload is lost
+**Status: FIXED (verified offline)** (2026-10-01). Break-test.
+- **Symptom:** edit, then reload within the 2 s debounce: the edit is gone.
+- **Root cause:** IndexedDB writes started in `pagehide` don't reliably finish before the page goes.
+- **Fix:** `stashForUnload()` (`platform/main.js:1154`) writes a synchronous localStorage rescue copy; it is replayed on the next start and dropped once a save lands (`dropRescue`).
+- **Regression check:** library-test B29.
+
+## 38. [Library] Storage full: autosave fails silently and switching projects throws the edits away
+**Status: FIXED (verified offline)** (2026-10-01). Break-test.
+- **Symptom:** with the disk/quota full, edits weren't saved and opening another project cleared them without warning.
+- **Root cause:** a failed save cleared `pending`; openProject then cleared the scene.
+- **Fix:** `store.js` throws `StoreQuotaError` (code `quota`, readable message); `saveWorkingNow` keeps `pending`/`saveFailed`; openProject/closeProject refuse once (`discardOk`, `main.js:873`, `:947`) and say so; the next flush retries. See #43 for the follow-up button.
+- **Regression check:** library-test B26.
+
+## 39. [Library ring] A refresh during a fling skips the rest of the glide
+**Status: FIXED (verified offline)** (2026-10-01). Break-test.
+- **Symptom:** thumbnails arriving (or a rename) mid-fling made the ring jump, passing several cards in one frame.
+- **Root cause:** `setProjects` reset the glide target instead of keeping the remaining motion.
+- **Fix:** `platform/ring.js` ~485 keeps the remaining glide across a refresh.
+- **Regression check:** `platform/ring-test.html` "#39" (fails on the old ring.js, passes now; ≤ 3 cards/s, never 2 in one frame).
+
+## 40. [Library ring] A long project title pushes the actions button off the panel
+**Status: FIXED (verified offline)** (2026-10-01). Break-test.
+- **Root cause:** an `auto` grid track grew to the title's full width (`platform/index.html` ~218).
+- **Fix:** `grid-template-columns: minmax(0, 1fr)` + ellipsis.
+- **Regression check:** ring-test "#40" (fails on the old index.html, passes now).
+- **Still to confirm:** on a phone-width window, a long title shows "…" and the ⋯ button stays visible.
+
+## 41. [Library] Cmd+S pressed again (or held) makes duplicate versions
+**Status: FIXED (verified offline)** (2026-10-01). Break-test.
+- **Root cause:** key repeat and repeat presses each saved a version even with nothing changed.
+- **Fix:** `lib.changedSinceVersion` (`main.js:535/706/751`): no changes → "no changes since the last saved version".
+- **Regression check:** library-test B25 (5 presses → exactly one version).
+
+## 42. [Library] Opening a project without a thumbnail hangs in a hidden tab
+**Status: FIXED (verified offline)** (2026-10-01). Break-test.
+- **Root cause:** the thumbnail step waited for an animation frame, which a hidden tab never runs.
+- **Fix:** wait for a frame or 100 ms, whichever comes first (`main.js:913`).
+- **Regression check:** library-test B27.
+
+## 43. [Library] Storage full leaves no way to free space from the page
+**Status: FIXED (verified offline)** (2026-10-01). Owner decision after #38: "Free space now".
+- **Symptom:** after #38 the visitor is told storage is full, but deleted projects stay in the trash for 30 days and keep using the space.
+- **Fix:** a "Hold: free space now" button appears in the status bar on a quota error (`platform/index.html` #freeSpace; `platform/main.js` freeSpaceNow ~563). Holding it `HOLD_GATE.ringMs` (650 ms; a short press or click does nothing) permanently removes already-deleted projects and unreferenced files at once — `store.purgeExpired(0, { orphanMs: 0, keep })` (`platform/store.js:525`) — then retries the failed save. Samples are never purged. `keep` spares files the open scene uses but hasn't referenced yet (a save that failed after storing its file), because the retry would otherwise reference a missing blob (`store.js` addRefs throws, :175). The button hides on the next successful save.
+- **Regression check:** library-test B30 (button shows, 200 ms press does nothing, 800 ms hold purges the trashed project + its file + an orphan, scene files kept, edit saved, button hidden) and B31 (keep).
+- **Still to confirm:** on the real page with a nearly full disk is not practical; check by eye that the button reads clearly and fills while held (simulated quota only).
+
+## 44. [Library] A second open during the first one's thumbnail step runs unguarded
+**Status: FIXED (verified offline)** (2026-10-01). Break-test.
+- **Symptom:** open A (no thumbnail yet), then B straight away: B started loading, and when A finished it cleared "opening" and the busy state in the middle of B's load, so edits during B's load could autosave and a third open could start; A's thumbnail could be taken of B's scene.
+- **Reproduction:** library-test B32 starts B from the very frame A's thumbnail step waits on. Before the fix: `A true B true opening/busy when A finished false/false` (1/1, deterministic).
+- **Root cause:** `openProject` set `lib.opening = false` before the thumbnail capture (`platform/main.js`, old line ~904).
+- **Fix:** `lib.opening` stays true until the thumbnail is stored; edits made meanwhile are handed to autosave afterwards; a thumbnail failure no longer counts as a failed open (`main.js` ~905-924).
+- **Regression check:** library-test B32 (after: B refused, A opened with a thumbnail).

@@ -1,3 +1,20 @@
+import { gunFeatures, isGun } from './gunPose.js';
+
+// CONTRACT (pointer arbitration, added 2026-10-01; every new argument is optional and the
+// defaults reproduce the old behaviour exactly, so hands.js, the labs and tests are unchanged
+// unless they opt in):
+//   pointerState(worldLandmarks, gesture) -> { gun: boolean, rejectedBy: string | null }
+//     gunPose.js's pointer ("finger gun") check for ONE hand, on MediaPipe world landmarks
+//     (metres). gun is false with rejectedBy 'no-hand' when there are no usable world landmarks.
+//   isFistLike(gesture, landmarks, aspect = 1, { pointer, worldLandmarks } = {}) -> boolean
+//     pointer: a precomputed pointerState() for this hand (preferred: compute once per frame).
+//     worldLandmarks: used to compute it here when `pointer` is not given.
+//     Neither given -> exactly the pre-2026-10-01 rule.
+//   pinch(landmarks, aspect, { threshold, gesture, pointer, worldLandmarks }) -> as before;
+//     pointer/worldLandmarks are passed through to isFistLike, so a pointer never blocks a pinch.
+//   annotateHand(hand, aspect) -> hand, with hand.pointer, hand.pinch, hand.fistLike set.
+//     The per-frame hand building hologram.js does; exported so test.js replays the same code.
+
 export const LANDMARK = {
   WRIST: 0,
   THUMB_TIP: 4,
@@ -55,7 +72,7 @@ export function palmLength(landmarks, aspect) {
 // across viewing angles, it just happened to on the one angle it was tuned against. Fixed on
 // a real hand: facing the camera, a genuine pinch measured as "curled" and silently failed.
 // `isFistShape()` below is the replacement — it targets the actual fist shape instead.
-export function pinch(landmarks, aspect = 1, { threshold = PINCH_THRESHOLD, gesture = null } = {}) {
+export function pinch(landmarks, aspect = 1, { threshold = PINCH_THRESHOLD, gesture = null, pointer, worldLandmarks } = {}) {
   const thumb = landmarks[LANDMARK.THUMB_TIP];
   const index = landmarks[LANDMARK.INDEX_TIP];
   const palm = palmLength(landmarks, aspect);
@@ -63,7 +80,7 @@ export function pinch(landmarks, aspect = 1, { threshold = PINCH_THRESHOLD, gest
   if (palm <= 0) return { ratio: Infinity, pinching: false, rejectedBy: 'no-palm' };
 
   const ratio = distance(thumb, index, aspect) / palm;
-  const rejectedBy = isFistLike(gesture, landmarks, aspect) ? 'fist' : null;
+  const rejectedBy = isFistLike(gesture, landmarks, aspect, { pointer, worldLandmarks }) ? 'fist' : null;
 
   return { ratio, pinching: ratio < threshold && rejectedBy === null, rejectedBy };
 }
@@ -110,16 +127,50 @@ export function isFistShape(landmarks, aspect = 1) {
 // which is exactly the punch-orientation gap it exists to backstop. Trusting a confident
 // alternative label over the geometric guess is what stops a thumbs-up or a loosely
 // closed hand from being read as a grab.
-export function isFistLike(gesture, landmarks, aspect = 1) {
+//
+// Pointer arbitration (live probe 2026-10-01): a pointer (index out, the other three curled)
+// labelled None was read as a grabbing fist on 100% of frames, because isFistShape counts the
+// three curled fingers in 2D, and aimed at the camera the index foreshortens into a fourth.
+// A 2D image cannot separate the two, so the 3D pointer check (gunPose.js, world landmarks)
+// decides first: a pointer is never a fist. A real fist cannot pass it: on the owner's hand
+// a fist's index bends 97-109 deg with reach 0.60-0.88, the pointer's <= 25 deg / >= 1.81,
+// against limits of 45 deg / 1.35. Closed_Fist still wins outright (isGun vetoes that label
+// anyway, so the two can never disagree).
+export function isFistLike(gesture, landmarks, aspect = 1, { pointer, worldLandmarks } = {}) {
   if (gesture === 'Closed_Fist') return true;
+  const p = pointer ?? (worldLandmarks ? pointerState(worldLandmarks, gesture) : null);
+  if (p?.gun) return false;
   if (gesture === 'None' || gesture == null) return isFistShape(landmarks, aspect);
   return false;
 }
 
+// One hand's pointer state, in the small shape the hand object carries (hand.pointer). The
+// full feature set stays in gunPose.js; the pages only need the verdict and, for the live
+// readout, the first failed check.
+export function pointerState(worldLandmarks, gesture = null) {
+  const { gun, rejectedBy } = isGun(gunFeatures(worldLandmarks), { gesture });
+  return { gun, rejectedBy };
+}
+
+// The per-frame hand reading the live page does, in one place so the pointer is computed
+// once per hand per frame and the regression suite replays exactly this. hand.worldLandmarks
+// comes from handTracker.js toHands(); landmarks should already be smoothed (the pointer uses
+// the raw world landmarks, which smoothLandmarks.js does not filter, as the calibration did).
+export function annotateHand(hand, aspect = 1) {
+  hand.pointer = pointerState(hand.worldLandmarks, hand.gesture);
+  hand.pinch = pinch(hand.landmarks, aspect, { gesture: hand.gesture, pointer: hand.pointer });
+  hand.fistLike = isFistLike(hand.gesture, hand.landmarks, aspect, { pointer: hand.pointer });
+  return hand;
+}
+
 // Distance between the two hands, in the same palm-relative units as pinch(), so it is
 // comparable across users. Phase 4 uses the change in this for two-hand scale.
-export function handSpan(handA, handB, aspect = 1) {
-  const palm = (palmLength(handA.landmarks, aspect) + palmLength(handB.landmarks, aspect)) / 2;
+//
+// `palm` overrides the live average palm length as the normaliser. Two-hand scale passes a
+// held reference (BUGS #31): the live palm length is the noisiest part of this ratio, and
+// while the hands hold one pinch the normaliser only needs to track real depth change.
+export function handSpan(handA, handB, aspect = 1, { palm: palmOverride = null } = {}) {
+  const palm = palmOverride ?? (palmLength(handA.landmarks, aspect) + palmLength(handB.landmarks, aspect)) / 2;
   if (palm <= 0) return 0;
   return distance(handA.landmarks[LANDMARK.WRIST], handB.landmarks[LANDMARK.WRIST], aspect) / palm;
 }

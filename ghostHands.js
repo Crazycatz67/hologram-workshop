@@ -28,6 +28,14 @@ const FIST_COLOR = 0xffd166;
 const JOINT_RADIUS = 0.02;
 const BONE_RADIUS = 0.011;
 const PALM_OPACITY = 0.5;
+const JOINT_OPACITY = 0.9;
+const BONE_OPACITY = 0.55;
+
+// Engage zone (pointer.js createEngagement): a lowered hand is at rest and does nothing, and
+// its ghost dims to say so. Eased, never a step (BUGS #14): a hand hovering at the line would
+// otherwise blink.
+const REST_OPACITY = 0.35;   // x the normal opacity while at rest
+const DIM_EASE_MS = 150;
 
 const FINGERTIPS = new Set([4, 8, 12, 16, 20]);
 const PINCH_TIPS = new Set([4, 8]);
@@ -74,14 +82,14 @@ function createHandPool(scene, connections) {
   const boneGeo = new THREE.CylinderGeometry(1, 1, 1, 6, 1);
 
   const joints = Array.from({ length: 21 }, () => {
-    const mesh = new THREE.Mesh(jointGeo, new THREE.MeshBasicMaterial({ color: JOINT_COLOR, transparent: true, opacity: 0.9 }));
+    const mesh = new THREE.Mesh(jointGeo, new THREE.MeshBasicMaterial({ color: JOINT_COLOR, transparent: true, opacity: JOINT_OPACITY }));
     mesh.visible = false;
     group.add(mesh);
     return mesh;
   });
 
   const bones = connections.map(() => {
-    const mesh = new THREE.Mesh(boneGeo, new THREE.MeshBasicMaterial({ color: JOINT_COLOR, transparent: true, opacity: 0.55 }));
+    const mesh = new THREE.Mesh(boneGeo, new THREE.MeshBasicMaterial({ color: JOINT_COLOR, transparent: true, opacity: BONE_OPACITY }));
     mesh.visible = false;
     group.add(mesh);
     return mesh;
@@ -104,16 +112,18 @@ function createHandPool(scene, connections) {
   palm.visible = false;
   group.add(palm);
 
-  return { group, joints, bones, palm };
+  return { group, joints, bones, palm, hand: null, dim: 1 };
 }
 
 export function createGhostHands(scene, connections) {
   const pools = [createHandPool(scene, connections), createHandPool(scene, connections)];
+  let lastT = null;
 
   function hideAll(pool) {
     pool.joints.forEach((j) => (j.visible = false));
     pool.bones.forEach((b) => (b.visible = false));
     pool.palm.visible = false;
+    pool.hand = null;
   }
 
   return {
@@ -122,6 +132,9 @@ export function createGhostHands(scene, connections) {
     // depth plane sits; aspect matches the video's own, same as everywhere else in Phase 1/4.
     update(hands, { camera, object, aspect, mirror = true, isFist = () => false }) {
       const depth = camera.position.distanceTo(object.position);
+      const now = performance.now();
+      const k = lastT === null ? 1 : 1 - Math.exp(-Math.max(0, now - lastT) / DIM_EASE_MS);
+      lastT = now;
 
       for (let i = 0; i < pools.length; i++) {
         const pool = pools[i];
@@ -131,6 +144,9 @@ export function createGhostHands(scene, connections) {
           continue;
         }
 
+        pool.hand = hand;
+        pool.dim += ((hand.engaged === false ? REST_OPACITY : 1) - pool.dim) * k;
+        const dim = pool.dim;
         const pinching = hand.pinch?.pinching ?? false;
         const fisted = isFist(hand);
         const points = hand.landmarks.map((lm) => landmarkToWorld(lm, camera, depth, mirror));
@@ -143,6 +159,7 @@ export function createGhostHands(scene, connections) {
           const isPinchTip = pinching && PINCH_TIPS.has(idx);
           const color = fisted ? FIST_COLOR : isPinchTip ? PINCH_COLOR : JOINT_COLOR;
           joint.material.color.setHex(color);
+          joint.material.opacity = JOINT_OPACITY * dim;
 
           const scale = FINGERTIPS.has(idx) ? (isPinchTip || fisted ? 1.8 : 1.3) : 1;
           joint.scale.setScalar(JOINT_RADIUS * scale);
@@ -153,6 +170,7 @@ export function createGhostHands(scene, connections) {
           orientBoneBetween(bone, points[conn.start], points[conn.end]);
           bone.scale.x = bone.scale.z = BONE_RADIUS;
           bone.material.color.setHex(fisted ? FIST_COLOR : JOINT_COLOR);
+          bone.material.opacity = BONE_OPACITY * dim;
         });
 
         const palmPos = pool.palm.geometry.getAttribute('position');
@@ -161,8 +179,16 @@ export function createGhostHands(scene, connections) {
         pool.palm.geometry.computeVertexNormals();
         pool.palm.geometry.computeBoundingSphere();
         pool.palm.material.color.setHex(fisted ? FIST_COLOR : JOINT_COLOR);
+        pool.palm.material.opacity = PALM_OPACITY * dim;
         pool.palm.visible = true;
       }
+    },
+
+    // World position of a drawn hand's landmark (default: the index tip, where the pointer's
+    // beam starts), from the last update(); null if that hand isn't drawn.
+    landmarkOf(hand, index = 8) {
+      const pool = pools.find((p) => p.hand === hand);
+      return pool ? pool.joints[index].position.clone() : null;
     },
 
     dispose() {

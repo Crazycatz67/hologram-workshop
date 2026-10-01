@@ -11,7 +11,7 @@ const { loadModel, frameObject } = await import('./loadModel.js' + V);
 // resting on it, rebuild the leg the scanner missed, and weld the result watertight.
 const { startCamera, stopCamera, describeCameraError } = await import('./camera.js' + V);
 const { createHandTracker, HAND_CONNECTIONS } = await import('./handTracker.js' + V);
-const { pinch, isFistLike, handSpan } = await import('./gestures.js' + V);
+const { annotateHand, handSpan } = await import('./gestures.js' + V);
 const { drawHands, sizeOverlayTo } = await import('./overlay.js' + V);
 const { createManipulator, MODE, CHANNELS } = await import('./manipulator.js' + V);
 const { default: HolographicMaterial } = await import('./HolographicMaterial.js' + V);
@@ -21,6 +21,8 @@ const { smoothHandLandmarks, resetLandmarkSmoothing } = await import('./smoothLa
 const { createMeasurePanel } = await import('./measurePanel.js' + V);
 const { MODELS } = await import('./models.js' + V);
 const { createCarousel } = await import('./carousel.js' + V);
+const { createPointer, createEngagement } = await import('./pointer.js' + V);
+const { createReticle, probe } = await import('./reticle.js' + V);
 
 const video = document.getElementById('cam');
 const overlay = document.getElementById('overlay');
@@ -76,6 +78,13 @@ enableSingleLayer(scene, [hologramMaterial]);
 
 const ghostHands = createGhostHands(scene, HAND_CONNECTIONS);
 const isFist = (h) => h.fistLike;
+
+// Finger-gun pointer (pointer.js) and its reticle (reticle.js). Aim with one hand in the
+// pointer pose, click with the other hand's pinch; the mouse drives the same cursor. Hands
+// count only while raised (createEngagement): lowered = at rest, ghost dimmed.
+const engagement = createEngagement();
+const pointer = createPointer();
+const reticle = createReticle(scene);
 
 // Interaction-tied visual feedback on the hologram itself, in place of haptics this can't
 // have — requested directly during testing ("depending on what we're interacting with,
@@ -235,6 +244,8 @@ function stopTracking() {
   latestFrame = null;
   frameWatchStream = null;
   resetLandmarkSmoothing();
+  engagement.reset();
+  pointer.reset();
   hologramMaterial.setBrightness(MODE_BRIGHTNESS.idle);
   overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
   ghostHands.update([], { camera, object: window.hologram.model ?? scene, aspect: 1 });
@@ -284,30 +295,76 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-// Part selection by mouse (BUGS #28; the one-hand pinch that was meant to select is being
-// retired for a finger-gun pointer later). Once the model is exploded past half-way, a click
-// on a part makes grab/spin/tilt/scale act on that part alone; a click on empty space goes
-// back to the whole model. A drag is an orbit, not a click (same 5px rule as the measure
-// panel), and while the measure panel's point-picking or note mode is on, clicks belong to it.
+// Clicks, from the mouse or the finger-gun pointer, go through act(). Mouse clicks: a drag is
+// an orbit, not a click (same 5px rule as the measure panel). Part selection (BUGS #28): once
+// the model is exploded past half-way, a click on a part makes grab/spin/tilt/scale act on that
+// part alone; a click on empty space goes back to the whole model. While the measure panel's
+// point-picking or note mode is on, clicks belong to it: a mouse click is already handled by
+// the panel's own listener, a pointer click is passed to it here.
 const CLICK_TOLERANCE_PX = 5;
 let clickDownAt = null;
+let snappedVertex = null; // the reticle's current snap, for hysteresis when a click re-probes
+
+function eventNdc(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  return {
+    x: ((e.clientX - rect.left) / rect.width) * 2 - 1,
+    y: -((e.clientY - rect.top) / rect.height) * 2 + 1
+  };
+}
+
+function viewportSize() {
+  const rect = renderer.domElement.getBoundingClientRect();
+  return { width: rect.width || 1, height: rect.height || 1 };
+}
+
+function act(click) {
+  if (!click) return;
+  const panelMode = currentMeasurePanel?.mode ?? 'off';
+  if (panelMode !== 'off') {
+    if (click.source !== 'hand') return;
+    reticle.pulse();
+    // Re-probe at the rewound cursor so the point lands on the vertex the reticle showed.
+    const hit = probe(click.x, click.y, {
+      object: window.hologram.model, camera, viewport: viewportSize(), snapped: snappedVertex
+    });
+    const placed = currentMeasurePanel.placeAtNdc(click.x, click.y, hit?.vertex ? hit.point : null);
+    if (!placed) setStatus('pointer click missed the model');
+    else if (panelMode === 'tape') {
+      setStatus(currentMeasurePanel.tapePoints === 1 ? 'tape: point A placed · aim and pinch again for B' : 'tape: point B placed');
+    } else setStatus('note pinned');
+    return;
+  }
+  if (click.source === 'hand') reticle.pulse();
+  if (!manipulator?.explodeIsLiteral) {
+    if (click.source === 'hand') setStatus('click · turn on the tape (M) or explode the model to pick parts');
+    return;
+  }
+  const before = manipulator.activePart;
+  const part = manipulator.selectPartAtScreenPoint(click.x, click.y);
+  if (part) setStatus(`selected: ${part.name || 'part'} · gestures now move just this part`);
+  else if (before && !manipulator.activePart) setStatus('whole model selected');
+  else if (click.source === 'hand') setStatus('click · explode the model past half-way to pick a part');
+}
+
 renderer.domElement.addEventListener('pointerdown', (e) => {
   clickDownAt = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
 });
 renderer.domElement.addEventListener('pointerup', (e) => {
   const down = clickDownAt;
   clickDownAt = null;
-  if (!down || !manipulator?.explodeIsLiteral) return;
+  if (!down) return;
   if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > CLICK_TOLERANCE_PX) return;
-  if (document.querySelector('#measure button.active')) return;
-  const rect = renderer.domElement.getBoundingClientRect();
-  const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-  const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-  const before = manipulator.activePart;
-  const part = manipulator.selectPartAtScreenPoint(ndcX, ndcY);
-  if (part) setStatus(`selected: ${part.name || 'part'} · gestures now move just this part`);
-  else if (before && !manipulator.activePart) setStatus('whole model selected');
+  const at = eventNdc(e);
+  act(pointer.mouseClick(at.x, at.y));
 });
+// Mouse fallback: the mouse drives the same cursor (and reticle) as the hand pointer.
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'touch') return;
+  const at = eventNdc(e);
+  pointer.mouseMove(at.x, at.y);
+});
+renderer.domElement.addEventListener('pointerleave', () => pointer.mouseLeave());
 
 // Camera frame timing. requestVideoFrameCallback reports each new camera frame once, with
 // its capture time; the old way (polling video.currentTime from the render loop) stamped
@@ -371,6 +428,7 @@ startRenderLoop({
       // Still advance the model's follow springs, so a release that was coasting when the
       // camera stopped settles instead of freezing mid-glide.
       manipulator?.tick(tickNow);
+      updatePointerVisuals(tickNow);
       return;
     }
 
@@ -385,16 +443,19 @@ startRenderLoop({
       const now = frameTime;
       hands = tracker.read(video, now);
       smoothHandLandmarks(hands, now);
-      for (const hand of hands) {
-        hand.pinch = pinch(hand.landmarks, aspect, { gesture: hand.gesture });
-        hand.fistLike = isFistLike(hand.gesture, hand.landmarks, aspect);
-      }
+      // Pointer first, once per hand per frame (gestures.js annotateHand): a pointer is never
+      // read as a grabbing fist and never blocks a pinch (BUGS #32). hand.pointer is
+      // { gun, rejectedBy }; the manipulator also uses it for the post-pointer gap.
+      for (const hand of hands) annotateHand(hand, aspect);
+      // Raised hands only (hand.engaged); the manipulator and pointer both ignore lowered ones.
+      engagement.update(hands);
 
       const mode = manipulator?.update(hands, aspect, now) ?? MODE.IDLE;
       modeEl.textContent = mode;
       modeEl.className = mode;
       // Eased, never a step: a brightness jump on every gesture start/stop is a flash.
       hologramMaterial.setBrightness(MODE_BRIGHTNESS[mode] ?? 1.0);
+      act(pointer.update(hands, aspect, now));
       updateLive(mode);
     }
     // Every display frame, not just camera frames: the model's follow springs glide between
@@ -407,8 +468,26 @@ startRenderLoop({
       ghostHands.update(hands, { camera, object: window.hologram.model, aspect, isFist });
     }
     drawHands(overlayCtx, hands, HAND_CONNECTIONS);
+    updatePointerVisuals(tickNow);
   }
 });
+
+// Every display frame (after the ghost hands, whose index tip the beam starts from).
+function updatePointerVisuals(nowMs) {
+  pointer.tick(nowMs);
+  const st = pointer.state;
+  const model = window.hologram.model;
+  const shown = st.mode !== 'off' && model;
+  const result = reticle.update({
+    cursor: shown ? { x: st.x, y: st.y } : null,
+    object: model,
+    camera,
+    viewport: viewportSize(),
+    beamFrom: st.source === 'hand' && st.aimHand ? ghostHands.landmarkOf(st.aimHand, 8) : null,
+    nowMs
+  });
+  snappedVertex = result?.vertex ?? null;
+}
 
 // ---------------------------------------------------------------------------------------
 // Practice drills. Reported live: "it keeps accidentally moving around and doing commands I
@@ -424,7 +503,7 @@ const DRILLS = [
     sub: 'normal use',
     channels: CHANNELS,
     title: 'All gestures active',
-    body: 'Fist — move, twist to spin, hand nearer/farther to push-pull · second hand up/down tips it, left/right rolls it · two-hand pinch — scale · two open hands apart — explode (past half-way, click a part to move just that part) · clap from rest — reset (U undoes) · after letting go of any gesture, relax your hands for a moment before starting a different one'
+    body: 'Fist — move, twist to spin, hand nearer/farther to push-pull · second hand up tilts it up, down tilts it down, left/right rolls it · two-hand pinch — scale · two open hands apart — explode (past half-way, click a part to move just that part) · clap from rest — reset (U undoes) · point (index out, other fingers curled) to aim the ring, pinch your OTHER hand to click (places tape points with the tape on, picks parts once exploded) · lower your hands to rest · after letting go of any gesture, relax your hands for a moment before starting a different one'
   },
   {
     id: 'move',
@@ -445,10 +524,10 @@ const DRILLS = [
   {
     id: 'tilt',
     label: 'Tilt',
-    sub: 'second hand: up/down tips, left/right rolls',
+    sub: 'second hand: up tilts up, left/right rolls',
     channels: ['tilt'],
     title: 'Tilt',
-    body: 'Hold a fist with one hand to take hold. Raise and lower your OTHER hand to tip it toward or away from you; move that hand left and right to roll it side to side. Both read from the same hand at once. It can be any shape.'
+    body: 'Hold a fist with one hand to take hold. Raise your OTHER hand to tilt it up (its front edge rises) and lower it to tilt it down; move that hand left and right to roll it side to side. Both read from the same hand at once. It can be any shape.'
   },
   {
     id: 'push',
@@ -584,7 +663,8 @@ function updateLive(mode) {
 
   const fists = hands.filter((h) => h.fistLike).length;
   const pinches = hands.filter((h) => h.pinch?.pinching).length;
-  const open = hands.filter((h) => !h.fistLike && !h.pinch?.pinching).length;
+  // A pointer is not an open hand (it can't explode or clap; manipulator.js isOpen).
+  const open = hands.filter((h) => !h.fistLike && !h.pinch?.pinching && !h.pointer?.gun).length;
 
   switch (activeDrill.id) {
     case 'move':
@@ -622,7 +702,16 @@ function updateLive(mode) {
         [MODE.EXPLODE]: 'move/spin/tilt/push, scale locked'
       };
       const locked = lockedFor[mode];
-      const base = hands.length + (hands.length === 1 ? ' hand · ' : ' hands · ') + mode;
+      const raised = hands.filter((h) => h.engaged !== false).length;
+      if (raised === 0) {
+        setLive(false, 'hands lowered · at rest (raise a hand to engage)');
+        break;
+      }
+      if (mode === MODE.IDLE && pointer.state.mode === 'aim' && pointer.state.source === 'hand') {
+        setLive(true, raised < 2 ? 'pointing · raise your other hand and pinch to click' : 'pointing · pinch your other hand to click');
+        break;
+      }
+      const base = raised + (raised === 1 ? ' hand · ' : ' hands · ') + mode;
       setLive(mode !== MODE.IDLE, locked ? `${base} (${locked})` : base);
       break;
     }

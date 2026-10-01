@@ -47,8 +47,29 @@ const MOVE_DEADZONE = 0.005;   // normalized frame units (≈1.6 cm of model at 
 const TWIST_DEADZONE = 0.05;   // radians of wrist twist (2.9°)
 const TILT_DEADZONE = 0.005;   // normalized frame units of second-hand motion
 const DEPTH_DEADZONE = 0.07;   // ln(palm size): apparent hand size is the noisiest signal
-const SCALE_DEADZONE = 0.05;   // ln(hand span)
+const SCALE_DEADZONE = 0.12;   // palm lengths of hand span (was 0.05 in ln(span); BUGS #31)
+const PALM_REF_DEADZONE = 0.04; // ln(palm size): when the span's palm-length normaliser updates
 const EXPLODE_DEADZONE = 0.3;  // palm lengths of hand span (≈5% of a canonical pull-apart)
+
+// Two-hand scale (BUGS #31). The hand span is wrist distance / average palm length, and the
+// live palm length was most of its noise (smoothed peak-to-peak 0.020-0.053 in ln, vs
+// 0.005-0.024 for the wrist distance alone). That forced a 0.05 deadzone on ln(span): a start
+// cost 5% of span and every reversal 10%, so small slow moves felt stuck. Now:
+//   - While a pinch is held, the span is divided by a HELD palm length that only updates
+//     once the measured palm has changed by more than PALM_REF_DEADZONE (its own backlash),
+//     so palm noise never reaches the span. Not frozen outright: leaning toward or away from
+//     the camera grows or shrinks the wrist distance and the palms together, and a frozen
+//     normaliser read a 25% lean as a 24% scale. With 0.04 a lean of any size leaks a
+//     one-off 3.5-5% (0.8x to 1.25x leans, measured), against 0 for the old live
+//     normaliser; 0.03 and below let palm noise back in (still hands drifted again).
+//   - The deadzone is in palm lengths of span, not ln(span), because what is left is wrist
+//     position noise, which is a fixed size in the image: in ln units it is 2-3x larger with
+//     the hands close together than far apart, so one ln width was too wide when they are
+//     apart and too narrow when they are close. 0.12 palm lengths holds still hands at
+//     exactly zero drift (10 s, jitter 0.002/0.003/0.004, hands 1.5-4.5 palms apart, 120
+//     trials per jitter level; 0.1 drifted in 5 of 40 at 0.004), where the old 0.05 ln width
+//     drifted up to 2.4% with the hands under 2 palms apart. It costs 3.2% of span with the
+//     hands 3.7 palms apart and 2.3% at 5.2 palms (was 5% everywhere), and 5.7% at 2.1 palms.
 
 // Spring stiffness (rad/s). Critically damped: a step settles to 2% in ~5.8/OMEGA seconds
 // (~180 ms) with no overshoot, and a steady motion trails by 2/OMEGA (~63 ms).
@@ -139,6 +160,17 @@ const PINCH_GLITCH_MS = 100;
 const NEUTRAL_GAP_MS = 400;
 const NEUTRAL_HOLD_MS = 100;
 const CLAP = 'clap'; // not a MODE (it is instant), but it ends like one for the neutral gap
+
+// Post-pointer gap (BUGS #32, 2026-10-01). The pointer ("finger gun", gunPose.js) is left by
+// curling the index back in, and that IS a fist, so without a pause every exit from the
+// pointer would grab the model. For POINTER_GAP_MS after the pointer ends (while nothing else
+// is active) no gesture may start. Deliberately NOT the neutral gap above: that one also
+// demands 100 ms of relaxed hands, which would make "point, then make a fist and hold it"
+// never grab until the hand had opened first. A timer alone is enough here, because the
+// unwanted fist is the transition itself and lasts only while the index curls (a fist held
+// past the gap is meant). It shares the `allowed` gate in update(). Pointer state comes from
+// hand.pointer (gestures.js annotateHand); hands without it never start this gap.
+const POINTER_GAP_MS = 300;
 
 // Explode: two open hands (neither fisted nor pinching, keeping it out of grab/scale's
 // hand-shape space) pulling apart drives it, continuously, like scale rather than a
@@ -323,6 +355,12 @@ function follow(c, dt, maxSpeed) {
   return delta;
 }
 
+// The hand's grab reading, honouring its precomputed pointer state: a pointer is never a fist.
+// Hands built without `pointer` (tests, labs) get exactly the old isFistLike rule.
+function fistOf(h, aspect) {
+  return isFistLike(h.gesture, h.landmarks, aspect, { pointer: h.pointer });
+}
+
 export function createManipulator(object, camera) {
   // Live-tunable, because every threshold in this file is an untuned guess made without a
   // webcam (see ROADMAP.md Phase 1) and the only way to fix "out of proportion" is to
@@ -376,6 +414,7 @@ export function createManipulator(object, camera) {
         lastTwist: null, twistAccum: 0,
         sig: {},              // raw-signal deadzone state, rebuilt at every new grab
         spanSig: null,        // two-hand scale deadzone state
+        palmSig: null,        // two-hand scale's held palm-length normaliser
         ch: { x: newChannel(), y: newChannel(), spin: newChannel(), pitch: newChannel(), roll: newChannel(), depth: newChannel(), scale: newChannel() }
       };
       targetStates.set(target, s);
@@ -444,6 +483,10 @@ export function createManipulator(object, camera) {
   // The pending neutral gap, or null when any gesture may start (see NEUTRAL_GAP_MS).
   // { endedMode, since, neutralSince, sawNeutral }
   let gap = null;
+  // Post-pointer gap (see POINTER_GAP_MS): when it started, or null; and whether any hand was a
+  // pointer on the previous camera frame.
+  let pointerGapSince = null;
+  let wasPointing = false;
   // Whether the current explode session has actually pulled the hands apart. Two open hands
   // are both the explode pose AND the clap's ready stance, so explode engages the moment the
   // hands come up; until they have pulled apart it is still "at rest" for the clap. Once
@@ -503,6 +546,7 @@ export function createManipulator(object, camera) {
     explodeV = { x: 0, y: 0 };
     lastAdvanceTime = null;
     gap = null;
+    pointerGapSince = null;
     mode = MODE.IDLE;
   }
 
@@ -803,6 +847,11 @@ export function createManipulator(object, camera) {
     // timestampMs: the camera frame's time. Defaults to performance.now() so callers that
     // don't pass one keep working.
     update(hands, aspect, timestampMs = performance.now()) {
+      // Engage zone (Engage -> Aim -> Act): a lowered hand is at rest and does nothing, as if
+      // it were out of frame. hand.engaged is set by pointer.js createEngagement; hands without
+      // it (tests, labs, the viewer) all count, exactly as before.
+      if (hands.some((h) => h.engaged === false)) hands = hands.filter((h) => h.engaged !== false);
+
       // Real elapsed time since the last call. Clamped so a long pause (tab backgrounded,
       // camera hiccup) can't read as a wildly fast gesture the instant tracking resumes.
       let dt = lastUpdateTime !== null ? (timestampMs - lastUpdateTime) / 1000 : 1 / 60;
@@ -813,11 +862,15 @@ export function createManipulator(object, camera) {
       const twoHanded = hands.length === 2 && hands.every((h) => h.pinch?.pinching);
       // isFistLike trusts MediaPipe's own classifier when it has a confident opinion
       // either way, and only falls back to geometric curl detection when it doesn't.
-      const fisted = hands.some((h) => isFistLike(h.gesture, h.landmarks, aspect));
+      // fistOf also honours hand.pointer: a pointer is never a fist (BUGS #32).
+      const fisted = hands.some((h) => fistOf(h, aspect));
+      const pointing = hands.some((h) => h.pointer?.gun === true);
       // Explode's trigger occupies a hand-shape space disjoint from both pinch (transform)
-      // and fist (grab) on purpose — two open hands, neither pinching nor fisted.
+      // and fist (grab) on purpose — two open hands, neither pinching nor fisted. Nor
+      // pointing: once a pointer stopped reading as a fist, "pointer + relaxed other hand"
+      // would otherwise have become explode, and aiming moves the hands apart.
       const openHanded =
-        hands.length === 2 && hands.every((h) => !isFistLike(h.gesture, h.landmarks, aspect) && !h.pinch?.pinching);
+        hands.length === 2 && hands.every((h) => !fistOf(h, aspect) && !h.pinch?.pinching && !h.pointer?.gun);
 
       // Each mode is gated on its channel being armed, so practice mode can silence a
       // gesture completely rather than merely ignoring its effect.
@@ -830,7 +883,12 @@ export function createManipulator(object, camera) {
       // have been neutral. `allowed` only ever bites in IDLE -- the gap is cleared the
       // moment any gesture is active.
       updateGap(!wantTransform && !wantExplode && !wantGrab, timestampMs);
-      const allowed = (m) => !gap || gap.endedMode === m;
+      // Post-pointer gap: starts on the first frame without a pointer, only from rest (an
+      // active gesture by the other hand is left alone), and blocks every gesture start.
+      if (wasPointing && !pointing && mode === MODE.IDLE) pointerGapSince = timestampMs;
+      wasPointing = pointing;
+      if (pointerGapSince !== null && timestampMs - pointerGapSince >= POINTER_GAP_MS) pointerGapSince = null;
+      const allowed = (m) => (!gap || gap.endedMode === m) && pointerGapSince === null;
 
       // Clap is a command, so it only fires from rest (BUGS #27): IDLE, or an explode that
       // has engaged but not pulled apart (the clap's own ready stance), and never inside a
@@ -845,7 +903,8 @@ export function createManipulator(object, camera) {
       } else if (on('clap')) {
         const clapped = checkClap(hands, aspect, timestampMs);
         const atRest = mode === MODE.IDLE || (mode === MODE.EXPLODE && !explodePulled);
-        if (clapped && atRest && allowed(CLAP)) {
+        // A pointer is not an open hand, so it never claps.
+        if (clapped && atRest && allowed(CLAP) && !pointing) {
           performReset();
           lastAdvanceTime = timestampMs;
           // A clap ends like any gesture: the hands it leaves together and open are the
@@ -924,12 +983,12 @@ export function createManipulator(object, camera) {
   // like a doorknob spins the model about its vertical axis (a lazy Susan, deliberately not
   // a literal roll), and its apparent size pushes/pulls (bigger = nearer; see palmLength()
   // for why that is used instead of MediaPipe's noisier z). A second hand, any shape, tilts:
-  // up/down pitches, left/right rolls.
+  // raising it tilts the model up (front edge rises), lowering tilts it down; left/right rolls.
   function commandGrab(target, hands, aspect, dt) {
     const s = stateFor(target);
     const os = target === object ? s : stateFor(object); // depth always on the object
 
-    const fists = hands.filter((h) => isFistLike(h.gesture, h.landmarks, aspect));
+    const fists = hands.filter((h) => fistOf(h, aspect));
     const hand = nearestTo(fists.length ? fists : hands, s.lastWrist);
     const wrist = wristOf(hand);
     const palm = palmLength(hand.landmarks, aspect);
@@ -984,9 +1043,11 @@ export function createManipulator(object, camera) {
         const tx = takeUpSlack(s.sig.px, pw.x, TILT_DEADZONE, MAX_TILT_PER_SECOND, dt);
         const ty = takeUpSlack(s.sig.py, pw.y, TILT_DEADZONE, MAX_TILT_PER_SECOND, dt);
         if (on('tilt')) {
-          // Same signs as before the rewrite: raising the hand (image y falling) pitches
-          // positive about world X; moving it right in the image rolls positive about Z.
-          s.ch.pitch.cmd -= ty * PITCH_SENSITIVITY * sens;
+          // Raising the hand (image y falling) tilts the model UP: its front edge rises on
+          // screen and its top tips away from the camera (negative pitch about world X).
+          // Owner request after the 2026-10-01 webcam test; it used to tilt down. Moving the
+          // hand right in the image rolls positive about Z (unchanged).
+          s.ch.pitch.cmd += ty * PITCH_SENSITIVITY * sens;
           s.ch.roll.cmd += tx * ROLL_SENSITIVITY * sens;
         }
       }
@@ -1012,16 +1073,27 @@ export function createManipulator(object, camera) {
   // ratio (hands twice as far apart = twice the size).
   function commandTransform(target, hands, aspect, dt) {
     const s = stateFor(target);
-    const span = handSpan(hands[0], hands[1], aspect);
-    if (!(span > 0)) return;
-    const logSpan = Math.log(span);
+    // Normalised by the HELD palm length (see PALM_REF_DEADZONE), captured when the pinch
+    // engages and updated only past its own deadzone, so palm noise stays out of the span.
+    const palm = (palmLength(hands[0].landmarks, aspect) + palmLength(hands[1].landmarks, aspect)) / 2;
+    if (!(palm > 0)) return;
+    const logPalm = Math.log(palm);
     if (!s.spanSig) {
-      s.spanSig = newSignal(logSpan);
+      s.palmSig = newSignal(logPalm);
+      s.spanSig = newSignal(handSpan(hands[0], hands[1], aspect, { palm }));
       s.ch.scale.coast = 0;
       return;
     }
-    const d = takeUpSlack(s.spanSig, logSpan, SCALE_DEADZONE, MAX_SPAN_RATIO_PER_SECOND, dt);
-    s.ch.scale.cmd += d * settings.sensitivity;
+    takeUpSlack(s.palmSig, logPalm, PALM_REF_DEADZONE, MAX_DEPTH_RATIO_PER_SECOND, dt);
+    const span = handSpan(hands[0], hands[1], aspect, { palm: Math.exp(s.palmSig.anchor) });
+    if (!(span > 0)) return;
+    // Slack in palm lengths (see SCALE_DEADZONE), but the tracking-jump guard stays in
+    // ln(span)/s as before (a jump moves the slack reference with it), and the model still
+    // scales by the RATIO the slack reference moved.
+    const jumped = Math.abs(Math.log(span / s.spanSig.last)) > MAX_SPAN_RATIO_PER_SECOND * dt;
+    const d = takeUpSlack(s.spanSig, span, SCALE_DEADZONE, jumped ? 0 : Infinity, dt);
+    const from = s.spanSig.anchor - d;
+    if (d && from > 0) s.ch.scale.cmd += Math.log(s.spanSig.anchor / from) * settings.sensitivity;
   }
 
   // Two open hands pulling apart: on a multi-part object, each mesh slides outward from the
