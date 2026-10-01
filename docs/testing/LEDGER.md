@@ -26,12 +26,14 @@ Electron-as-node (see the bottom of this file).
 
 | Suite | How to run | Needs | Last result | Date / commit |
 | --- | --- | --- | --- | --- |
-| `test.html` (v1 regression, imports test.js) | open `/test.html`, wait ~5 s, read `#summary` and every `.case.fail` | srv, tab | 217 passed / 0 failed (Timmy) | 2026-10-01 commit gate, f439528 + dirty |
-| `platform/ring-test.html` (Library ring) | open `/platform/ring-test.html`, read pass/fail | srv, tab | 73 / 0 (Timmy; 74 was an agent/overseer miscount, Debbie reported 73) | 2026-10-01 commit gate |
+| `test.html` (v1 regression, imports test.js) | open `/test.html`, wait ~5 s, read `#summary` and every `.case.fail` | srv, tab | 304 passed / 0 failed (Timmy, 2026-10-01 pass 2, c90d3e2+dirty; was 217) | 2026-10-01 commit gate, f439528 + dirty |
+| `platform/ring-test.html` (Library ring) | open `/platform/ring-test.html`, read pass/fail | srv, tab | 74 / 0 (Timmy pass 2; was 73, +1 check, none lost) | 2026-10-01 commit gate |
 | `platform/library-test.html` (store + app wiring) | open `/platform/library-test.html`; uses its own IndexedDB names `hologram-library-test-unit` and `hologram-library-test-app` (the app runs in an iframe with `?db=…&ring=stub`) | srv, tab | 69 / 0 (Timmy; ~100 s, hidden tab) | 2026-10-01 commit gate |
-| `platform/p5-test.html` (P5 inferred display, look, photosafety) | open, read pass/fail | srv, tab | 24 / 0 (Timmy; incl. #30 stacking checks) | 2026-10-01 commit gate |
+| `platform/polygon-test.html` (polygon lens, whole-model view #46) | open, read pass/fail (recorded run) | srv, tab | 42 / 0 (Timmy pass 2) | 2026-10-01, c90d3e2+dirty |
+| `platform/hands-test.html` (Platform hands step 2, synthetic; `?camera=1` = fake cam, owner/agents) | open, read recorded run | srv, tab | 24 / 0 (Timmy pass 2) | 2026-10-01, c90d3e2+dirty |
+| `platform/p5-test.html` (P5 inferred display, look, photosafety) | open, read pass/fail | srv, tab | 24 / 0 (Timmy pass 2, unchanged) | 2026-10-01 commit gate |
 | `docs/lab/gestures/holdgate-lab.html` (hold-to-confirm ring timing) | page, or node: import `holdgate-lab.js`, call `runScenarios()` | node or srv+tab | 19 / 19 PASS (Timmy, browser) | 2026-10-01 commit gate |
-| `docs/lab/gestures/gun-lab.html` self-test (finger-gun pose maths) | page (self-test runs on load, no camera), or node: import `gun-lab.js`, call `runSelfTest()` | node or srv+tab | 45 / 0 + 3 info rows (Timmy, browser) | 2026-10-01 commit gate |
+| `docs/lab/gestures/gun-lab.html` self-test (finger-gun pose maths) | page (self-test runs on load, no camera), or node: import `gun-lab.js`, call `runSelfTest()` | node or srv+tab | 48 / 0 (Timmy pass 2; was 45) | 2026-10-01 commit gate |
 | `docs/lab/gestures/gun-lab.html` live probe (decides the click) | owner, webcam, ~2 min guided | cam | Owner ran it 2026-10-01 at 49 fps: click = **other hand's pinch** (8 px median palm shift vs 13–25 px thumb drop); gun pose recognised on **0%** of real frames | 2026-10-01 (owner) |
 | `docs/lab/gestures/gesture-lab.html` (per-gesture sweeps; `?only=spin,clap`) | open, read `window.__gestureReport` / the `<pre>` | srv, tab | 17 / 0 (Timmy; recorded run) | 2026-10-01 commit gate |
 | `docs/lab/gestures/smoothing-lab.html` (One Euro filter, clap recall by fps) | open, wait for "done" | srv, tab | done; clap recall 22/24 at 8 fps, 24/24 at 12-60 fps, slow bring-together 0 (unchanged) | 2026-10-01 commit gate |
@@ -169,3 +171,52 @@ GREEN. All suites run fresh in my own tab (hidden tab; perf timings may be affec
 - Lamp: underside 94%/84%, wall 100%/46%, holes 87%/85%. Wall added-real was 14%: PASS (bar 40%, predicted 55%).
 - Stool: underside 100%/100%, wall 100%/100%, holes 94%/100%. PASS (bar 97%).
 - Sofa (report only): underside 24%/32%, wall 68%/36%, holes 100%/23% (22-25 s, 925 MB). Cov identical to baseline (24/21, 68/33, 100/22); real +11/+3/+1.
+
+
+## Commit-gate pass 2, 2026-10-01 (Timmy), c90d3e2 + dirty tree
+PARTIAL: every suite GREEN, but the page-load / console-error sweep could not be run (browser extension disconnected mid-pass).
+- Fresh runs (own tab, server :8080): test.html 304/0, library 69/0, ring 74/0, p5 24/0, polygon 42/0, hands 24/0, holdgate 19/19, gun-lab 48/0, gesture-lab 17/0, safety ALL PASS 5/5, parts 9 rows ok, smoothing-lab done (0 flags), perf done (tolerance flag = numbers got FASTER, visible tab: legacy pr1 3.9 -> 0.9 ms; not a regression). All recorded runs: 0 failures, 0 console errors.
+- Track B: chair `complete` underside 98% @2cm / 98% real (bar 97%), 6.7 s, 598 MB. completion/redwood.py imports OK (not re-run).
+- Not run: photo-test (no photo), console-error sweep of hologram.html / hands.html / platform/index.html / index.html (extension lost; Cody-S/-U/Cody/Debbie report 0 on their last runs, unverified by me), anything with a webcam.
+- Gotchas: library-test B32 (#44) needs animation frames: in a hidden tab it hangs forever and freezes the renderer (CDP timeouts). A screenshot call makes the tab visible and it finishes (69/0 in ~90 s). Do not navigate away mid-run: it records an "incomplete, 69 checks gone" flag (09:19, 09:25, 09:28 lines in FLAGS.md are mine, not failures). MediaPipe "INFO: Created TensorFlow Lite" lines are known noise on camera pages.
+- FLAGS.md 04:54-04:55 "Selection practice" fails: Cody-S mid-edit runs, fixed (test.html 304/0).
+
+### Features (pass 2)
+| Feature | Offline | Live |
+| --- | --- | --- |
+| One-hand selection (hold+bubble, same-hand pinch, other-hand pinch; test.js +50) | verified-offline (test.html 304/0, synthetic) | needs-live |
+| Gesture-demo layout (Tools panel, one coach slot, ? Help; Cody-U) | verified-offline (test.html; hologram.html 0 errors per Cody-U, not re-seen) | needs-live (legibility) |
+| Selection practice (calibrate.js) | verified-offline | needs-live |
+| Polygon whole-model view (#46) | verified-offline (polygon-test 42/0) | needs-live |
+| Platform hands step 2 (Camera button, hover/select, BVH pick) | verified-offline (hands-test 24/0) | needs-live |
+| #47 pinch latch (same-hand pinch while fist-like starts GRAB at 367 ms; fix in reports/2026-10-01-cody-i-pinch-grab-fix.js) | RISK open, fix not applied | needs-live |
+| #24 thin shells (partial) | verified-offline: vase wall 34% added-real, bar 40% MISSED; lamp, stool, chair PASS | n/a |
+| #25 slab skips room shell | verified-offline (room_bench occlusion 40%@2cm, up from 13) | n/a |
+| #23 big thick furniture | parked: geodesic fallback (HW_SLAB_GEO=1, default off) failed the bar | n/a |
+| #48 / #49 | open (see BUGS.md) | n/a |
+
+## Owner live checklist for NEXT session, shadow site (about 14 min). Server: `python3 serve.py`; hard refresh (Cmd+Shift+R) each page. Sessions record themselves (SHADOW badge); nothing to paste unless a step fails.
+READY marks: wait until the overseer confirms no one is mid-edit.
+
+### G. Gesture demo, http://localhost:8080/hologram.html — ~7 min — READY
+1. Look at the page without the camera. Expected: one Tools panel (tabs Practice / Measure / Look), one coach line, top bar not covered.
+2. Press ?. Expected: help opens and closes.
+3. Start camera, allow. Complete the calibration card. Expected: card sits under the top bar, plain wording, bar fills each step.
+4. Point (index out, other three curled), hold still ~0.7 s on a chair part. Expected: bubble fills, part selects.
+5. Point at another part and pinch with the OTHER hand. Expected: that part selects at once.
+6. Point at a part and pinch with the SAME hand. Expected: selects; the model does NOT start moving (#47).
+7. Press P, run Selection practice (hold vs pinch). Expected: a score line; note which felt easier.
+8. Press T, click two points with pinch. Expected: a length appears.
+Send back: pass/fail per step, which selection method you prefer.
+
+### H. Platform, http://localhost:8080/platform/index.html — ~5 min — READY
+1. Landing ring shows samples + "Drop your own scan". Expected: no errors; ring is smooth and readable.
+2. Open the chair, press P. Expected: the WHOLE chair becomes a wire over a faint skin (not just one part).
+3. Click a patch, Delete, Cmd/Ctrl+Z. Expected: hides, then returns.
+4. Press the Camera button, allow. Expected: hand cursor; hover highlights a part; other-hand pinch selects it.
+5. Press I on a selected patch. Expected: marked inferred, hatched.
+Send back: pass/fail per step.
+
+### I. Library ring look — ~2 min — READY
+1. Back to the ring, spin it with mouse or hands. Expected: no flashing, easing is comfortable.
+Send back: pass/fail, one line on comfort.

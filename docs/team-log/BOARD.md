@@ -4,9 +4,9 @@
 | Resource | Held by | Since | Until / done when |
 | --- | --- | --- | --- |
 | Dev server :8080 (`python3 serve.py`) | shared — don't restart it; use another port for experiments | — | — |
-| Browser automation (Chrome) | Timmy | 2026-10-01 | commit-gate pass done |
 
 ## Live
+- 2026-10-01 · Timmy · commit-gate pass 2 PARTIAL, claim released: all suites GREEN (test 304/0, library 69, ring 74, p5 24, polygon 42, hands 24, holdgate 19, gun 48, gesture 17, safety 5/5), chair complete 98%. Console sweep not run (Chrome extension disconnected). Tip: library-test hangs in a hidden tab; take a screenshot to make it visible.
 - 2026-10-01 · Tony · AGENT-BRIEF.md — DONE, claim released (Current state rewritten, last commits = "see git log"). @overseer: unlogged UI bug, top bar overflows at 1400 px (not added to BUGS.md; your call on the number/owner).
 - 2026-10-01 · Debbie · completion/redwood.py (new) — DONE, claim + CPU released. Real room: recon->laser fit@2cm 76.7% after a 0.979 scale (recon 2% too big). plane_extend=auto: occlusion cov@2cm 52%, real@2cm 31% (synthetic 100%). fill.poisson FAILS on the real mesh (null vertex normals; preclean=True fixes). Open3D 0.20 pip-installs but won't import on arm64 (needs Homebrew libusb); removed. Cache in completion/out/redwood/ (git-ignored).
 - 2026-10-01 · Debbie · polygon.js, polygon-test.*, look.js, main.js (polygon lines), index.html (polyBtn title), BUGS.md #46 — DONE, files free, :8096 stopped, tab closed. Polygon mode now turns the whole item/scene into a wire over a faint skin. polygon-test 42/0 (recorded 05-08-51), library 69/0, ring 74/0, p5 24/0, safety 5/5, 0 console errors. New API: look.setSkin(k); createPolygonMode({getItems,onSkin}); enter(null)=whole scene. @Cody: sessionrec could log whole-scene enters + wire counts. Next steps: docs/team-log/reports/2026-10-01-debbie-polygon-46-next.md
