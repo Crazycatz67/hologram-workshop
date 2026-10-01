@@ -144,6 +144,14 @@
     #statusbar > span:empty { display: none; }
     #status { color: var(--ok); }
     #status.error { color: var(--err); }
+    /* #43: press-and-hold (HOLD_GATE.ringMs) so a stray click never purges the trash */
+    #freeSpace {
+      flex: none; font: inherit; color: var(--text); padding: 2px 8px; cursor: pointer;
+      border: 1px solid var(--err); border-radius: 4px; background-color: transparent;
+      background-image: linear-gradient(var(--accent-soft), var(--accent-soft));
+      background-repeat: no-repeat; background-size: 0% 100%;
+    }
+    #freeSpace.holding { background-size: 100% 100%; transition: background-size var(--hold-ms, 650ms) linear; }
     #sel { color: var(--select); }
     #fps { margin-left: auto; color: var(--faint); }
 
@@ -177,6 +185,92 @@
     #guide p { margin: 0 0 8px; }
     #guide kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line-2); border-radius: 4px; color: var(--text); }
 
+    /* ---- library ring (ring.js) ----------------------------------------------------
+       The 3D cards are drawn in the page's own WebGL scene; everything here is the page
+       layer over them: the drag surface, card titles, the centre card's details, and the
+       listbox (#libraryList), which is the source of truth and stays usable on its own.
+       Steady outlines, no animation (BUGS.md #14). */
+    #libraryRing { position: absolute; inset: 0; z-index: 20; }
+    /* The ring is the landing screen: the older empty-state card would show through it. */
+    #stage:has(> #libraryRing:not([hidden])) #empty { display: none; }
+    .lr-head {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 3; display: flex; align-items: center; gap: var(--gap);
+      padding: 10px 12px; background: linear-gradient(rgba(10,13,17,.9), rgba(10,13,17,0));
+    }
+    .lr-title { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .lr-chips { display: flex; gap: 6px; overflow-x: auto; min-width: 0; }
+    .lr-chip { height: 26px; padding: 0 10px; border-radius: 999px; font-size: 12px; }
+    .lr-chip[aria-pressed="true"] { color: var(--accent); border-color: rgba(79,209,255,.6); background: var(--accent-soft); }
+    .lr-search, .lr-rename input {
+      height: 28px; min-width: 0; width: min(240px, 40vw); padding: 0 8px;
+      background: var(--bg); border: 1px solid var(--line-2); border-radius: 4px;
+    }
+    .lr-surface { position: absolute; inset: 0; z-index: 1; touch-action: none; cursor: grab; }
+    .lr-surface:active { cursor: grabbing; }
+    .lr-labels { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+    .lr-sidelabel {
+      position: absolute; left: 0; top: 0; color: var(--muted); font-size: 12px; text-align: center;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .lr-panel {
+      position: absolute; left: 50%; top: 62%; z-index: 3; transform: translateX(-50%);
+      width: min(360px, calc(100% - 32px)); display: grid; gap: 6px; justify-items: center; text-align: center;
+      grid-template-columns: minmax(0, 1fr);   /* an auto track would grow to a long title (BUGS #40) */
+    }
+    .lr-ptop { display: flex; align-items: center; gap: 8px; max-width: 100%; }
+    /* min-width 0: a flex item otherwise grows to its text, so a long title never ellipsises
+       and pushes the actions button off-screen (BUGS #40). */
+    .lr-ptitle { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .lr-more { height: 26px; width: 30px; padding: 0; flex: none; }
+    .lr-psub { color: var(--muted); font-size: 12px; }
+    .lr-psub:empty, .lr-badges:empty { display: none; }
+    .lr-badges { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
+    .lr-badge { padding: 1px 8px; border: 1px solid var(--line-2); border-radius: 999px; color: var(--muted); font-size: 11px; }
+    .lr-badge.inf { border-style: dashed; }
+    .lr-versions { display: grid; gap: 3px; min-width: 210px; max-height: 120px; overflow-y: auto; }
+    .lr-vchip { height: 24px; justify-content: flex-start; font: 12px var(--mono); color: var(--muted); }
+    .lr-vchip[aria-pressed="true"] { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
+    .lr-actions, .lr-rename { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+    .lr-actions button, .lr-rename button { height: 28px; font-size: 12px; }
+    .lr-hold svg { width: 16px; height: 16px; }
+    .lr-hold-track, .lr-hold-fill { fill: none; stroke-width: 2.5; }
+    .lr-hold-track { stroke: var(--line-2); }
+    .lr-hold-fill { stroke: var(--err); }
+    .lr-hold.holding { border-color: rgba(255,122,122,.6); }
+    .lr-hint {
+      position: absolute; left: 0; right: 0; bottom: 8px; z-index: 2; pointer-events: none;
+      text-align: center; color: var(--faint); font-size: 11px;
+    }
+    /* The listbox is the accessible source of truth: off-screen in the ring view (the ring's
+       steady outline shows its active item), a visible grid in "All" or without WebGL. */
+    .lr-list, .lr-live {
+      position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+    }
+    .lr.lr-grid { display: flex; flex-direction: column; background: rgba(10,13,17,.92); }
+    .lr-grid .lr-head { position: static; background: none; flex-wrap: wrap; }
+    .lr-grid .lr-surface, .lr-grid .lr-labels, .lr-grid .lr-hint { display: none; }
+    .lr-grid .lr-list {
+      position: static; width: auto; height: auto; clip-path: none; white-space: normal; overflow-y: auto;
+      flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      align-content: start; gap: 10px; padding: 6px 12px 12px;
+    }
+    .lr-grid .lr-list:focus-visible { outline: none; }
+    .lr-grid .lr-panel { position: static; transform: none; margin: 4px auto 14px; top: auto !important; }
+    .lr-opt { padding: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); cursor: pointer; min-width: 0; }
+    .lr-opt[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); }
+    .lr-list:focus-visible .lr-opt[aria-selected="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .lr-thumb {
+      display: grid; place-items: center; width: 100%; aspect-ratio: 4 / 3; object-fit: cover;
+      border-radius: 4px; background: var(--bg); color: var(--accent); font-size: 28px;
+    }
+    .lr-thumb-empty { border: 1px dashed var(--line-2); }
+    .lr-otitle { margin-top: 6px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lr-osub { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    @media (max-width: 600px) {
+      .lr-hint { display: none; }
+      .lr-panel { top: 58%; }
+    }
+
     /* ---- narrow screens: side panels become drawers over the view -------------- */
     @media (max-width: 960px) {
       #app { grid-template-columns: 0 1fr 0; }
@@ -203,8 +297,11 @@
 <body>
   <div id="app">
     <header id="topbar">
-      <button id="toggleLeft" class="ghost" title="Show / hide the library" aria-controls="left">☰ Library</button>
+      <button id="toggleLeft" class="ghost" title="Show / hide the items in this scene" aria-controls="left">☰ Items</button>
       <div class="brand">Hologram <span>Workshop</span></div>
+      <div class="sep"></div>
+      <button id="libraryBtn" title="Library: your saved scenes and their versions (L)" aria-controls="libraryRing" aria-expanded="false">Library</button>
+      <button id="saveVersionBtn" title="Save a version of this scene (Ctrl/⌘+S)">Save version</button>
       <div class="sep"></div>
       <button id="pick" class="primary">Add files…</button>
       <button id="folder">Add folder…</button>
@@ -232,9 +329,9 @@
       <button id="toggleRight" class="ghost" title="Show / hide the inspector" aria-controls="right">Inspector ☰</button>
     </header>
 
-    <aside id="left" class="side" aria-label="Library">
+    <aside id="left" class="side" aria-label="Items in this scene">
       <div id="library" style="display:contents">
-        <h2>Library <span id="libCount"></span></h2>
+        <h2>In this scene <span id="libCount"></span></h2>
         <div id="libEmpty">Drop scans or photos anywhere on the page. Include an OBJ's .mtl and textures, or a .gltf's .bin, in the same drop and they're matched automatically. Photos become 2.5D holograms.</div>
         <div id="libList"></div>
       </div>
@@ -250,6 +347,10 @@
             <button data-proxy="sample">Open the sample chair</button>
           </div>
         </div>
+      </div>
+      <!-- Library ring (ring.js): filled and shown by main.js; the listbox is the source of truth. -->
+      <div id="libraryRing" role="region" aria-label="Library" hidden>
+        <div id="libraryList"></div>
       </div>
     </main>
 
@@ -268,6 +369,7 @@
 
     <footer id="statusbar">
       <span id="status">drop scans or photos anywhere</span>
+      <button id="freeSpace" type="button" hidden title="Press and hold: permanently removes projects you already deleted, then saves your edits">Hold: free space now</button>
       <span id="info"></span>
       <span id="parts"></span>
       <span id="sel"></span>
@@ -277,6 +379,7 @@
 
   <div id="guide" role="dialog" aria-label="Controls" hidden>
     <h3>Controls</h3>
+    <p><b>Library</b> (<kbd>L</kbd>): <kbd>←</kbd>/<kbd>→</kbd> (or drag, scroll, swipe) between projects, <kbd>↑</kbd>/<kbd>↓</kbd> through a project's versions, <kbd>Enter</kbd> or click the centre card to open, <kbd>Esc</kbd> closes. "…" forks, renames or deletes (press and hold). <kbd>Ctrl/⌘</kbd>+<kbd>S</kbd> saves a version.</p>
     <p><b>Scene mode</b>: drag to orbit, scroll to zoom, right-drag to pan, <kbd>R</kbd> auto-rotate.</p>
     <p><b>Object mode</b> (<kbd>Tab</kbd>): hover highlights, click selects, drag moves along the floor, <kbd>Shift</kbd>+scroll rotates, <kbd>Alt/⌥</kbd>+scroll resizes (a redesign), <kbd>Del</kbd> hides, <kbd>H</kbd> shows all, <kbd>Esc</kbd> deselects, <kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd> undoes.</p>
     <p><b>Completed scans</b> (Track B output, with its <code>.json</code> sidecar dropped alongside): filled-in surfaces are drawn ghosted with a hatch, never as measured. <kbd>I</kbd> or <b>View</b> switches between completed and as scanned.</p>
@@ -288,6 +391,13 @@
   <input id="folderPicker" type="file" webkitdirectory multiple hidden />
   <input id="layoutPicker" type="file" accept=".json,application/json" hidden />
 
+  <script type="module">
+    // Shadow site (docs/testing/README.md): only on this machine, record this session (numbers and
+    // events only, never camera frames). The public site never downloads sessionrec.js.
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      import(`../sessionrec.js?v=${Date.now()}`).then((m) => m.startSession({ name: 'platform' })).catch(() => {});
+    }
+  </script>
   <script type="module">
     import(`./main.js?v=${Date.now()}`);
   </script>

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Library ring test</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="../theme.css" />
+<style>
+  /* The page scrolls (theme.css locks it for the app shell). */
+  html, body { overflow: auto; height: auto; }
+  #wrap { padding: 10px; font: 12px var(--mono); }
+  pre { white-space: pre-wrap; margin: 8px 0; }
+  #stage { position: relative; width: 800px; max-width: 100%; height: 450px; border: 1px solid var(--line); }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  /* The ring's own CSS is read from index.html at runtime (ring-test.js), so it can't drift. */
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/" } }
+</script></head>
+<body><div id="wrap">
+<b>Library ring (platform/ring.js): keyboard, wrap-around, events, list/ring sync, hold-to-delete, speed cap, reduced motion, dispose.</b>
+The ring below is driven by the test; nothing on it flashes. The press-and-hold check takes about 3 s of real time.
+<p><button id="libraryBtn">Library</button> <input id="outsideInput" placeholder="(an input outside the ring)"></p>
+<div id="stage"><div id="libraryRing" hidden><div id="libraryList"></div></div></div>
+<pre id="out">running…</pre>
+</div>
+<script type="module">
+  import('./ring-test.js?v=' + Date.now()).catch((e) => {
+    document.getElementById('out').textContent += '\nERROR ' + (e.stack || e);
+    console.error(e);
+  });
+</script>
+</body></html>

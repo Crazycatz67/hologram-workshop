@@ -150,10 +150,8 @@ check('scanned surfaces keep the unchanged hologram shader', look.materialFor(sc
 check('inferred surfaces get the marked variant', look.materialFor(infMesh).userData.inferred === true && /P5: inferred/.test(look.materialFor(infMesh).fragmentShader));
 
 // Scanned plane behind, inferred plane in front, both facing the camera and filling the centre.
-// Background null for section B only: with a Color background three r161's WebGLBackground
-// force-clears DEPTH at the start of the colour pass, which wipes the single-layer pre-pass
-// (reported to the overseer -- hologramLook.js / lod.js, not this slice). Section B tests
-// this slice's own behaviour on a working pre-pass; section C renders like the Platform does.
+// Background null for section B (written while BUGS #30 wiped the pre-pass under a Color
+// background; fixed 2026-10-01, and section B30 below now covers the Color-background case).
 scene.background = null;
 renderer.setClearColor(0x000000, 1);
 camera.position.set(0, 0, 1.5); camera.lookAt(0, 0, 0);
@@ -180,6 +178,37 @@ check('hatch contrast under the BT.1702 pattern limit (< 20 cd/m² at 300 nits)'
   `bars ${lo.toFixed(4)}-${hi.toFixed(4)} rel. lum = ${((hi - lo) * NITS).toFixed(1)} cd/m²`);
 scene.remove(scannedMesh, infMesh);
 scene.background = new THREE.Color(0x000000);   // back to how the Platform renders (see above)
+
+// ---- B30. BUGS #30: single layer WITH a Color background (as every real page renders) ------
+// Two scanned planes stacked on the view axis. With the pre-pass working, the stack shows only
+// the front plane; if the colour pass's forced background clear wipes the pre-pass depth, the
+// back plane adds its brightness. Checked for both renderers (v1 hologramLook, Platform lod).
+{
+  const { renderSingleLayer } = await import('../hologramLook.js' + V);
+  const { createDisplayLod } = await import('./lod.js' + V);
+  const lod = createDisplayLod({ scene, camera, renderer, look });
+  const front = new THREE.Mesh(new THREE.PlaneGeometry(1, 1)), back = new THREE.Mesh(new THREE.PlaneGeometry(1, 1));
+  front.material = back.material = look.materialFor(front);
+  back.position.z = -0.2;
+  camera.position.set(0, 0, 1.5); camera.lookAt(0, 0, 0);
+  look.parents.base.update(0);
+  const centreRGB = (px) => { const p = ((H - 1 - 180) * W + 240) * 4; return `${px[p]},${px[p + 1]},${px[p + 2]}`; };
+  const region = (px) => { let s = 0, n = 0; for (let y = 150; y < 210; y++) for (let x = 210; x < 270; x++) { s += lumAt(px, x, y); n++; } return s / n; };
+  for (const [name, render] of [['v1 hologramLook', () => renderSingleLayer(renderer, scene, camera)], ['Platform lod', () => lod.render(renderer, scene, camera)]]) {
+    scene.add(front); lod.add(front);
+    render(); const alone = readPx();
+    renderer.render(scene, camera); const onePass = readPx();
+    scene.add(back); lod.add(back);
+    render(); const stacked = readPx();
+    scene.remove(front, back); lod.remove(front); lod.remove(back);
+    const La = region(alone), Ls = region(stacked);
+    check(`#30 ${name}: stacked surfaces don't add up with a Color background`, Math.abs(Ls - La) < 0.002,
+      `centre ${centreRGB(alone)} alone -> ${centreRGB(stacked)} stacked; L ${La.toFixed(4)} -> ${Ls.toFixed(4)}`);
+    let maxDiff = 0;
+    for (let i = 0; i < alone.length; i++) maxDiff = Math.max(maxDiff, Math.abs(alone[i] - onePass[i]));
+    check(`#30 ${name}: a single layer looks the same as a plain one-pass render`, maxDiff <= 1, `max channel diff ${maxDiff}`);
+  }
+}
 
 // ---- C. photosafety (same measure as safety-test.html) -------------------------------------
 const TILE_W = 80, TILE_H = 60, FLASH_DELTA = 0.10, DARK_LIMIT = 0.80;

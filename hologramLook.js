@@ -65,8 +65,25 @@ export function renderSingleLayer(renderer, scene, camera) {
   renderer.render(scene, camera);
   scene.overrideMaterial = null;
   scene.background = background;
-  renderer.render(scene, camera);
+  renderColourPass(renderer, scene, camera);
   renderer.autoClear = autoClear;
+}
+
+/**
+ * The colour pass, keeping the pre-pass depth (BUGS #30). In three r161 a THREE.Color
+ * scene.background makes every renderer.render() force-clear colour AND depth, even with
+ * autoClear = false, which wiped the pre-pass and let stacked surfaces add up again. Only
+ * the depth/stencil part is switched off: the colour clear still paints the background
+ * (the pre-pass writes no colour, so nothing is lost).
+ */
+export function renderColourPass(renderer, scene, camera) {
+  const { autoClearDepth, autoClearStencil } = renderer;
+  renderer.autoClearDepth = false;
+  renderer.autoClearStencil = false;
+  try { renderer.render(scene, camera); } finally {
+    renderer.autoClearDepth = autoClearDepth;
+    renderer.autoClearStencil = autoClearStencil;
+  }
 }
 
 /**

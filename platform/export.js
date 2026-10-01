@@ -319,3 +319,49 @@ export function exportPNG(ctx) {
   return new Promise((res, rej) => renderer.domElement.toBlob(
     (blob) => (blob ? res({ blob, filename: `hologram-${stamp()}.png` }) : rej(new Error('screenshot failed'))), 'image/png'));
 }
+
+// ---------------------------------------------------------------- Thumbnail (library cards)
+// renderThumbnail(ctx, size = 256, { scene?, camera?, quality? }) -> Promise<Blob> (JPEG)
+//
+// Shoots `scene` through a square copy of `camera` (defaults: the live view in ctx) with the
+// EXISTING renderer -- never a second WebGL context. Why not a WebGLRenderTarget: in r161 a
+// render target gets LINEAR output from three's built-in materials but the raw values from
+// HolographicMaterial (a ShaderMaterial with no colour-space step), so no single correction
+// makes the thumbnail match the screen. Instead it renders into a scissored square in the
+// corner of the live canvas, copies that square out in the same task (the buffer is still
+// valid then), and re-renders the normal frame before returning, so the screen never shows
+// the thumbnail pass (photosafe: no one-frame flash). JPEG, because Safari's toBlob silently
+// falls back to PNG for WebP.
+export async function renderThumbnail(ctx, size = 256, { scene, camera, quality = 0.82 } = {}) {
+  const { renderer } = ctx;
+  const liveScene = ctx.scene, liveCam = ctx.camera;
+  const shotScene = scene ?? liveScene, shotCam = camera ?? liveCam;
+  const canvas = renderer.domElement;
+  const pr = renderer.getPixelRatio();
+  // Square side in CSS px: `size` device px, or as much as a small canvas allows.
+  const side = Math.max(1, Math.floor(Math.min(size / pr, canvas.width / pr, canvas.height / pr)));
+  const px = Math.max(1, Math.floor(side * pr));
+  const cam = shotCam.clone();
+  if (cam.isPerspectiveCamera) { cam.aspect = 1; cam.updateProjectionMatrix(); }
+
+  const draw = (s, c) => (s.userData.renderSingleLayer ? s.userData.renderSingleLayer(renderer, s, c) : renderer.render(s, c));
+  const vp = renderer.getViewport(new THREE.Vector4());
+  const sc = renderer.getScissor(new THREE.Vector4());
+  const scTest = renderer.getScissorTest();
+  const out = document.createElement('canvas');
+  out.width = out.height = size;
+  try {
+    renderer.setViewport(0, 0, side, side);
+    renderer.setScissor(0, 0, side, side);
+    renderer.setScissorTest(true);   // the clear stays inside the square too
+    draw(shotScene, cam);
+    // Viewport (0,0) is the bottom-left corner; canvas image rows start at the top.
+    out.getContext('2d').drawImage(canvas, 0, canvas.height - px, px, px, 0, 0, size, size);
+  } finally {
+    renderer.setViewport(vp);
+    renderer.setScissor(sc);
+    renderer.setScissorTest(scTest);
+    draw(liveScene, liveCam);
+  }
+  return new Promise((res, rej) => out.toBlob((b) => (b ? res(b) : rej(new Error('thumbnail failed'))), 'image/jpeg', quality));
+}

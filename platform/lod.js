@@ -31,6 +31,7 @@
 
 import * as THREE from 'three';
 import { loadSimplifier } from './parts.js';
+import { renderColourPass } from '../hologramLook.js';
 
 const BUDGET = 120_000;        // displayed triangles per scene in hologram mode
 const MIN_TRIS = 8_000;        // meshes smaller than this aren't worth simplifying
@@ -185,7 +186,7 @@ export function createDisplayLod({ scene, camera, renderer, look, budget = BUDGE
       s.overrideMaterial = null;
       s.background = background;
       cam.layers.mask = mask;
-      r.render(s, cam);
+      renderColourPass(r, s, cam);     // keeps the pre-pass depth under a Color background (BUGS #30)
       r.autoClear = autoClear;
     } finally {
       for (const m of swapped) m.geometry = m.userData.lod.source;   // full geometry back, always

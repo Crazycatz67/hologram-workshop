@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Library store test</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  html,body{margin:0;background:#0b0f14;color:#cfe;font:12px ui-monospace,monospace}
+  #wrap{padding:10px}
+  pre{white-space:pre-wrap;margin:8px 0}
+  iframe{width:960px;max-width:100%;height:600px;border:1px solid #234;display:block}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/" } }
+</script></head>
+<body><div id="wrap">
+<b>Project library: store.js + main.js wiring</b>. Uses its own IndexedDB databases (deleted at the end), never the app's library.
+<pre id="out">running…</pre>
+<div id="frame"></div>
+</div>
+<script type="module">
+  import('./library-test.js?v=' + Date.now()).catch((e) => {
+    document.getElementById('out').textContent += '\nERROR ' + (e.stack || e);
+    console.error(e);
+  });
+</script>
+</body></html>
