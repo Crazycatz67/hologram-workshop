@@ -23,6 +23,10 @@ from scipy.spatial import cKDTree
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import clean_scan  # noqa: E402  -- reuse the shipped symmetry search, never fork it
 
+# Screened Poisson's preclean drops unreferenced and null-normal vertices first. Real scans
+# have back-to-back folded faces whose normals cancel to zero, and MeshLab refuses those
+# (BUGS #48). On clean meshes it is a no-op; env HW_POISSON_PRECLEAN=0 restores the old call.
+POISSON_PRECLEAN = os.environ.get("HW_POISSON_PRECLEAN", "1") != "0"
 DENSITY_TRIM = float(os.environ.get("HW_DENSITY_TRIM", 3.0))  # log-depth below the supported median; 3.0 keeps the chair >=97% (#24); env override for experiments
 GAP = 0.01               # metres; new geometry closer than this to the scan is redundant
 SAMPLES = 250_000        # surface samples for nearest-surface queries (~3 mm on a chair)...
@@ -137,6 +141,15 @@ MAX_THICKNESS = 0.08
 UPWARD = 0.35            # a face this upward-facing can be the scanned top of a slab
 PROBE_STEP = 0.005
 PROBE_HIT = 0.004
+# Thin shells (BUGS #24): a vase wall is one sheet with two skins 5 mm apart. Where one skin is
+# hidden, the visible skin is copied by the wall thickness measured where BOTH skins were
+# scanned (an opposite-facing sample behind the face), but only where most captured faces
+# nearby are that thin, so a slab (chair seat) never borrows a thin part's thickness.
+SHELL_MAX_THICKNESS = 0.012   # a back skin closer than this makes the face part of a thin shell
+SHELL_STEP = 0.001            # fine probe for measuring that thickness
+SHELL_NEIGHBOURS = 64         # captured faces that vote on "is this region a thin shell?"
+SHELL_RADIUS = 0.15           # ...within this distance
+SHELL_VOTE = 0.5              # share of voters that must be thin
 
 
 def thickness_fill(v, f):
@@ -244,11 +257,15 @@ def slab_fill(v, f, geo_fallback=None):
     boundary = boundary_vertices(v, f)
     if len(boundary) == 0:
         return v, f
-    surface = cKDTree(sample_surface(v, f, sample_count(v, f), np.random.default_rng(1)))
+    spts, snrm = sample_surface(v, f, sample_count(v, f), np.random.default_rng(1), normals=True)
+    surface = cKDTree(spts)
     dirs = _sphere_directions(SLAB_DIRECTIONS)
     group = np.argmax(normals @ dirs.T, axis=1)
-    depths = np.arange(2 * PROBE_STEP, MAX_THICKNESS + 1e-9, PROBE_STEP)
-    pieces = []
+    # From one step, not two: a 5 mm wall's far skin sat inside the old 10 mm dead band, so
+    # every thin-shell face read as an open slab and was copied into the cavity (BUGS #24).
+    depths = np.arange(PROBE_STEP, MAX_THICKNESS + 1e-9, PROBE_STEP)
+    fine = np.arange(2 * SHELL_STEP, SHELL_MAX_THICKNESS + 1e-9, SHELL_STEP)
+    pieces, meas_f, meas_t, open_f, open_d = [], [], [], [], []
 
     # Room shell (floor, walls, ceiling: planes with nothing behind them) is not a slab. Probing
     # behind a wall finds nothing, so without this every wall face was copied to a fake
@@ -257,7 +274,7 @@ def slab_fill(v, f, geo_fallback=None):
     from planes import find_planes  # local import: planes imports from this module
     shell = np.zeros(len(f), dtype=bool)
     for pl in find_planes(v, f, rng=np.random.default_rng(0)):
-        if pl.shell:
+        if pl.shell or pl.shell_fragment:   # a demoted floor fragment is still floor (#49)
             shell[pl.faces] = True
 
     geo_b = _geodesic_boundary(v, f) if geo_fallback else None
@@ -268,7 +285,17 @@ def slab_fill(v, f, geo_fallback=None):
             continue
         probes = centroids[faces, None, :] - depths[None, :, None] * d
         hit, _ = surface.query(probes.reshape(-1, 3), distance_upper_bound=PROBE_HIT)
-        faces = faces[~np.isfinite(hit).reshape(len(faces), len(depths)).any(axis=1)]
+        captured = np.isfinite(hit).reshape(len(faces), len(depths)).any(axis=1)
+        if captured.any():  # measure wall thickness: first opposite-facing sample behind the face
+            cf = faces[captured]
+            pr = centroids[cf, None, :] - fine[None, :, None] * d
+            dd, ii = surface.query(pr.reshape(-1, 3), distance_upper_bound=2 * SHELL_STEP)
+            back = np.isfinite(dd)
+            back[back] = (snrm[ii[back]] @ d) < -0.5
+            back = back.reshape(len(cf), len(fine))
+            meas_f.append(cf)
+            meas_t.append(np.where(back.any(axis=1), fine[np.argmax(back, axis=1)], np.inf))
+        faces = faces[~captured]
         if len(faces) == 0:
             continue
 
@@ -295,16 +322,51 @@ def slab_fill(v, f, geo_fallback=None):
                 fb[long[h.any(axis=1)]] = False
             thickness = np.where(fb, drop, thickness)
             ok |= fb
+        if (~ok).any():  # no plausible slab drop: a thin-shell candidate
+            open_f.append(faces[~ok])
+            open_d.append(np.repeat(d[None], (~ok).sum(), axis=0))
         faces, thickness = faces[ok], thickness[ok]
         if len(faces):
             pieces.append(v[f[faces]] - d * thickness[:, None, None])
 
-    if not pieces:
+    gv, gf = np.empty((0, 3)), np.empty((0, 3), dtype=np.int64)
+    if pieces:
+        new_v = np.concatenate(pieces).reshape(-1, 3)
+        new_f = np.arange(len(new_v)).reshape(-1, 3)[:, ::-1]
+        gv, gf = keep_only_gaps(v, f, new_v, new_f)
+    sv, sf = _shell_offsets(v, f, centroids, normals, meas_f, meas_t, open_f, open_d)
+    gv, gf = append(gv, gf, sv, sf)
+    if len(gf) == 0:
         return v, f
-    new_v = np.concatenate(pieces).reshape(-1, 3)
-    new_f = np.arange(len(new_v)).reshape(-1, 3)[:, ::-1]
-    gv, gf = keep_only_gaps(v, f, new_v, new_f)
     return append(v, f, gv, gf)
+
+
+def _shell_offsets(v, f, centroids, normals, meas_f, meas_t, open_f, open_d):
+    """Copy open thin-shell faces by the nearby measured wall thickness (see SHELL_*).
+    Merged normal-aware: the new skin lies within GAP of the old one but faces the other way."""
+    empty = np.empty((0, 3)), np.empty((0, 3), dtype=np.int64)
+    if not meas_f or not open_f:
+        return empty
+    mf, mt = np.concatenate(meas_f), np.concatenate(meas_t)
+    of, od = np.concatenate(open_f), np.concatenate(open_d)
+    thin = mt <= SHELL_MAX_THICKNESS
+    if not thin.any():
+        return empty
+    k = min(SHELL_NEIGHBOURS, len(mf))
+    dk, ik = cKDTree(centroids[mf]).query(centroids[of], k=k, distance_upper_bound=SHELL_RADIUS)
+    dk, ik = dk.reshape(len(of), k), ik.reshape(len(of), k)
+    near = np.isfinite(dk)
+    ik = np.where(near, ik, 0)
+    thin_near = near & thin[ik]
+    alike = thin_near & (np.einsum("nkj,nj->nk", normals[mf][ik], normals[of]) > 0.7)
+    use = alike.any(axis=1) & (thin_near.sum(axis=1) >= SHELL_VOTE * near.sum(axis=1))
+    if not use.any():
+        return empty
+    t = mt[ik[np.arange(len(of)), np.argmax(alike, axis=1)]][use]
+    of, od = of[use], od[use]
+    new_v = (v[f[of]] - od[:, None, :] * t[:, None, None]).reshape(-1, 3)
+    new_f = np.arange(len(new_v)).reshape(-1, 3)[:, ::-1]
+    return keep_only_gaps(v, f, new_v, new_f, normal_aware=True)
 
 
 def complete(v, f, watertight=False):
@@ -336,18 +398,22 @@ def close_holes(v, f):
     return from_meshset(ms)
 
 
-def poisson(v, f, density_trim=None):
+def poisson(v, f, density_trim=None, preclean=None):
     """Screened Poisson with clean_scan.py's shipped parameters, single-threaded
     (multi-threaded aborts at random -- clean_scan.POISSON_THREADS_NOTE).
 
     density_trim (log-depth units, e.g. DENSITY_TRIM): drop faces with any vertex whose
     Poisson density is that far below the median density of vertices the input supports
     (within GAP of it). Unsupported surface -- the balloon over an open side -- has low
-    density (PyMeshLab stores it in vertex_scalar_array). None = no trim (the baseline)."""
+    density (PyMeshLab stores it in vertex_scalar_array). None = no trim (the baseline).
+
+    preclean (default POISSON_PRECLEAN, on): let MeshLab drop null-normal vertices before
+    solving; without it a folded face pair on a real scan fails the whole run (BUGS #48)."""
     ms = to_meshset(v, f)
     before = ms.current_mesh_id()
     ms.generate_surface_reconstruction_screened_poisson(
-        depth=9, samplespernode=1.5, pointweight=4.0, threads=1
+        depth=9, samplespernode=1.5, pointweight=4.0, threads=1,
+        preclean=POISSON_PRECLEAN if preclean is None else bool(preclean),
     )
     if ms.current_mesh_id() == before:
         raise RuntimeError("Poisson produced no mesh")

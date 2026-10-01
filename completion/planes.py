@@ -31,7 +31,9 @@ HOW
      least squares, largest first.
   2. Each plane is a SHELL plane (floor, wall, ceiling) if almost nothing in the scan
      lies behind it -- the room's outer hull. That test needs no "up" axis, no Manhattan
-     assumption and no labels. Everything else is a SURFACE (furniture faces).
+     assumption and no labels. Everything else is a SURFACE (furniture faces). A shell
+     plane with a larger parallel shell plane within DUP_GAP is a RANSAC fragment of the
+     same uneven real floor/wall and is demoted to a surface (BUGS #49).
   3. Shell planes are extended to their intersections with the other shell planes (the
      room is the intersection of their half-spaces) and to the scan's own extent.
      Surface planes are split into connected pieces. Each piece fills the holes it
@@ -83,6 +85,12 @@ MIN_SHELL_AREA = 0.5     # m^2; a room's floor/wall/ceiling is always at least t
 # can show a little of the next room, hence a margin and a small allowance.
 BEHIND_MARGIN = 0.05     # metres
 SHELL_BEHIND_MAX = 0.03  # share of scan area allowed behind a shell plane
+# A real floor/wall is not one exact plane (the Redwood bedroom floor spans ~8 cm), so
+# RANSAC at DIST_TOL splits it into parallel fragments, and a small fragment passed the
+# shell test and was extended room-wide 5-15 cm off the real surface (BUGS #49). A shell
+# plane with a LARGER shell plane of the same orientation within DUP_GAP is only a surface.
+DUP_COS = np.cos(np.radians(10))
+DUP_GAP = 0.25           # metres
 CLOSING = 0.05           # metres; cracks narrower than ~2x this join one surface piece
 RANSAC_TRIALS = 200
 RANSAC_SUBSAMPLE = 5000
@@ -97,6 +105,7 @@ class Plane:
     faces: np.ndarray           # indices of inlier faces in the input mesh
     area: float                 # measured (inlier) area, m^2
     shell: bool = False
+    shell_fragment: bool = False  # a shell plane demoted as a near-duplicate (BUGS #49): still room hull
     u: np.ndarray = field(default=None)   # in-plane axes, aligned with the plane's own
     w: np.ndarray = field(default=None)   # min-area rectangle so the grid follows walls
 
@@ -155,6 +164,11 @@ def find_planes(v, f, rng=None, min_area=MIN_PLANE_AREA):
         behind = areas[centroids @ pl.normal - pl.offset < -BEHIND_MARGIN].sum()
         pl.shell = pl.area >= MIN_SHELL_AREA and behind / total < SHELL_BEHIND_MAX
         pl.u, pl.w = _plane_axes(v, f, pl)
+    shells = [p for p in planes if p.shell]
+    for p in shells:
+        if any(q is not p and q.area > p.area and q.normal @ p.normal > DUP_COS
+               and abs(q.offset - p.offset) < DUP_GAP for q in shells):
+            p.shell, p.shell_fragment = False, True
     return planes
 
 
