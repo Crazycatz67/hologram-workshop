@@ -12,6 +12,7 @@ recommended B1 chain (what complete() runs):
     v, f = poisson(v, f)
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from scipy.spatial import cKDTree
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import clean_scan  # noqa: E402  -- reuse the shipped symmetry search, never fork it
 
+DENSITY_TRIM = float(os.environ.get("HW_DENSITY_TRIM", 3.0))  # log-depth below the supported median; 3.0 keeps the chair >=97% (#24); env override for experiments
 GAP = 0.01               # metres; new geometry closer than this to the scan is redundant
 SAMPLES = 250_000        # surface samples for nearest-surface queries (~3 mm on a chair)...
 SAMPLES_PER_M2 = 210_000  # ...and never sparser than the chair's density (1.18 m2), so the
@@ -40,16 +42,17 @@ def face_geometry(v, f):
     return (a + b + c) / 3.0, cross / np.maximum(area2, 1e-12)[:, None], area2 / 2.0
 
 
-def sample_surface(v, f, n, rng):
-    """Area-weighted uniform points on a triangle mesh."""
+def sample_surface(v, f, n, rng, normals=False):
+    """Area-weighted uniform points on a triangle mesh (and their face normals if asked)."""
     if len(f) == 0:
-        return np.empty((0, 3))
-    _, _, area = face_geometry(v, f)
+        return (np.empty((0, 3)), np.empty((0, 3))) if normals else np.empty((0, 3))
+    _, nrm, area = face_geometry(v, f)
     idx = rng.choice(len(f), n, p=area / area.sum())
     r1, r2 = rng.random(n), rng.random(n)
     s = np.sqrt(r1)
     a, b, c = v[f[idx, 0]], v[f[idx, 1]], v[f[idx, 2]]
-    return (1 - s)[:, None] * a + (s * (1 - r2))[:, None] * b + (s * r2)[:, None] * c
+    pts = (1 - s)[:, None] * a + (s * (1 - r2))[:, None] * b + (s * r2)[:, None] * c
+    return (pts, nrm[idx]) if normals else pts
 
 
 def sample_count(v, f, minimum=SAMPLES):
@@ -76,13 +79,25 @@ def boundary_vertices(v, f):
     return v[np.unique(uniq[counts == 1])]
 
 
-def keep_only_gaps(v, f, new_v, new_f, gap=GAP):
-    """The merge rule: of the candidate faces, keep those farther than `gap` from the scan."""
+def keep_only_gaps(v, f, new_v, new_f, gap=GAP, normal_aware=False):
+    """The merge rule: of the candidate faces, keep those the scan doesn't already cover.
+
+    Plain: a candidate within `gap` of any scan surface is redundant. normal_aware: it is
+    redundant only if a scan sample within `gap` also FACES THE SAME WAY (dot > 0.5). On a
+    thin wall the missing outer skin lies within 1 cm of the scanned inner skin but faces
+    the other way; the plain rule always discarded it (BUGS.md #24, Ricky's 2026-10-01 runs).
+    """
     if len(new_f) == 0:
         return np.empty((0, 3)), np.empty((0, 3), dtype=np.int64)
-    centroids, _, _ = face_geometry(new_v, new_f)
-    dist, _ = cKDTree(sample_surface(v, f, sample_count(v, f), np.random.default_rng(0))).query(centroids)
-    return submesh(new_v, new_f, dist > gap)
+    centroids, cnorm, _ = face_geometry(new_v, new_f)
+    if not normal_aware:
+        dist, _ = cKDTree(sample_surface(v, f, sample_count(v, f), np.random.default_rng(0))).query(centroids)
+        return submesh(new_v, new_f, dist > gap)
+    pts, pn = sample_surface(v, f, sample_count(v, f), np.random.default_rng(0), normals=True)
+    dk, ik = cKDTree(pts).query(centroids, k=16, distance_upper_bound=gap)
+    near = np.isfinite(dk)
+    same = (near & (np.einsum("nkj,nj->nk", pn[np.where(near, ik, 0)], cnorm) > 0.5)).any(axis=1)
+    return submesh(new_v, new_f, ~same)
 
 
 def to_meshset(v, f):
@@ -172,11 +187,16 @@ def thickness_fill(v, f):
     tri = v[f[top]] - np.array([0.0, 1.0, 0.0]) * thickness[:, None, None]
     new_v = tri.reshape(-1, 3)
     new_f = np.arange(len(new_v)).reshape(-1, 3)[:, ::-1]
-    gv, gf = keep_only_gaps(v, f, new_v, new_f)
+    gv, gf = keep_only_gaps(v, f, new_v, new_f, normal_aware=True)
     return append(v, f, gv, gf)
 
 
 SLAB_DIRECTIONS = 26     # directions sampled on the sphere; faces are grouped by the nearest
+# Experimental (BUGS.md #23, default off): when the planar-nearest boundary gives an implausible
+# drop (it often belongs to another part: stool seat -> rung, lamp base -> shade), fall back to
+# the boundary nearest ALONG THE SURFACE -- but only if the face's own -d probe stays empty out
+# to 2x that drop, so a wall or thin shell (open behind, far side somewhere else) gets no slab.
+SLAB_GEO_FALLBACK = os.environ.get("HW_SLAB_GEO", "0") == "1"
 
 
 def _sphere_directions(n):
@@ -187,7 +207,26 @@ def _sphere_directions(n):
     return np.stack([np.cos(theta) * np.sin(phi), np.cos(phi), np.sin(theta) * np.sin(phi)], axis=1)
 
 
-def slab_fill(v, f):
+def _geodesic_boundary(v, f):
+    """Per face: index of the open-boundary vertex nearest along the mesh edges (-1 if the
+    face's component has no boundary), via one multi-source Dijkstra from every boundary vertex."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import dijkstra
+    edges = np.sort(np.concatenate([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]]), axis=1)
+    uniq, counts = np.unique(edges, axis=0, return_counts=True)
+    bidx = np.unique(uniq[counts == 1])
+    face_b = np.full(len(f), -1)
+    if len(bidx) == 0:
+        return face_b
+    w = np.linalg.norm(v[uniq[:, 0]] - v[uniq[:, 1]], axis=1)
+    graph = coo_matrix((w, (uniq[:, 0], uniq[:, 1])), shape=(len(v), len(v))).tocsr()
+    dist, _, src = dijkstra(graph, directed=False, indices=bidx, min_only=True, return_predecessors=True)
+    corner = f[np.arange(len(f)), np.argmin(dist[f], axis=1)]  # the face's corner nearest a boundary
+    face_b = np.where(np.isfinite(dist[corner]), src[corner], -1)
+    return face_b
+
+
+def slab_fill(v, f, geo_fallback=None):
     """thickness_fill in every direction: rebuild the missing far side of any slab.
 
     The underside of a seat is one case; the back of a backrest pushed against a wall is
@@ -196,7 +235,11 @@ def slab_fill(v, f):
     along vertical: probe along -d for existing surface, measure the drop along d to the
     nearest open boundary (nearest in the plane perpendicular to d), copy the face by that
     drop. Grouping keeps it vectorised -- one boundary KD-tree per direction, not per face.
+
+    geo_fallback (None = SLAB_GEO_FALLBACK): see that constant; experimental, BUGS.md #23.
     """
+    if geo_fallback is None:
+        geo_fallback = SLAB_GEO_FALLBACK
     centroids, normals, _ = face_geometry(v, f)
     boundary = boundary_vertices(v, f)
     if len(boundary) == 0:
@@ -207,8 +250,20 @@ def slab_fill(v, f):
     depths = np.arange(2 * PROBE_STEP, MAX_THICKNESS + 1e-9, PROBE_STEP)
     pieces = []
 
+    # Room shell (floor, walls, ceiling: planes with nothing behind them) is not a slab. Probing
+    # behind a wall finds nothing, so without this every wall face was copied to a fake
+    # "thickness" offset: 5.64 m2 invented, 25% real on the synthetic room (BUGS.md #25).
+    # Objects have no shell planes, so they are unaffected.
+    from planes import find_planes  # local import: planes imports from this module
+    shell = np.zeros(len(f), dtype=bool)
+    for pl in find_planes(v, f, rng=np.random.default_rng(0)):
+        if pl.shell:
+            shell[pl.faces] = True
+
+    geo_b = _geodesic_boundary(v, f) if geo_fallback else None
+
     for g, d in enumerate(dirs):
-        faces = np.flatnonzero((group == g) & (normals @ d > UPWARD))
+        faces = np.flatnonzero((group == g) & (normals @ d > UPWARD) & ~shell)
         if len(faces) == 0:
             continue
         probes = centroids[faces, None, :] - depths[None, :, None] * d
@@ -225,6 +280,21 @@ def slab_fill(v, f):
         _, nearest = cKDTree(plane(boundary)).query(plane(centroids[faces]))
         thickness = (centroids[faces] - boundary[nearest]) @ d
         ok = (thickness > MIN_THICKNESS) & (thickness < MAX_THICKNESS)
+        if geo_b is not None:
+            fb = (~ok) & (geo_b[faces] >= 0)
+            drop = (centroids[faces] - v[np.maximum(geo_b[faces], 0)]) @ d
+            fb &= (drop > MIN_THICKNESS) & (drop < MAX_THICKNESS)
+            # The usual probe stops at MAX_THICKNESS; a drop over half that needs the empty
+            # check extended to 2x drop before we trust it is a slab and not an open shell.
+            long = np.flatnonzero(fb & (2 * drop > MAX_THICKNESS))
+            if len(long):
+                far = np.arange(MAX_THICKNESS + PROBE_STEP, 2 * MAX_THICKNESS + 1e-9, PROBE_STEP)
+                pr = centroids[faces[long], None, :] - far[None, :, None] * d
+                h, _ = surface.query(pr.reshape(-1, 3), distance_upper_bound=PROBE_HIT)
+                h = np.isfinite(h).reshape(len(long), len(far)) & (far[None, :] <= 2 * drop[long, None])
+                fb[long[h.any(axis=1)]] = False
+            thickness = np.where(fb, drop, thickness)
+            ok |= fb
         faces, thickness = faces[ok], thickness[ok]
         if len(faces):
             pieces.append(v[f[faces]] - d * thickness[:, None, None])
@@ -247,12 +317,12 @@ def complete(v, f, watertight=False):
     between scan and patch are not welded; for a single closed surface pass
     watertight=True and every face is labelled by its distance to the scan instead.
     """
-    rebuilt_v, rebuilt_f = poisson(*slab_fill(*mirror_gaps(v, f)))
+    rebuilt_v, rebuilt_f = poisson(*slab_fill(*mirror_gaps(v, f)), density_trim=DENSITY_TRIM)
     if watertight:
         centroids, _, _ = face_geometry(rebuilt_v, rebuilt_f)
         dist, _ = cKDTree(sample_surface(v, f, sample_count(v, f), np.random.default_rng(0))).query(centroids)
         return rebuilt_v, rebuilt_f, dist > GAP
-    pv, pf = keep_only_gaps(v, f, rebuilt_v, rebuilt_f)
+    pv, pf = keep_only_gaps(v, f, rebuilt_v, rebuilt_f, normal_aware=True)
     out_v, out_f = append(v, f, pv, pf)
     inferred = np.zeros(len(out_f), dtype=bool)
     inferred[len(f):] = True
@@ -266,9 +336,14 @@ def close_holes(v, f):
     return from_meshset(ms)
 
 
-def poisson(v, f):
+def poisson(v, f, density_trim=None):
     """Screened Poisson with clean_scan.py's shipped parameters, single-threaded
-    (multi-threaded aborts at random -- clean_scan.POISSON_THREADS_NOTE)."""
+    (multi-threaded aborts at random -- clean_scan.POISSON_THREADS_NOTE).
+
+    density_trim (log-depth units, e.g. DENSITY_TRIM): drop faces with any vertex whose
+    Poisson density is that far below the median density of vertices the input supports
+    (within GAP of it). Unsupported surface -- the balloon over an open side -- has low
+    density (PyMeshLab stores it in vertex_scalar_array). None = no trim (the baseline)."""
     ms = to_meshset(v, f)
     before = ms.current_mesh_id()
     ms.generate_surface_reconstruction_screened_poisson(
@@ -276,6 +351,15 @@ def poisson(v, f):
     )
     if ms.current_mesh_id() == before:
         raise RuntimeError("Poisson produced no mesh")
+    if density_trim is not None:
+        m = ms.current_mesh()
+        pv, pf = m.vertex_matrix().astype(np.float64), m.face_matrix().astype(np.int64)
+        q = m.vertex_scalar_array()
+        d, _ = cKDTree(sample_surface(v, f, sample_count(v, f), np.random.default_rng(0))).query(pv)
+        if (d < GAP).any():
+            keep = q >= np.median(q[d < GAP]) - density_trim
+            pv, pf = submesh(pv, pf, keep[pf].all(axis=1))
+        ms = to_meshset(pv, pf)
     ms.meshing_remove_connected_component_by_diameter(
         mincomponentdiag=pymeshlab.PercentageValue(5.0)
     )
