@@ -38,6 +38,9 @@ Electron-as-node (see the bottom of this file).
 | `docs/lab/gestures/gesture-lab.html` (per-gesture sweeps; `?only=spin,clap`) | open, read `window.__gestureReport` / the `<pre>` | srv, tab | 7 / 7 gestures fire, no bleed (Timmy pass 3; page reports 'done', no pass/fail count) | 2026-10-01 commit gate |
 | `docs/lab/gestures/smoothing-lab.html` (One Euro filter, clap recall by fps) | open, wait for "done" | srv, tab | done; clap recall 22/24 at 8 fps, 24/24 at 12-60 fps, slow bring-together 0 (unchanged) | 2026-10-01 commit gate |
 | `safety-test.html` (photosafety, WCAG ≤ 3 flashes/s) | open, wait for `ALL PASS` / `SOME FAIL`; shows the look on screen | srv, tab | ALL PASS 5/5, 0-1 flashes/s (Timmy pass 3: v1 3.79%, v1+comfort 3.25%); blown pixels: chess+comfort 0.60% (was 0.81), v1+comfort 3.25% (was 3.85) (Debbie #30 numbers, confirmed by Timmy) | 2026-10-01 commit gate |
+| `handui-test.html` (hands on buttons/sliders/ring, handUI.js, synthetic) | open, read `N passed, M failed`; wait ~9 s | srv, tab, **viewport >= ~1000x700** | 28 / 0 at 1460x812 (Timmy pass 4). At a ~756x469 viewport: 25 / 3 (H1-H3, the ring ones) | 2026-10-01 pass 4, 942770d+dirty |
+| `hand-model-test.html` (rigged hologram hand) | open, read title `24/24` | srv, tab | 24 / 0 (Timmy pass 4; `?camera=1` not run) | 2026-10-01 pass 4 |
+| `testguide-steps.js` pure check (Node) | scratch script: import STEPS/KINDS/PAGES, check ids, fields, pageOf, loadState with a throwing storage (not committed) | node | 370 / 0 checks, 44 steps (was 37) (Timmy pass 4) | 2026-10-01 pass 4 |
 | `platform/perf-test.html` (render cost, readPixels-synced) | open, read the table | srv, tab, **vis** (uses rAF) | done, GPU timer; platform mode pr1 1.1 ms median on chair_detail (608k tri, LOD 240k); pr2 legacy 6.1 ms vs 3.5 before (tolerance flag; hidden tab, legacy path, not shipped) | 2026-10-01 commit gate |
 | `platform/parts-test.html` (parts.js splitter) | open, read pass/fail | srv, tab | runs: chair_clean.obj -> 8 parts, 8 rows all ok (table, no pass/fail line) | 2026-10-01 commit gate |
 | `platform/photo-test.html` (photo.js, photo → hologram) | open, read pass/fail | srv, tab | loads clean, waits for "pick a photo" (needs a human photo; not exercised) | 2026-10-01 commit gate |
@@ -279,3 +282,64 @@ Not verified: gesture/hand feel, real camera, MediaPipe, clip-lab record/Keep, :
 **D. Grab/pin HA3-HA7 (1.5 min, camera on in Platform)**
 7. Follow guide steps HA3 to HA7 at http://localhost:8080/guide.html (one at a time): fist to grab a part, move it, pin with K, try to grab the pinned part, K again to unpin. Expected per step as written in the guide.
 Send back: pass/fail per step number (1-7), plus a note if the hand lags.
+
+
+## Commit-gate pass 4, 2026-10-01 (Timmy), working tree on 942770d (no new commit; 39+ dirty files), own :8099 + own headless Chrome via CDP :9399 (Chrome extension tab was hidden / disconnected: rAF suites ran in headless real time, viewport 1460x812). demos/ skipped (Cody-PG mid-edit).
+
+New since pass 3: handUI.js, ring/lens by hand, Platform zoom/tilt/clap, Debbie-G's 9 gesture fixes, models.js + samples.js + 10 GLBs, landing site (index/about/viewer, site.css, site-nav.js, assets/site). All runs with `?rec=off` so no new runs/ records were written.
+
+| Check | Before (pass 3) | Now | Status |
+| --- | --- | --- | --- |
+| test.html | 326/0 | 345/0 | GREEN |
+| ring-test | 74/0 | 74/0 (hidden tab 73 + 1 SKIP) | GREEN |
+| library-test | 72/0 | 72/0 (86 s, visible headless; 2 console lines are its deliberate 404/blob negative tests) | GREEN |
+| p5-test | 24/0 | 24/0 | GREEN |
+| polygon-test | 43/0 | 43/0 | GREEN |
+| platform hands-test | 45/0 | 55/0 (`?camera=1` not run) | GREEN |
+| handui-test (new) | n/a | 28/0 at 1460x812; 25/3 (H1-H3 ring) at a small ~756x469 viewport | GREEN (viewport-sensitive, see below) |
+| hand-model-test | 24/0 | 24/0 | GREEN |
+| holdgate-lab | 19/19 | 19/19 | GREEN |
+| gun-lab self-test | 45/0 | 45/45 passed | GREEN |
+| gesture-lab | 7/7 fire, no bleed | 7/7 fire; NEW: tilt "all armed" also fires spin 180.0 deg; tilt isolated now p-79.3/r180.0 (was p-42.3/r0.0 at ad941bc, same -79.3/r180 already in the 16:47 run at 942770d) | flag (Debbie) |
+| safety-test | 5/5 | ALL PASS 5/5 (112 s headless; v1 3.79%, v1+comfort 3.25%, chess+comfort 0.60%) | GREEN |
+| testguide-steps node check | 88/0 (37 steps) | 370/0 (44 steps) | GREEN (scratch script) |
+| Console sweep: index, about, viewer, hologram, hands, platform/index, guide, clip-lab | 0 | 0 errors on all 8 (camera never started) | GREEN |
+| Top bar 800/1000/1200/1400/1600 px, hologram.html + Platform | fits | 1 row, 48 px, no horizontal overflow, last button right edge < viewport at all 10 combos | GREEN |
+| Landing index + about at 375/768/1400 | n/a | scrollWidth == viewport, no element past the right edge, 0 broken images, 0 errors (375 px screenshot viewed: hero, buttons, chair fine) | GREEN |
+| Carousel, 13 models (hologram.html) | 4 | each loads ("ready"), 0 errors | GREEN |
+| Platform samples (10 + Chair, ?db=timmy-p4s) | n/a | all 11 open via library.open, parts 1-13, 0 errors | GREEN |
+| Off-localhost (demo.hologram.test -> 127.0.0.1) | n/a | index, about, viewer, hologram, hands, platform, guide: no testrec/sessionrec/__testrun request. test.html loads testrec.js (allowed, test page) | GREEN |
+| Completion Track B | n/a | NOT RUN (not in scope this pass) | not-run |
+
+Findings: (1) gesture-lab tilt bleed + roll 180 (possibly Euler gimbal artefact near pitch -80; not proven). (2) handui-test H1-H3 depend on viewport size. (3) :8080 was not restarted; Keep in clip-lab still needs an :8080 restart. Not verified: any camera/hand feel, MediaPipe, ?camera=1 variants, the shadow recorder with rec on, POST /__clip.
+
+### Features (pass 4)
+| Feature | Offline | Live |
+| --- | --- | --- |
+| Hands on buttons/sliders, camera remember (handUI.js) | verified-offline (handui 28/0) | needs-live |
+| Ring / lens by hand | verified-offline (handui H1-H3, ring 74, polygon 43) | needs-live |
+| Platform zoom / tilt / clap by hand | verified-offline (hands-test 55) | needs-live |
+| Gesture fixes 1-9 (sticky pointer, clap, tilt, scale, aim-grab, outline, practice, thumb-tap) | verified-offline (test.html 345; gesture-lab tilt flag) | needs-live |
+| 13 carousel models + 10 Platform samples | verified-offline (load, 0 errors) | needs-live (looks, explode, credit line) |
+| Landing site (index/about/viewer) | verified-offline (3 widths, 0 errors) | needs-live (phone, real eyes) |
+
+### Owner live checklist for pass 4 (~9 min). Restart :8080 first (`python3 serve.py`), hard refresh (Cmd+Shift+R) every page.
+**A. Hands on the page, http://localhost:8080/hologram.html (3 min)**
+1. Press Start camera, raise one open hand. Expected: rigged hologram hand follows; reload and the camera asks to start again only if "remember" is off.
+2. Aim the pointer (index out, 3 curled) at a button in the top bar and pinch with the other hand. Expected: the button presses, once.
+3. Aim at a slider (Tools panel), pinch-hold and move sideways. Expected: slider follows, releases on open hand.
+4. Fist-grab the model, tilt with the second hand, clap two open hands. Expected: grab moves it, tilt tilts without the model spinning sideways, clap resets. Note if tilt flips or jumps (gesture-lab flag).
+**B. Gesture feel, same page (2 min)**
+5. Point at a part after exploding; hold, then pinch. Expected: outline appears on the part; selects once; pointer stays steady when your hand pauses (sticky).
+6. Do the 🎯 practice targets. Expected: rings appear one by one, no flashing.
+**C. Platform, http://localhost:8080/platform/index.html (2 min)**
+7. Camera on; open the Library ring by hand: aim at the centre card, other-hand pinch. Expected: opens it. Pinch-hold and drag spins the ring.
+8. In a part view, push-pull a fist (zoom), tilt, clap. Expected: zoom in/out, tilt, reset.
+9. Polygon lens (P) with a hand. Expected: lens follows the pointer.
+**D. Objects (1.5 min)**
+10. On hologram.html step through all 13 models with the arrows; explode a multi-part one. Expected: each loads, parts separate; credit line shows on CC BY ones (barrel chair, bar stool, pedestal table).
+11. Platform ring: open 3 of the 10 samples. Expected: they open as hatched-free scanned looks, parts selectable.
+**E. Landing, http://localhost:8080/ and /about.html (1 min; phone too if handy)**
+12. Open on your phone (same Wi-Fi, http://<Mac IP>:8080/). Expected: no sideways scroll, menu opens, buttons reach gesture demo and Platform.
+13. On the Mac, scroll the cards. Expected: feature cards animate; viewer link goes to /viewer.html.
+Send back: pass/fail per step number (1-13), plus a note on tilt flip and whether the hand lags.
