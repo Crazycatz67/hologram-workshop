@@ -108,6 +108,14 @@ select.fit-input { cursor: pointer; }
 .surface-row { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
 .surface-h { color: var(--accent); min-width: 62px; font-family: var(--mono); }
 .surface-d { color: var(--muted); font-size: 12px; }
+/* The tape is the big everyday toggle; Report's sub-sections sit indented. The toggle's text
+   is lowercase on purpose (test.js finds "pick two points"). Moved from hologram.html so
+   index.html's panel gets them too. */
+#measure .tape-toggle { display: block; height: 40px; font-size: 14px; color: var(--text); background: var(--panel-2); border-color: var(--line-2); }
+#measure .tape-toggle::first-letter { text-transform: uppercase; }
+#measure .tape-toggle.active { color: var(--select); border-color: rgba(255,176,64,.6); background: rgba(255,176,64,.08); }
+#measure .report-body { padding-left: 10px; border-left: 1px solid var(--line); }
+#measure .report-export { margin-top: 12px; }
 .measure-caveat { margin-top: 8px; font-size: 11px; line-height: 1.5; color: #ff9a7a; border-left: 2px solid rgba(255,154,122,.5); padding-left: 8px; }
 .note-list { margin-top: 8px; display: grid; gap: 6px; }
 .note-row { display: flex; gap: 6px; align-items: center; }

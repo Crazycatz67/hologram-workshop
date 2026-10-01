@@ -9,24 +9,21 @@ const { loadModel, frameObject } = await import('./loadModel.js' + V);
 // crater of scanned floor. Cleaning is now an offline step (clean_scan.py), which can do
 // the things a live radius crop cannot: detect the actual ground plane, keep the runners
 // resting on it, rebuild the leg the scanner missed, and weld the result watertight.
-const { startCamera, stopCamera, describeCameraError } = await import('./camera.js' + V);
-const { createHandTracker, HAND_CONNECTIONS } = await import('./handTracker.js' + V);
-const { annotateHand, handSpan } = await import('./gestures.js' + V);
-const { drawHands, sizeOverlayTo } = await import('./overlay.js' + V);
+const { describeCameraError } = await import('./camera.js' + V);
 const { createManipulator, MODE, CHANNELS } = await import('./manipulator.js' + V);
 const { default: HolographicMaterial } = await import('./HolographicMaterial.js' + V);
-const { createGhostHands } = await import('./ghostHands.js' + V);
 const { prepareHologram, enableSingleLayer } = await import('./hologramLook.js' + V);
-const { smoothHandLandmarks, resetLandmarkSmoothing } = await import('./smoothLandmarks.js' + V);
 const { createMeasurePanel } = await import('./measurePanel.js' + V);
 const { MODELS } = await import('./models.js' + V);
 const { createCarousel } = await import('./carousel.js' + V);
-const { createPointer, createEngagement } = await import('./pointer.js' + V);
-const { createReticle, probe } = await import('./reticle.js' + V);
+const { scoreLine, PRACTICE_ROUNDS } = await import('./calibrate.js' + V);
+const { partLabel } = await import('./reticle.js' + V);
+// Camera, tracker, smoothing, engagement, pointer, reticle, calibration, reset gate, tracking
+// monitor and ghost hands live in the shared hands runtime (also used by the Platform).
+const { createHandsRuntime } = await import('./handsRuntime.js' + V);
 
 const video = document.getElementById('cam');
 const overlay = document.getElementById('overlay');
-const overlayCtx = overlay.getContext('2d');
 
 const statusEl = document.getElementById('status');
 const fpsEl = document.getElementById('fps');
@@ -34,27 +31,34 @@ const modeEl = document.getElementById('mode');
 const startBtn = document.getElementById('start');
 const resetBtn = document.getElementById('reset');
 
-const panelEl = document.getElementById('panel');
+const toolsEl = document.getElementById('tools');
+const toolsBtn = document.getElementById('toolsBtn');
 const drillsEl = document.getElementById('drills');
-const lampEl = document.getElementById('lamp');
-const liveTextEl = document.getElementById('liveText');
+const coachEl = document.getElementById('coach');
 const coachTitleEl = document.getElementById('coachTitle');
 const coachBodyEl = document.getElementById('coachBody');
+const coachLiveEl = document.getElementById('coachLive');
+const lampEl = document.getElementById('lamp');
+const liveTextEl = document.getElementById('liveText');
+const helpEl = document.getElementById('help');
+const helpBtn = document.getElementById('helpBtn');
+const calLineEl = document.getElementById('calLine');
+const partChipEl = document.getElementById('partChip');
+const selPracticeBtn = document.getElementById('selPractice');
 
 const { scene, camera, renderer, controls } = createScene(document.getElementById('stage'), {
   transparentBackground: true
 });
 
 let manipulator = null;
-let tracker = null;
-let stream = null;
-let tracking = false;
-let hands = [];
-let lastVideoTime = -1;
 let currentMeasurePanel = null;
 let currentModelId = null;
 let swapping = false;
 let seenResets = 0; // manipulator.resetCount already announced (see noticeResets)
+// The loaded model's own words for the instructions: "Chair" from "Chair (raw scan)", and how
+// it explodes (literal parts vs stretch). Filled in by loadModelById.
+const model = { name: MODELS[0].name.replace(/\s*\(.*\)\s*$/, ''), parts: 0, literal: false };
+const the = () => `the ${model.name.toLowerCase()}`;
 
 // scanlineSize is high on purpose. At the library's default (8) the scanline bands are
 // wide enough to cut clean across a chair leg, and thin parts read as SEVERED -- reported
@@ -76,16 +80,6 @@ const hologramMaterial = new HolographicMaterial({
 // Photosafety (BUGS.md #14): one-layer rendering so stacked surfaces can't bloom to white.
 enableSingleLayer(scene, [hologramMaterial]);
 
-const ghostHands = createGhostHands(scene, HAND_CONNECTIONS);
-const isFist = (h) => h.fistLike;
-
-// Finger-gun pointer (pointer.js) and its reticle (reticle.js). Aim with one hand in the
-// pointer pose, click with the other hand's pinch; the mouse drives the same cursor. Hands
-// count only while raised (createEngagement): lowered = at rest, ghost dimmed.
-const engagement = createEngagement();
-const pointer = createPointer();
-const reticle = createReticle(scene);
-
 // Interaction-tied visual feedback on the hologram itself, in place of haptics this can't
 // have — requested directly during testing ("depending on what we're interacting with,
 // add more color"). This is the coarse whole-object version; per-region glow (e.g. just
@@ -97,6 +91,145 @@ const reticle = createReticle(scene);
 const MODE_BRIGHTNESS = { idle: 1.25, grab: 1.8, transform: 1.8, explode: 1.8 };
 
 window.hologram = { scene, camera, renderer, controls, model: null, material: hologramMaterial };
+
+// ---- the coach: ONE slot for every prompt -------------------------------------------------
+// The owner's live test (2026-10-01) found toasts, hint chips, the drill text and the
+// calibration card all talking at once and overlapping. Now every prompt goes into a slot here
+// and #coach shows the single most important one: an error beats a tracking hint beats the
+// calibration step beats the drill step beats a toast. A toast only shows when nothing else is
+// up (its text also goes to the status line, so nothing is lost). Text swaps in place and the
+// box only fades (eased opacity), so changing messages never flashes (BUGS #14).
+// While calibrating, calibrate.js draws its own card, so the calibration slot just keeps the
+// drill and toast quiet ({ silent: true }) instead of saying the same thing twice.
+// Message shape: { title, body? }; title starts with an icon and a verb, body ends "✓ …".
+const COACH_ORDER = ['error', 'hint', 'calibration', 'drill', 'toast'];
+const coachSlots = { error: null, hint: null, calibration: null, drill: null, toast: null };
+let coachKey = null;
+function setCoach(kind, msg) {
+  coachSlots[kind] = msg ?? null;
+  const top = COACH_ORDER.find((k) => coachSlots[k]);
+  const m = top ? coachSlots[top] : null;
+  const key = m && !m.silent ? `${top}|${m.title}|${m.body ?? ''}` : '';
+  if (key === coachKey) return;
+  coachKey = key;
+  if (!key) {
+    coachEl.className = 'empty';
+    return;
+  }
+  coachEl.className = top;
+  coachTitleEl.textContent = m.title;
+  coachBodyEl.textContent = m.body ?? '';
+  // The live "what I can see" line belongs to a practice drill only.
+  coachLiveEl.hidden = top !== 'drill' || !m.live;
+}
+let toastTimer = null;
+function showToast(title, body = '', ms = 3000) {
+  setCoach('toast', { title, body });
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => setCoach('toast', null), ms);
+}
+// Tracking hints (pointer.js createTrackingMonitor) in this page's own words, by key, so the
+// wording follows the writing standard without touching pointer.js.
+const HINT_TEXT = {
+  flicker: ['☝ Hold the pointer shape', 'Index straight out, the other three fingers curled tight. ✓ Success looks like: the ring stops blinking out.'],
+  edge: ['↔ Bring your hand back toward the middle', 'Or press C to recalibrate your reach. ✓ Success looks like: the ring leaves the edge.'],
+  lost: ['✋ Keep your hand inside the camera view', 'Move back a little if needed. ✓ Success looks like: the ghost hand comes back.']
+};
+function showHint(hint) {
+  if (!hint) return setCoach('hint', null);
+  const [title, body] = HINT_TEXT[hint.key] ?? [hint.text, ''];
+  setCoach('hint', { title, body });
+}
+function showError(title, body) {
+  setCoach('error', { title, body });
+}
+
+// The hands runtime (handsRuntime.js) runs inside this page's render loop (onTick below).
+// Created before the first model load so its canvas listeners keep their old place in line,
+// ahead of the measure panel's.
+const runtime = createHandsRuntime({
+  scene, camera, renderer, overlay, video,
+  pickTargets: () => window.hologram.model,
+  manipulator: () => manipulator,
+  // What a held cursor or a pointing-hand pinch selects: with the tape or notes on, a point on
+  // the surface (the click goes to the measure panel); otherwise an exploded part.
+  holdOn: () => ((currentMeasurePanel?.mode ?? 'off') !== 'off' ? 'surface' : 'parts'),
+  onAction: (type, detail) => {
+    if (type === 'click') act(detail);
+    else if (type === 'practice') finishPractice(detail);
+    else if (type === 'frame') onCameraFrame(detail.mode);
+    else if (type === 'hint') showHint(detail);
+    else if (type === 'reset') {
+      setStatus(`Tracking reset · ${detail.why}`);
+      showToast('↻ Tracking reset', `${detail.why[0].toUpperCase()}${detail.why.slice(1)}. Raise a hand to carry on. ✓ Success looks like: the ghost hand reappears.`);
+    } else if (type === 'calibrated') finishCalibration(detail);
+    else if (type === 'starting') setStatus(detail.phase === 'model' ? 'Loading hand tracking…' : 'Asking for the camera…');
+  }
+});
+const pointer = runtime.pointer;
+const calibration = runtime.calibration;
+
+// Numbers sessionrec.js (or anyone) can read: window.hologram.pointerStats, .pointerProfile,
+// .calibration (.active, .step). Same objects and names as before the runtime existed.
+window.hologram.pointerStats = runtime.stats;
+window.hologram.pointerProfile = runtime.profile;
+window.hologram.calibration = calibration;
+window.hologram.handsRuntime = runtime;
+
+// Calibration (calibrate.js): first camera use with no saved profile, then C / Recalibrate.
+// The score's numbers (error px, hit rate) go in the ⚙ Pointer section, not the status line.
+function finishCalibration(profile) {
+  window.hologram.pointerProfile = profile;
+  calLineEl.textContent = scoreLine(profile);
+  if (profile?.skipped) {
+    setStatus('Pointer calibration skipped · press C any time');
+    showToast('🎯 Calibration skipped', 'Press C any time to calibrate. ✓ Success looks like: a card with three short steps.');
+  } else {
+    setStatus('✓ Pointer calibrated');
+    showToast('✓ Pointer calibrated', `Point at ${the()} and pinch your other hand to click. ✓ Success looks like: the ring follows your finger.`);
+  }
+}
+function startCalibration() {
+  if (runtime.calibrate() === 'not-tracking') {
+    setStatus('Start the camera first, then press C');
+    showToast('▶ Start the camera first', 'Then press C to calibrate the pointer. ✓ Success looks like: a card with three short steps.');
+  }
+}
+// Selection practice (calibrate.js createSelectionPractice via the runtime): an A/B of the
+// three ways to select (hold still / pinch the pointing hand / pinch the other hand). It draws
+// its own card and targets, so the coach stays quiet while it runs (onTick). The results land
+// on window.hologram.selectionPractice, which sessionrec.js records.
+// A part's name for people: partLabel's name with file-style separators read as spaces
+// ("leg_·_front_right" -> "leg · front right").
+const partName = (part) => partLabel(part).name.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
+const COMMIT_WORDS = { hold: 'hold', pinch: 'pinch', 'other-pinch': 'other hand', any: 'close targets' };
+function startSelectionPractice() {
+  const r = runtime.startPractice();
+  if (r === 'not-tracking') {
+    setStatus('Start the camera first, then Selection practice');
+    showToast('▶ Start the camera first', 'Then press 🎯 Selection practice. ✓ Success looks like: a row of rings with one lit.');
+  } else if (r === 'busy') setStatus('Finish the calibration first (Esc skips it)');
+  else setStatus('🎯 Selection practice · Esc stops');
+}
+function finishPractice(results) {
+  // Hits per commit kind across its rounds, e.g. "hold 11/12 · pinch 12/12 · other hand 9/12".
+  const by = {};
+  for (const r of results?.rounds ?? []) {
+    const k = COMMIT_WORDS[r.commit] ?? r.commit;
+    by[k] = by[k] ?? { hits: 0, n: 0 };
+    by[k].hits += r.hits;
+    by[k].n += r.n;
+  }
+  const line = Object.entries(by).map(([k, v]) => `${k} ${v.hits}/${v.n}`).join(' · ');
+  const cancelled = (results?.rounds ?? []).some((r) => r.cancelled) || (results?.rounds?.length ?? 0) < PRACTICE_ROUNDS.length;
+  setStatus(`${cancelled ? 'Selection practice stopped' : '✓ Selection practice done'}${line ? ' · ' + line : ''}`);
+  showToast(cancelled ? '🎯 Selection practice stopped' : '✓ Selection practice done',
+    `${line ? line + ' hit. ' : ''}Pick the way that felt easiest. ✓ Success looks like: parts select on the first try.`, 6000);
+}
+selPracticeBtn.addEventListener('click', () => startSelectionPractice());
+
+calLineEl.textContent = scoreLine(runtime.profile);
+document.getElementById('recal').addEventListener('click', () => startCalibration());
 
 function setStatus(text, isError = false) {
   statusEl.textContent = text;
@@ -114,13 +247,14 @@ async function loadModelById(id) {
 
   swapping = true;
   carousel.setBusy(true);
-  setStatus(`loading ${entry.name}…`);
+  setStatus(`Loading ${entry.name}…`);
 
   let object, path;
   try {
     ({ object, path } = await loadModel(entry));
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(`Couldn't load ${entry.name}`, true);
+    showError(`⚠ Couldn't load ${entry.name}`, `${err.message} Pick another model with ◂ ▸. ✓ Success looks like: a hologram in the middle.`);
     swapping = false;
     carousel.setBusy(false);
     return;
@@ -170,17 +304,22 @@ async function loadModelById(id) {
   manipulator = createManipulator(object, camera);
   window.hologram.manipulator = manipulator;
   seenResets = manipulator.resetCount;
+  setCoach('error', null);
+  model.name = entry.name.replace(/\s*\(.*\)\s*$/, '');
+  model.literal = manipulator.explodeIsLiteral;
+  model.parts = 0;
+  object.traverse((c) => { if (c.isMesh) model.parts++; });
+  installPartDim(manipulator.parts);
+  chipPart = undefined;   // re-evaluate the chip against the new model
 
   // Re-apply whatever practice drill/tuning was active -- otherwise a mid-session drill
   // selection would silently reset to "everything on" with default tuning on the new model.
   applyDrill(activeDrill);
   applyTuning();
 
-  // Decided once per model from its own mesh count — see manipulator.js: the detailed chair
-  // (8 parts) explodes literally, the single-mesh scans stretch. No manual override exists.
-  document.getElementById('explodeMode').textContent = manipulator.explodeIsLiteral
-    ? 'explode: literal'
-    : 'explode: stretch';
+  // Literal explode vs stretch is decided once per model from its own mesh count (see
+  // manipulator.js); the Explode drill and Help say which, via `model` above.
+  renderHelp();
 
   // Live dimensions sit next to the gestures on purpose: scaling or stretching the model
   // reports what the size has become, which is the whole reason to have both on one page.
@@ -189,14 +328,25 @@ async function loadModelById(id) {
     object, camera, renderer, scene,
     // A stable id from the registry, not a filename -- two models could otherwise collide on
     // the same derived name and share localStorage keys.
-    modelName: entry.id
+    modelName: entry.id,
+    displayName: model.name.toLowerCase(),
+    tapeKey: 'T',
+    onModeChange: (mode) => {
+      if (mode === 'tape') {
+        setStatus('📏 Tape on · click two points');
+        showToast('📏 Click two points on ' + the(), 'Or aim and pinch your other hand. ✓ Success looks like: the distance in the Measure tab.');
+      } else if (mode === 'note') {
+        setStatus('📌 Notes on · click to pin one');
+        showToast('📌 Click ' + the() + ' to pin a note', 'Then type it in the Measure tab. ✓ Success looks like: a label on the model.');
+      } else setStatus('Tape and notes off');
+    }
   });
 
   currentModelId = id;
   carousel.setActive(id);
   carousel.setBusy(false);
   swapping = false;
-  setStatus(`${path} loaded · start the camera to control it`);
+  setStatus(`${entry.name} ready · drag to orbit, or ▶ Camera for hands`);
   startBtn.disabled = false;
 }
 
@@ -212,51 +362,37 @@ loadModelById(MODELS[0].id);
 async function startTracking() {
   startBtn.disabled = true;
   try {
-    // Reused across stop/start: the recognizer holds the WASM runtime, the model and a GPU
-    // context, and stopTracking() never closed it, so every restart used to build (and leak)
-    // another one (BUGS #16). Loading it once also makes a restart near-instant.
-    if (!tracker) {
-      setStatus('loading gesture model…');
-      tracker = await createHandTracker({ numHands: 2 });
-    }
-
-    setStatus('requesting camera…');
-    stream = await startCamera(video);
-
-    tracking = true;
-    watchVideoFrames();
-    startBtn.textContent = 'stop camera';
+    // Status lines for each phase come back as 'starting' events (onAction above).
+    await runtime.start();
+    setCameraButton(true);
     startBtn.disabled = false;
-    setStatus('tracking');
+    setCoach('error', null);
+    setStatus(runtime.profile ? 'Camera on · raise a hand' : 'Camera on · first, a 45 s pointer calibration (Esc skips)');
+    applyDrill(activeDrill);
+    if (!runtime.profile) startCalibration();
   } catch (err) {
-    setStatus(describeCameraError(err), true);
+    setStatus("The camera didn't start", true);
+    showError("⚠ The camera didn't start", `${describeCameraError(err)} Then press ▶ Camera again. ✓ Success looks like: the chip says "Ready".`);
     startBtn.disabled = false;
     console.error(err);
   }
 }
 
 function stopTracking() {
-  tracking = false;
-  stopCamera(stream);
-  stream = null;
-  video.srcObject = null;
-  hands = [];
-  latestFrame = null;
-  frameWatchStream = null;
-  resetLandmarkSmoothing();
-  engagement.reset();
-  pointer.reset();
+  runtime.stop();
   hologramMaterial.setBrightness(MODE_BRIGHTNESS.idle);
-  overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
-  ghostHands.update([], { camera, object: window.hologram.model ?? scene, aspect: 1 });
-  setLive(false, 'camera off');
-  modeEl.textContent = 'idle';
-  modeEl.className = '';
-  startBtn.textContent = 'start camera';
-  setStatus('camera stopped · drag to orbit');
+  renderChip(null);
+  setCameraButton(false);
+  setStatus('Camera off · drag to orbit');
+  applyDrill(activeDrill);
 }
 
-startBtn.addEventListener('click', () => (tracking ? stopTracking() : startTracking()));
+function setCameraButton(on) {
+  startBtn.innerHTML = on ? '■<span class="btn-word"> Camera</span>' : '▶<span class="btn-word"> Camera</span>';
+  startBtn.title = on ? 'Turn the camera off' : 'Camera on / off: use your hands';
+}
+
+startBtn.addEventListener('click', () => (runtime.tracking ? stopTracking() : startTracking()));
 resetBtn.addEventListener('click', () => manipulator?.reset());
 
 // Every reset (clap, R, the Reset button) can be undone one step (BUGS #27: a misfired clap
@@ -265,10 +401,11 @@ resetBtn.addEventListener('click', () => manipulator?.reset());
 function noticeResets() {
   if (!manipulator || manipulator.resetCount === seenResets) return;
   seenResets = manipulator.resetCount;
-  setStatus('reset · press U (or Ctrl+Z) to undo');
+  setStatus('Reset · press U to undo');
+  showToast('↺ Reset', `Press U (or Ctrl+Z) to undo. ✓ Success looks like: ${the()} back where it started.`);
 }
 function undoReset() {
-  if (manipulator?.undo()) setStatus('reset undone');
+  if (manipulator?.undo()) setStatus('Reset undone');
 }
 
 window.addEventListener('keydown', (e) => {
@@ -282,134 +419,96 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (key === 'escape' && calibration.active) {
+    calibration.cancel();
+    return;
+  }
+  if (key === 'escape' && runtime.practice?.active) {
+    runtime.practice.cancel();
+    return;
+  }
+  // Tab: the next part behind the cursor (or the next in order). Only taken while parts can be
+  // selected, so Tab keeps moving keyboard focus the rest of the time.
+  if (key === 'tab' && !e.shiftKey && manipulator?.partsSelectable) {
+    e.preventDefault();
+    const part = runtime.cycleTarget();
+    if (part) setStatus(`✓ ${partName(part)} selected · Tab for the next one`);
+    return;
+  }
+  if (key === 'escape' && !helpEl.hidden) return toggleHelp(false);
+  if (key === '?') toggleHelp();
+  if (key === 'c') startCalibration();
   if (key === 'r') manipulator?.reset();
   if (key === 'u') undoReset();
   if (key === 'd') document.body.classList.toggle('debug-camera');
-  if (key === 'p') togglePanel();
-  if (key === 'm') document.getElementById('measure').classList.toggle('hidden');
-  if (key === 'arrowleft' || key === 'arrowright') {
-    const idx = MODELS.findIndex((m) => m.id === currentModelId);
-    const dir = key === 'arrowleft' ? -1 : 1;
-    const next = MODELS[(idx + dir + MODELS.length) % MODELS.length];
-    loadModelById(next.id);
-  }
+  // P / M open the Tools panel on that tab, or close it if that tab is already showing.
+  if (key === 'p') toggleTools('practice');
+  if (key === 'm') toggleTools('measure');
+  // T only switches the tape; it doesn't open the panel (the readout is in Measure).
+  if (key === 't') currentMeasurePanel?.toggleMode('tape');
+  if (key === 'arrowleft' || key === 'arrowright') stepModel(key === 'arrowleft' ? -1 : 1);
 });
 
-// Clicks, from the mouse or the finger-gun pointer, go through act(). Mouse clicks: a drag is
-// an orbit, not a click (same 5px rule as the measure panel). Part selection (BUGS #28): once
-// the model is exploded past half-way, a click on a part makes grab/spin/tilt/scale act on that
-// part alone; a click on empty space goes back to the whole model. While the measure panel's
-// point-picking or note mode is on, clicks belong to it: a mouse click is already handled by
-// the panel's own listener, a pointer click is passed to it here.
-const CLICK_TOLERANCE_PX = 5;
-let clickDownAt = null;
-let snappedVertex = null; // the reticle's current snap, for hysteresis when a click re-probes
-
-function eventNdc(e) {
-  const rect = renderer.domElement.getBoundingClientRect();
-  return {
-    x: ((e.clientX - rect.left) / rect.width) * 2 - 1,
-    y: -((e.clientY - rect.top) / rect.height) * 2 + 1
-  };
+function stepModel(dir) {
+  const idx = MODELS.findIndex((m) => m.id === currentModelId);
+  loadModelById(MODELS[(idx + dir + MODELS.length) % MODELS.length].id);
 }
+document.getElementById('prevModel').addEventListener('click', () => stepModel(-1));
+document.getElementById('nextModel').addEventListener('click', () => stepModel(1));
 
-function viewportSize() {
-  const rect = renderer.domElement.getBoundingClientRect();
-  return { width: rect.width || 1, height: rect.height || 1 };
-}
-
+// Clicks, from the mouse or the finger-gun pointer, reach act() as the runtime's 'click' event
+// (a mouse drag is an orbit, not a click; the runtime applies the 5px rule). Part selection
+// (BUGS #28): once the model is exploded past half-way, a click on a part makes
+// grab/spin/tilt/scale act on that part alone; a click on empty space goes back to the whole
+// model. While the measure panel's point-picking or note mode is on, clicks belong to it: a
+// mouse click is already handled by the panel's own listener, a pointer click is passed to it here.
 function act(click) {
   if (!click) return;
   const panelMode = currentMeasurePanel?.mode ?? 'off';
   if (panelMode !== 'off') {
     if (click.source !== 'hand') return;
-    reticle.pulse();
+    runtime.pulse();
     // Re-probe at the rewound cursor so the point lands on the vertex the reticle showed.
-    const hit = probe(click.x, click.y, {
-      object: window.hologram.model, camera, viewport: viewportSize(), snapped: snappedVertex
-    });
+    const hit = runtime.probeAt(click.x, click.y);
     const placed = currentMeasurePanel.placeAtNdc(click.x, click.y, hit?.vertex ? hit.point : null);
-    if (!placed) setStatus('pointer click missed the model');
+    if (!placed) clickOutcome('miss', click, `Missed ${the()} · aim at it and pinch again`);
     else if (panelMode === 'tape') {
-      setStatus(currentMeasurePanel.tapePoints === 1 ? 'tape: point A placed · aim and pinch again for B' : 'tape: point B placed');
-    } else setStatus('note pinned');
+      clickOutcome('tape-point', click, currentMeasurePanel.tapePoints === 1 ? '📏 Point A placed · aim at B and pinch' : '📏 Point B placed · distance in Measure');
+    } else clickOutcome('note', click, '📌 Note pinned · type it in Measure');
     return;
   }
-  if (click.source === 'hand') reticle.pulse();
+  if (click.source === 'hand') runtime.pulse();
   if (!manipulator?.explodeIsLiteral) {
-    if (click.source === 'hand') setStatus('click · turn on the tape (M) or explode the model to pick parts');
+    if (click.source === 'hand') clickOutcome('miss', click, `Nothing to click · press T for the tape`);
     return;
   }
   const before = manipulator.activePart;
-  const part = manipulator.selectPartAtScreenPoint(click.x, click.y);
-  if (part) setStatus(`selected: ${part.name || 'part'} · gestures now move just this part`);
-  else if (before && !manipulator.activePart) setStatus('whole model selected');
-  else if (click.source === 'hand') setStatus('click · explode the model past half-way to pick a part');
+  // click.part: the runtime's bubble / hold target (a near miss still picks the nearest part).
+  const part = manipulator.selectPartAtScreenPoint(click.x, click.y, { part: click.part });
+  if (part) clickOutcome('part-select', click, `✓ ${partName(part)} selected${VIA_WORDS[click.via] ?? ''} · gestures move only this part`);
+  else if (before && !manipulator.activePart) clickOutcome('deselect', click, `Whole ${model.name.toLowerCase()} selected`);
+  else if (click.source === 'hand') clickOutcome('miss', click, `Nothing to pick · explode ${the()} past half-way first`);
 }
 
-renderer.domElement.addEventListener('pointerdown', (e) => {
-  clickDownAt = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
-});
-renderer.domElement.addEventListener('pointerup', (e) => {
-  const down = clickDownAt;
-  clickDownAt = null;
-  if (!down) return;
-  if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > CLICK_TOLERANCE_PX) return;
-  const at = eventNdc(e);
-  act(pointer.mouseClick(at.x, at.y));
-});
-// Mouse fallback: the mouse drives the same cursor (and reticle) as the hand pointer.
-renderer.domElement.addEventListener('pointermove', (e) => {
-  if (e.pointerType === 'touch') return;
-  const at = eventNdc(e);
-  pointer.mouseMove(at.x, at.y);
-});
-renderer.domElement.addEventListener('pointerleave', () => pointer.mouseLeave());
-
-// Camera frame timing. requestVideoFrameCallback reports each new camera frame once, with
-// its capture time; the old way (polling video.currentTime from the render loop) stamped
-// frames with whenever the render loop noticed them, which adds up to a display frame of
-// random error to every dt. At 30 fps that is ±50% noise on the elapsed time the landmark
-// filter and every per-second rate divide by. Falls back to the old polling where the API
-// is missing (older Safari), and to the callback's own time where captureTime is absent.
-let latestFrame = null;   // { t, id } of the newest camera frame not yet processed
-let frameCounter = 0;
-let lastFrameStamp = -Infinity;
-let frameWatchStream = null;
-
-function watchVideoFrames() {
-  if (!video.requestVideoFrameCallback || frameWatchStream === stream) return;
-  frameWatchStream = stream;
-  const mine = stream;
-  const onFrame = (now, meta) => {
-    if (!tracking || stream !== mine) return;
-    // captureTime shares performance.now()'s clock; anything implausible falls back to the
-    // callback's own time.
-    const c = meta?.captureTime;
-    const t = Number.isFinite(c) && Math.abs(c - now) < 1000 ? c : now;
-    latestFrame = { t, id: ++frameCounter };
-    video.requestVideoFrameCallback(onFrame);
-  };
-  video.requestVideoFrameCallback(onFrame);
+// Click results as data as well as words. sessionrec.js used to regex the old status lines;
+// the reworded lines no longer match, so the outcome is published here (board note
+// 2026-10-01): window.hologram.lastClick and a 'hologram:click' event on window, with
+// outcome 'tape-point' | 'note' | 'miss' | 'part-select' | 'deselect'.
+// via (2026-10-01, one-hand selection): 'hold' | 'pinch' | 'other-pinch' | 'mouse'.
+const VIA_WORDS = { hold: ' by holding still', pinch: ' by pinching', 'other-pinch': '', mouse: '' };
+function clickOutcome(outcome, click, text) {
+  const detail = { outcome, source: click.source, via: click.via ?? (click.source === 'mouse' ? 'mouse' : 'other-pinch'), t: performance.now() };
+  window.hologram.lastClick = detail;
+  window.dispatchEvent(new CustomEvent('hologram:click', { detail }));
+  setStatus(text);
 }
 
-// The timestamp of a camera frame that hasn't been processed yet, or null. Always strictly
-// increasing, which the tracker requires.
-let processedFrameId = 0;
-function nextFrameTime() {
-  let t = null;
-  if (video.requestVideoFrameCallback) {
-    if (!latestFrame || latestFrame.id === processedFrameId) return null;
-    processedFrameId = latestFrame.id;
-    t = latestFrame.t;
-  } else {
-    if (video.currentTime === lastVideoTime) return null;
-    lastVideoTime = video.currentTime;
-    t = performance.now();
-  }
-  if (t <= lastFrameStamp) t = lastFrameStamp + 1;
-  lastFrameStamp = t;
-  return t;
+// Once per camera frame, after the runtime has routed this frame's click, reset and hint.
+function onCameraFrame(mode) {
+  renderChip(mode);
+  // Eased, never a step: a brightness jump on every gesture start/stop is a flash.
+  hologramMaterial.setBrightness(MODE_BRIGHTNESS[mode] ?? 1.0);
+  updateLive(mode);
 }
 
 startRenderLoop({
@@ -418,75 +517,86 @@ startRenderLoop({
   camera,
   controls,
   onFrame: (fps) => {
-    fpsEl.textContent = `${fps} fps`;
+    fpsEl.textContent = `${fps}`;
   },
   onTick: (tickNow = performance.now()) => {
     hologramMaterial.update();
+    // Calibration and the selection practice draw their own cards: keep the coach quiet.
+    setCoach('calibration', calibration.active || runtime.practice?.active ? { silent: true } : null);
     noticeResets();
-
-    if (!tracking || !sizeOverlayTo(overlay, video)) {
-      // Still advance the model's follow springs, so a release that was coasting when the
-      // camera stopped settles instead of freezing mid-glide.
-      manipulator?.tick(tickNow);
-      updatePointerVisuals(tickNow);
-      return;
-    }
-
-    const aspect = overlay.width / overlay.height;
-
-    const frameTime = nextFrameTime();
-    if (frameTime !== null) {
-      // One timestamp per camera frame, used by the tracker, the landmark filter and the
-      // manipulator alike. Every filter downstream is time-based now, so this has to be when
-      // the frame was captured, not when the render loop happened to notice it (see
-      // nextFrameTime).
-      const now = frameTime;
-      hands = tracker.read(video, now);
-      smoothHandLandmarks(hands, now);
-      // Pointer first, once per hand per frame (gestures.js annotateHand): a pointer is never
-      // read as a grabbing fist and never blocks a pinch (BUGS #32). hand.pointer is
-      // { gun, rejectedBy }; the manipulator also uses it for the post-pointer gap.
-      for (const hand of hands) annotateHand(hand, aspect);
-      // Raised hands only (hand.engaged); the manipulator and pointer both ignore lowered ones.
-      engagement.update(hands);
-
-      const mode = manipulator?.update(hands, aspect, now) ?? MODE.IDLE;
-      modeEl.textContent = mode;
-      modeEl.className = mode;
-      // Eased, never a step: a brightness jump on every gesture start/stop is a flash.
-      hologramMaterial.setBrightness(MODE_BRIGHTNESS[mode] ?? 1.0);
-      act(pointer.update(hands, aspect, now));
-      updateLive(mode);
-    }
-    // Every display frame, not just camera frames: the model's follow springs glide between
-    // camera frames instead of stepping at camera rate (manipulator.js, "FOLLOW").
-    manipulator?.tick(tickNow);
-
-    // Real 3D hands (always on) are the primary visual feedback; the flat 2D skeleton
-    // stays available behind the D-debug toggle for checking raw tracking accuracy.
-    if (window.hologram.model) {
-      ghostHands.update(hands, { camera, object: window.hologram.model, aspect, isFist });
-    }
-    drawHands(overlayCtx, hands, HAND_CONNECTIONS);
-    updatePointerVisuals(tickNow);
+    // Camera frame (tracker, gestures, manipulator, pointer), follow springs, ghost hands,
+    // debug skeleton and reticle: handsRuntime.js, inside this one render loop.
+    runtime.update(tickNow);
+    updateHover(tickNow);
   }
 });
 
-// Every display frame (after the ghost hands, whose index tip the beam starts from).
-function updatePointerVisuals(nowMs) {
-  pointer.tick(nowMs);
-  const st = pointer.state;
-  const model = window.hologram.model;
-  const shown = st.mode !== 'off' && model;
-  const result = reticle.update({
-    cursor: shown ? { x: st.x, y: st.y } : null,
-    object: model,
-    camera,
-    viewport: viewportSize(),
-    beamFrom: st.source === 'hand' && st.aimHand ? ghostHands.landmarkOf(st.aimHand, 8) : null,
-    nowMs
-  });
-  snappedVertex = result?.vertex ?? null;
+// ---- the hovered part: its name next to the reticle, the other parts dimmed --------------
+// runtime.target is the part a hold or pinch would select right now (bubble targeting). The
+// chip names it (reticle.js partLabel; amber = inferred). The other parts ease down to
+// DIM_OTHERS of their brightness so the target stands out; with nothing hovered every part
+// is back at exactly 1 and its draw is untouched, so the scanned look is identical.
+// Per part, without per-part materials: the meshes share one HolographicMaterial (and its
+// variants share its uniform objects), so the brightness uniform is scaled just for that
+// mesh's draw (onBeforeRender) and put back right after (onAfterRender). uniformsNeedUpdate
+// makes three upload it even when consecutive draws share the material.
+// Photosafety (BUGS #14): only ever darker than the resting look, eased with DIM_EASE_MS.
+const DIM_OTHERS = 0.55;
+const DIM_EASE_MS = 150;     // 63% of the way after 150 ms, 95% after 450 ms
+const CHIP_DX = 18, CHIP_DY = -34;   // CSS px from the cursor: above-right, clear of the ring
+const partDim = new WeakMap();       // part -> { f, saved }
+let dimParts = [];
+let dimLastT = null;
+let chipPart = null;
+function installPartDim(parts) {
+  dimParts = parts;
+  for (const part of parts) {
+    const d = { f: 1, saved: null };
+    partDim.set(part, d);
+    part.onBeforeRender = (r, sc, cam, geo, material) => {
+      const u = material?.uniforms?.hologramBrightness;
+      if (d.f >= 1 || !u) return;     // the depth pre-pass's material has no such uniform
+      d.saved = u.value;
+      u.value = d.saved * d.f;
+      material.uniformsNeedUpdate = true;
+    };
+    part.onAfterRender = (r, sc, cam, geo, material) => {
+      if (d.saved === null) return;
+      material.uniforms.hologramBrightness.value = d.saved;
+      d.saved = null;
+      material.uniformsNeedUpdate = true;
+    };
+  }
+}
+function updateHover(nowMs) {
+  const hovered = runtime.target?.part ?? null;
+  const dt = dimLastT === null ? 16 : Math.min(100, Math.max(0, nowMs - dimLastT));
+  dimLastT = nowMs;
+  const k = 1 - Math.exp(-dt / DIM_EASE_MS);
+  for (const part of dimParts) {
+    const d = partDim.get(part);
+    const goal = hovered && part !== hovered ? DIM_OTHERS : 1;
+    d.f += (goal - d.f) * k;
+    if (goal === 1 && d.f > 0.998) d.f = 1;
+  }
+  // The chip: text swaps only when the part changes; position follows the cursor.
+  if (hovered !== chipPart) {
+    chipPart = hovered;
+    if (hovered) {
+      const label = partLabel(hovered);
+      partChipEl.textContent = label.inferred ? `${partName(hovered)} · inferred` : partName(hovered);
+      partChipEl.classList.toggle('inferred', label.inferred);
+    }
+    partChipEl.classList.toggle('on', !!hovered);
+  }
+  if (hovered) {
+    const st = runtime.pointer.state;
+    const c = renderer.domElement;
+    const w = c.clientWidth, h = c.clientHeight;
+    const x = Math.min(Math.max(((st.x + 1) / 2) * w + CHIP_DX, 4), w - partChipEl.offsetWidth - 4);
+    const y = Math.min(Math.max(((1 - st.y) / 2) * h + CHIP_DY, 4), h - 30);
+    partChipEl.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+  }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -496,80 +606,104 @@ function updatePointerVisuals(nowMs) {
 // everything armed there is no way to tell which channel misfired, and no way to build any
 // feel for one of them. Each drill arms exactly one channel in the manipulator; every other
 // gesture becomes genuinely inert rather than merely ignored.
+// Writing standard (2026-10-01): icon + verb first, at most two lines, ending with what
+// success looks like, using the loaded model's real name -- so title/body are functions.
+// `help` is the one-line entry in the ? Help popover (the old #legend, now in one place).
 const DRILLS = [
   {
     id: 'free',
     label: 'Everything on',
     sub: 'normal use',
     channels: CHANNELS,
-    title: 'All gestures active',
-    body: 'Fist — move, twist to spin, hand nearer/farther to push-pull · second hand up tilts it up, down tilts it down, left/right rolls it · two-hand pinch — scale · two open hands apart — explode (past half-way, click a part to move just that part) · clap from rest — reset (U undoes) · point (index out, other fingers curled) to aim the ring, pinch your OTHER hand to click (places tape points with the tape on, picks parts once exploded) · lower your hands to rest · after letting go of any gesture, relax your hands for a moment before starting a different one'
+    chip: 'move · spin · tilt',
+    // Only shown while the camera is off (see applyDrill).
+    title: () => '▶ Press Camera to use your hands',
+    body: () => `Or drag to orbit ${the()}; ? Help lists every gesture. ✓ Success looks like: the chip says "Ready".`
   },
   {
     id: 'move',
     label: 'Move',
     sub: 'fist, slide it around',
+    help: 'fist, slide it',
     channels: ['move'],
-    title: 'Move',
-    body: 'Close one hand into a fist and slide it around. Spin, tilt and push are switched off, so it can only translate — nothing else can fire while you get the feel of it.'
+    chip: 'move',
+    title: () => '✊ Make a fist and slide it around',
+    body: () => `Only moving is on, so nothing else can fire. ✓ Success looks like: ${the()} follows your fist without turning.`
   },
   {
     id: 'spin',
     label: 'Spin',
     sub: 'fist, twist your wrist',
+    help: 'fist, twist your wrist',
     channels: ['spin'],
-    title: 'Spin',
-    body: 'Make a fist and twist your wrist like turning a doorknob. It will not drift while you do — movement is disarmed, so only rotation responds.'
+    chip: 'spin',
+    title: () => '✊ Make a fist and twist your wrist like a doorknob',
+    body: () => `Only spinning is on. ✓ Success looks like: ${the()} turns in place without drifting.`
   },
   {
     id: 'tilt',
     label: 'Tilt',
-    sub: 'second hand: up tilts up, left/right rolls',
+    sub: 'fist + raise or lower your other hand',
+    help: 'fist, then raise / lower / slide the other hand',
     channels: ['tilt'],
-    title: 'Tilt',
-    body: 'Hold a fist with one hand to take hold. Raise your OTHER hand to tilt it up (its front edge rises) and lower it to tilt it down; move that hand left and right to roll it side to side. Both read from the same hand at once. It can be any shape.'
+    chip: 'tilt',
+    title: () => '✊ Hold a fist, then raise or lower your other hand',
+    body: () => `Slide that hand left or right to roll. ✓ Success looks like: ${the()}'s front edge rises as your hand rises.`
   },
   {
     id: 'push',
     label: 'Push / pull',
     sub: 'fist nearer / farther',
+    help: 'fist toward / away from the camera',
     channels: ['push'],
-    title: 'Push and pull',
-    body: 'Make a fist, then move it toward the camera to pull the chair closer, and away to push it back. It is judged by how big your hand looks in frame, so keep the whole hand visible.'
+    chip: 'push',
+    title: () => '✊ Make a fist and move it toward the camera, then away',
+    body: () => `Keep your whole hand in view. ✓ Success looks like: ${the()} comes closer, then moves back.`
   },
   {
     id: 'scale',
     label: 'Scale',
-    sub: 'two-hand pinch',
+    sub: 'pinch with both hands',
+    help: 'pinch both hands, move apart / together',
     channels: ['scale'],
-    title: 'Scale',
-    body: 'Pinch thumb and index on BOTH hands at once, then move your hands apart to grow it and together to shrink it. Both hands must read as pinching before it engages.'
+    chip: 'scale',
+    title: () => '🤏 Pinch thumb and index on both hands, then move them apart',
+    body: () => `Bring them together to shrink. ✓ Success looks like: ${the()} grows, and Measure shows its on-screen size.`
   },
   {
     id: 'explode',
     label: 'Explode',
     sub: 'two open hands apart',
+    help: 'two open hands, pull apart',
     channels: ['explode'],
-    title: 'Explode / stretch',
-    body: 'Hold both hands open — not fisted, not pinching — and pull them apart. The chair separates into its 8 parts (a single-mesh scan stretches instead). Once it is more than half-way apart, click a part to make the other gestures move just that part; click empty space to go back to the whole chair.'
+    chip: 'explode',
+    title: () => '👐 Hold both hands open and pull them apart',
+    body: () => model.literal
+      ? `Past half-way, point at a part and hold still to select it. ✓ Success looks like: ${the()} splits into its ${model.parts} parts.`
+      : `This scan is one piece, so it stretches. ✓ Success looks like: ${the()} stretches out along your hands.`
   },
   {
     id: 'reset',
     label: 'Clap reset',
-    sub: 'clap open hands',
+    sub: 'clap open hands, from rest',
+    help: 'from rest, clap quickly (U undoes)',
     channels: ['clap'],
-    title: 'Clap to reset',
-    body: 'From rest, open both hands wide apart, then bring them together quickly. It has to be genuinely quick — drifting them together slowly will not count — and it will not fire in the middle of another gesture (bringing exploded parts back together fast just un-explodes them). Press U or Ctrl+Z to undo a reset.'
+    chip: 'reset',
+    title: () => '👏 From rest, open both hands wide and clap them together fast',
+    body: () => `A slow clap won't count; U undoes a reset. ✓ Success looks like: ${the()} jumps back to where it started.`
   }
 ];
 
 let activeDrill = DRILLS[0];
 
+// Everything-on only needs the coach before the hands are in (afterwards the chip says it all
+// and the slot is free for toasts); a practice drill keeps its step and live line up.
 function applyDrill(drill) {
   activeDrill = drill;
   manipulator?.configure({ channels: drill.channels });
-  coachTitleEl.textContent = drill.title;
-  coachBodyEl.textContent = drill.body;
+  const showStep = drill.id !== 'free' || !runtime.tracking;
+  setCoach('drill', showStep ? { title: drill.title(), body: drill.body(), live: drill.id !== 'free' } : null);
+  if (drill.id !== 'free' && !runtime.tracking) setLive(false, 'Camera off · press ▶ Camera to practise');
   for (const btn of drillsEl.children) btn.classList.toggle('active', btn.dataset.id === drill.id);
 }
 
@@ -587,27 +721,98 @@ for (const drill of DRILLS) {
   drillsEl.appendChild(btn);
 }
 
-// A standing reference of what each hand shape actually does, visible regardless of which
-// drill is selected -- the drills teach one gesture at a time, but nothing showed the whole
-// map at a glance once you'd learned them. Built from DRILLS itself rather than a separate
-// list, so the wording can't drift out of sync with what the drills already say.
-const legendEl = document.getElementById('legend');
-if (legendEl) {
-  for (const drill of DRILLS.filter((d) => d.id !== 'free')) {
-    const row = document.createElement('div');
-    row.className = 'legend-row';
-    row.innerHTML = `<span class="legend-k"></span><span class="legend-v"></span>`;
-    row.firstChild.textContent = drill.label;
-    row.lastChild.textContent = drill.sub;
-    legendEl.appendChild(row);
-  }
+// ---- the mode chip: what your hands are doing, in plain words --------------------------
+// Was the manipulator's internal mode name ("transform"); now an icon and a verb.
+function renderChip(mode) {
+  let text, cls;
+  const hands = runtime.hands ?? [];
+  if (mode === null || !runtime.tracking) [text, cls] = ['📷 Camera off', 'off'];
+  else if (calibration.active) [text, cls] = ['🎯 Calibrating', 'aim'];
+  else if (runtime.practice?.active) [text, cls] = ['🎯 Practising selection', 'aim'];
+  else if (mode === MODE.GRAB) [text, cls] = [`✊ Holding · ${activeDrill.chip}`, 'grab'];
+  else if (mode === MODE.TRANSFORM) [text, cls] = ['🤏 Scaling', 'transform'];
+  else if (mode === MODE.EXPLODE) [text, cls] = [model.literal ? '👐 Exploding' : '👐 Stretching', 'explode'];
+  else if (pointer.state.mode === 'aim' && pointer.state.source === 'hand') [text, cls] = ['👉 Aiming', 'aim'];
+  else if (!hands.length) [text, cls] = ['🙌 Raise a hand', 'idle'];
+  else if (!hands.some((h) => h.engaged !== false)) [text, cls] = ['💤 Hands at rest', 'idle'];
+  else [text, cls] = ['✋ Ready', 'idle'];
+  if (modeEl.textContent !== text) modeEl.textContent = text;
+  modeEl.className = cls;
 }
 
-function togglePanel() {
-  const hidden = panelEl.classList.toggle('hidden');
-  document.getElementById('togglePanel').textContent = hidden ? 'show panel' : 'hide panel';
+// ---- Tools panel: one panel, three tabs, one open at a time ----------------------------
+const TABS = ['practice', 'measure', 'look'];
+let activeTab = 'practice';
+function showTab(id) {
+  activeTab = id;
+  for (const t of TABS) {
+    document.getElementById(t).hidden = t !== id;
+    document.getElementById('tab-' + t).setAttribute('aria-selected', String(t === id));
+  }
 }
-document.getElementById('togglePanel').addEventListener('click', togglePanel);
+function setToolsOpen(open) {
+  toolsEl.classList.toggle('hidden', !open);
+  toolsBtn.setAttribute('aria-expanded', String(open));
+}
+// P / M: open on that tab, or close if that tab is already the one showing.
+function toggleTools(tab) {
+  const open = !toolsEl.classList.contains('hidden');
+  if (open && activeTab === tab) return setToolsOpen(false);
+  showTab(tab);
+  setToolsOpen(true);
+}
+for (const t of TABS) document.getElementById('tab-' + t).addEventListener('click', () => showTab(t));
+toolsBtn.addEventListener('click', () => setToolsOpen(toolsEl.classList.contains('hidden')));
+
+// ---- ? Help: every gesture and key in one popover (was #legend + #coachKeys) ------------
+function renderHelp() {
+  const row = (k, v) => {
+    const r = document.createElement('div');
+    r.className = 'help-row';
+    const a = document.createElement('span');
+    const b = document.createElement('span');
+    a.textContent = k;
+    b.textContent = v;
+    r.append(a, b);
+    return r;
+  };
+  const h = (tag, text) => Object.assign(document.createElement(tag), { textContent: text });
+  helpEl.replaceChildren(h('h3', `Using ${the()}`), h('h4', 'Hands'));
+  for (const d of DRILLS.filter((x) => x.help)) {
+    helpEl.append(row(d.label, d.id === 'explode' && !model.literal ? 'two open hands apart (stretches: one-piece scan)' : d.help));
+  }
+  helpEl.append(
+    row('Point', 'index out, other fingers curled'),
+    row('Click', 'pinch your OTHER hand'),
+    row('Select a part', 'point at it and hold still, or pinch that hand'),
+    row('Next part', 'hold again, or Tab'),
+    row('Rest', 'lower your hands'),
+    h('h4', 'Mouse'),
+    row('Orbit / zoom', 'drag / scroll'),
+    row('Pick a part', 'click it once exploded'),
+    h('h4', 'Keys'),
+    row('R / U', 'reset / undo reset'),
+    row('T', 'tape on / off'),
+    row('P / M', 'Practice / Measure tab'),
+    row('← →', 'switch model'),
+    row('C / Esc', 'calibrate pointer / skip'),
+    row('Tab', 'next part (once exploded)'),
+    row('D', 'show the camera view'),
+    row('?', 'this help')
+  );
+}
+function toggleHelp(open = helpEl.hidden) {
+  helpEl.hidden = !open;
+  helpBtn.setAttribute('aria-expanded', String(open));
+}
+helpBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleHelp();
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!helpEl.hidden && !helpEl.contains(e.target) && e.target !== helpBtn) toggleHelp(false);
+});
+renderHelp();
 
 // Feel controls. Every sensitivity and threshold in manipulator.js is an untuned guess made
 // without a webcam (see ROADMAP.md Phase 1). These make them adjustable against real hands
@@ -650,14 +855,17 @@ applyTuning();
 
 function setLive(on, text) {
   lampEl.classList.toggle('on', on);
-  liveTextEl.textContent = text;
+  if (liveTextEl.textContent !== text) liveTextEl.textContent = text;
 }
 
 // What the active drill is actually seeing right now, so a gesture that refuses to fire says
-// WHY (no fist detected, only one hand, not pinching) rather than just doing nothing.
+// WHY (no fist detected, only one hand, not pinching) rather than just doing nothing. Shown
+// as the coach's live line under a practice drill's step; Everything-on uses the chip.
 function updateLive(mode) {
+  if (activeDrill.id === 'free') return;
+  const hands = runtime.hands;
   if (hands.length === 0) {
-    setLive(false, 'no hands in frame');
+    setLive(false, 'No hands seen · raise your hand into view');
     return;
   }
 
@@ -665,55 +873,28 @@ function updateLive(mode) {
   const pinches = hands.filter((h) => h.pinch?.pinching).length;
   // A pointer is not an open hand (it can't explode or clap; manipulator.js isOpen).
   const open = hands.filter((h) => !h.fistLike && !h.pinch?.pinching && !h.pointer?.gun).length;
+  const both = hands.length >= 2;
 
   switch (activeDrill.id) {
     case 'move':
     case 'spin':
-      setLive(mode === MODE.GRAB, fists ? 'fist held · ' + mode : 'no fist yet — curl your fingers in');
+    case 'push':
+      setLive(mode === MODE.GRAB, mode === MODE.GRAB ? '✓ Holding' : fists ? 'Fist seen · hold it a moment' : 'Curl your fingers into a fist');
       break;
     case 'tilt':
-    case 'push':
       setLive(
         mode === MODE.GRAB,
-        !fists
-          ? 'no fist yet — one hand must take hold'
-          : activeDrill.id === 'tilt' && hands.length < 2
-            ? 'fist held · now raise your other hand'
-            : 'fist held · ' + mode
+        !fists ? 'Make a fist with one hand first' : !both ? '✓ Fist held · now raise your other hand' : '✓ Holding · raise, lower or slide your other hand'
       );
       break;
     case 'scale':
-      setLive(mode === MODE.TRANSFORM, hands.length < 2 ? 'need both hands' : 'pinching: ' + pinches + '/2');
+      setLive(mode === MODE.TRANSFORM, !both ? 'Raise both hands' : mode === MODE.TRANSFORM ? '✓ Scaling' : `Pinching ${pinches} of 2 hands`);
       break;
     case 'explode':
-      setLive(mode === MODE.EXPLODE, hands.length < 2 ? 'need both hands' : 'open hands: ' + open + '/2');
+      setLive(mode === MODE.EXPLODE, !both ? 'Raise both hands' : mode === MODE.EXPLODE ? '✓ Pulling apart' : `Open hands ${open} of 2`);
       break;
     case 'reset':
-      setLive(false, hands.length < 2 ? 'need both hands' : 'ready — clap quickly');
+      setLive(false, !both ? 'Raise both hands' : 'Ready · clap quickly');
       break;
-    default: {
-      // The three exclusive modes (grab/transform/explode) can't run at once by design --
-      // this says so explicitly rather than leaving it to be inferred, since "why didn't my
-      // pinch do anything" has an actual answer (something else is currently holding the
-      // mode) that the mode badge alone doesn't convey.
-      const lockedFor = {
-        [MODE.GRAB]: 'scale, explode locked',
-        [MODE.TRANSFORM]: 'move/spin/tilt/push, explode locked',
-        [MODE.EXPLODE]: 'move/spin/tilt/push, scale locked'
-      };
-      const locked = lockedFor[mode];
-      const raised = hands.filter((h) => h.engaged !== false).length;
-      if (raised === 0) {
-        setLive(false, 'hands lowered · at rest (raise a hand to engage)');
-        break;
-      }
-      if (mode === MODE.IDLE && pointer.state.mode === 'aim' && pointer.state.source === 'hand') {
-        setLive(true, raised < 2 ? 'pointing · raise your other hand and pinch to click' : 'pointing · pinch your other hand to click');
-        break;
-      }
-      const base = raised + (raised === 1 ? ' hand · ' : ' hands · ') + mode;
-      setLive(mode !== MODE.IDLE, locked ? `${base} (${locked})` : base);
-      break;
-    }
   }
 }

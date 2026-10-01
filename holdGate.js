@@ -57,6 +57,9 @@
 //     fired            the pose name on the frame it fires, else null. Act on this only.
 //     held             the pose that must be released before it can fire again, or null
 //   gate.reset()       forget everything (mode switch, tracking restart)
+//   Option releaseOnUnsteady (default true): with releaseSpans set, false makes only the
+//     distance from where it fired release the held pose, not a merely unsteady frame (hold-to-
+//     select, pointer.js createSelector: a trembling hand must not re-fire on the same part).
 //
 // FAILURE BEHAVIOUR: never throws from update(); a bad frame is just a bad frame. Throws a
 // TypeError at creation if a tier value isn't 'ring' or 'short' (a config typo would
@@ -73,6 +76,7 @@ export const HOLD_GATE = {
   releaseMs: 250, // showing something else this long releases the held pose
   leaveMs: 700, // hand gone this long releases it too (a tracking blip isn't a release)
   releaseSpans: null, // null = motion never releases (see DEVIATION); 0.6 = ASL behaviour
+  releaseOnUnsteady: true, // with releaseSpans set: an unsteady frame also releases (ASL); false = only the distance does
   steadySpans: 0.35, // wrist travel per steadyWindowMs above which the ring pauses
   steadyWindowMs: 200,
   repeatWindowMs: 2000, // same command again this soon after it fired -> short tier
@@ -177,7 +181,7 @@ export function createHoldGate(options = {}) {
         } else {
           goneSince = null;
           const moved = o.releaseSpans != null && anchor && spanPx > 0 &&
-            (!steady || Math.hypot(wristPos.x - anchor.x, wristPos.y - anchor.y) / ((anchor.span + spanPx) / 2) >= o.releaseSpans);
+            ((o.releaseOnUnsteady && !steady) || Math.hypot(wristPos.x - anchor.x, wristPos.y - anchor.y) / ((anchor.span + spanPx) / 2) >= o.releaseSpans);
           if (moved) {
             release();
           } else if (P !== held) {

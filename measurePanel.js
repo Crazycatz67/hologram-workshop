@@ -2,12 +2,28 @@
 // copy. Everything here answers a question you would actually ask about a real object rather
 // than demonstrating that the app knows a number:
 //
-//   Dimensions   how big is it, and how big is it NOW if you have scaled it
-//   Surfaces     how high is the seat / table top / shelf, detected not assumed
-//   Weight       roughly what does it weigh, and what will it cost to ship
+//   Size         how big is it, and how big is it NOW if you have scaled it
 //   Tape         the distance between any two points you pick on it
-//   Fit          will it go through an opening, and in which orientation
-//   Notes        pinned observations, exportable as a report
+//   Notes        pinned observations
+//   Report (folded, 2026-10-01 declutter; the everyday three above stay on top):
+//     True size    correct every figure from one feature measured by hand (was "Calibrate")
+//     Key heights  how high is the seat / table top / shelf, detected not assumed
+//     Will it fit? will it go through an opening, and in which orientation
+//     Weight       roughly what does it weigh, and what will it cost to ship
+//     Copy / Download  the whole thing as a markdown report
+//
+// CONTRACT (hologram.js and main.js build it; test.js drives it)
+//   createMeasurePanel({ mount, object, camera, renderer, scene, modelName,
+//                        displayName?, tapeKey?, onModeChange? }) -> panel | null
+//     modelName keys localStorage (notes, true-size factor); displayName (default modelName)
+//     is the word the instructions use ("Click two points on the Chair"). tapeKey (e.g. 'T')
+//     only labels the tape toggle; the host binds the key. onModeChange(mode) fires whenever
+//     the tape/note mode changes ('off' | 'tape' | 'note').
+//   panel.mode, panel.tapePoints, panel.placeAtNdc(x, y, point?), panel.report(),
+//   panel.toggleMode('tape' | 'note') -> the new mode, panel.dispose().
+//   Stable hooks: the tape toggle's text starts "pick two points" (test.js) and carries
+//   data-role="tape"; the readout is .measure-tape "<distance> apart on the real object"
+//   (sessionrec.js parses it).
 //
 // One distinction runs through all of it: the SCANNED size never changes, no matter what the
 // gestures do to the model on screen. Pinch-scaling a chair does not resize the real chair.
@@ -32,7 +48,10 @@ const CAL_STORAGE_PREFIX = 'hologram-cal:';
 // flagged rather than silently applied to everything.
 const CAL_SUSPICIOUS = 0.10;
 
-export function createMeasurePanel({ mount, object, camera, renderer, scene, modelName = 'Scanned object' }) {
+export function createMeasurePanel({
+  mount, object, camera, renderer, scene, modelName = 'Scanned object',
+  displayName = modelName, tapeKey = null, onModeChange = () => {}
+}) {
   const rawBase = measureObject(object);
   if (!rawBase) return null;
   const rawSurfaces = horizontalSurfaces(object).filter((s) => s.share >= SURFACE_MIN_SHARE);
@@ -94,7 +113,8 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
     return n;
   };
 
-  function section(titleText, startOpen = true) {
+  // `parent` lets the Report fold hold its own sub-sections.
+  function section(titleText, startOpen = true, parent = mount) {
     const wrap = el('div', 'sec');
     const head = el('button', 'sec-head');
     head.append(el('span', null, titleText), el('span', 'sec-caret', startOpen ? '−' : '+'));
@@ -106,7 +126,7 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
       head.lastChild.textContent = open ? '+' : '−';
     });
     wrap.append(head, body);
-    mount.append(wrap);
+    parent.append(wrap);
     return body;
   }
 
@@ -134,10 +154,37 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
   const stats = el('div', 'measure-stats');
   dimsBody.append(dims, scaledNote, stats);
 
-  // ---- calibration ----------------------------------------------------------------------
-  const calBody = section('Calibrate', false);
+  // ---- tape measure ---------------------------------------------------------------------
+  // One big toggle, because it is the tool people reach for most. Its text stays lowercase
+  // and starts "pick two points" (test.js finds it that way); CSS capitalises the first letter.
+  const tapeBody = section('Tape', true);
+  const tapeBtn = el('button', 'ghost wide tape-toggle', 'pick two points: off');
+  tapeBtn.dataset.role = 'tape';
+  if (tapeKey) {
+    tapeBtn.title = `Tape on / off (${tapeKey})`;
+    tapeBtn.append(' ', el('kbd', null, tapeKey));
+  }
+  const tapeLabel = tapeBtn.firstChild; // the text node setMode() rewrites
+  const tapeHow = el('div', 'measure-stats',
+    `📏 Click two points on the ${displayName}, or aim and pinch your other hand. ✓ The distance shows below.`);
+  const tapeOut = el('div', 'measure-tape', 'measures the real object, whatever the model is scaled to');
+  tapeBody.append(tapeBtn, tapeHow, tapeOut);
+
+  // ---- notes ----------------------------------------------------------------------------
+  const notesBody = section('Notes', true);
+  const noteBtn = el('button', 'ghost wide', 'pin a note: off');
+  noteBtn.dataset.role = 'note';
+  const noteList = el('div', 'note-list');
+  notesBody.append(noteBtn, noteList);
+
+  // ---- report: the less-used tools, folded under one heading ----------------------------
+  const reportBody = section('Report', false);
+  reportBody.classList.add('report-body');
+
+  // ---- true size (calibration) ----------------------------------------------------------
+  const calBody = section('True size', false, reportBody);
   const calIntro = el('div', 'measure-stats',
-    'Measure one feature on the real object by hand, then tell it the true value. Everything else is corrected with it.');
+    `📐 Measure one feature of the real ${displayName} by hand and enter it. ✓ Every figure here is corrected to match.`);
   const calRef = el('select', 'fit-input');
   const calRow = el('div', 'fit-row');
   const calValue = el('input');
@@ -223,7 +270,7 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
 
   // ---- detected surfaces ----------------------------------------------------------------
   if (surfaces.length) {
-    const body = section('Key heights');
+    const body = section('Key heights', false, reportBody);
     const list = el('div', 'measure-stats');
     body.append(list);
     const renderSurfaces = () => {
@@ -241,8 +288,24 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
     onUnitChange.push(renderSurfaces);
   }
 
+  // ---- fit check ------------------------------------------------------------------------
+  const fitBody = section('Will it fit?', false, reportBody);
+  const fitRow = el('div', 'fit-row');
+  const wIn = el('input');
+  const hIn = el('input');
+  for (const [input, ph] of [[wIn, 'width'], [hIn, 'height']]) {
+    input.type = 'number';
+    input.min = '1';
+    input.placeholder = ph;
+    input.className = 'fit-input';
+  }
+  const fitUnit = el('span', 'fit-unit', 'cm');
+  fitRow.append(wIn, el('span', 'fit-x', '×'), hIn, fitUnit);
+  const fitOut = el('div', 'measure-fit', 'enter an opening to check');
+  fitBody.append(fitRow, fitOut);
+
   // ---- weight and shipping --------------------------------------------------------------
-  const weightBody = section('Weight & shipping', false);
+  const weightBody = section('Weight & shipping', false, reportBody);
   const matSel = el('select', 'fit-input');
   for (const m of MATERIALS) {
     const opt = el('option', null, m.name);
@@ -267,38 +330,13 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
   }
   matSel.addEventListener('change', renderWeight);
 
-  // ---- tape measure ---------------------------------------------------------------------
-  const tapeBody = section('Tape measure', false);
-  const tapeBtn = el('button', 'ghost wide', 'pick two points: off');
-  const tapeOut = el('div', 'measure-tape', 'measures the real object, whatever the model is scaled to');
-  tapeBody.append(tapeBtn, tapeOut);
-
-  // ---- fit check ------------------------------------------------------------------------
-  const fitBody = section('Will it fit?', false);
-  const fitRow = el('div', 'fit-row');
-  const wIn = el('input');
-  const hIn = el('input');
-  for (const [input, ph] of [[wIn, 'width'], [hIn, 'height']]) {
-    input.type = 'number';
-    input.min = '1';
-    input.placeholder = ph;
-    input.className = 'fit-input';
-  }
-  const fitUnit = el('span', 'fit-unit', 'cm');
-  fitRow.append(wIn, el('span', 'fit-x', '×'), hIn, fitUnit);
-  const fitOut = el('div', 'measure-fit', 'enter an opening to check');
-  fitBody.append(fitRow, fitOut);
-
-  // ---- notes ----------------------------------------------------------------------------
-  const notesBody = section('Notes', false);
-  const noteBtn = el('button', 'ghost wide', 'pin a note: off');
-  const noteList = el('div', 'note-list');
-  const exportRow = el('div', 'fit-row');
+  // ---- copy / download: the last thing in the Report fold -------------------------------
+  const exportRow = el('div', 'fit-row report-export');
   const copyBtn = el('button', 'ghost', 'copy report');
   const dlBtn = el('button', 'ghost', 'download');
   exportRow.append(copyBtn, dlBtn);
   const exportOut = el('div', 'measure-stats');
-  notesBody.append(noteBtn, noteList, exportRow, exportOut);
+  reportBody.append(exportRow, exportOut);
 
   // createAnnotations() restores saved notes synchronously, calling onChange for each one
   // BEFORE this const is initialised -- renderNotes() reading `annotations` then threw a
@@ -316,7 +354,7 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
   function renderNotes() {
     noteList.innerHTML = '';
     if (!annotations.all.length) {
-      noteList.append(el('div', 'measure-stats', 'no notes yet — pin one to record a mark, a fault, a measurement point'));
+      noteList.append(el('div', 'measure-stats', `📌 Turn on "pin a note", then click the ${displayName} to mark a fault or a spot. ✓ The note appears here and on the model.`));
       return;
     }
     for (const note of annotations.all) {
@@ -476,12 +514,15 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
   }
 
   function setMode(next) {
+    const before = mode;
     mode = mode === next ? 'off' : next;
-    tapeBtn.textContent = `pick two points: ${mode === 'tape' ? 'on' : 'off'}`;
+    tapeLabel.textContent = `pick two points: ${mode === 'tape' ? 'on' : 'off'}`;
     tapeBtn.classList.toggle('active', mode === 'tape');
     noteBtn.textContent = `pin a note: ${mode === 'note' ? 'on' : 'off'}`;
     noteBtn.classList.toggle('active', mode === 'note');
     if (mode !== 'tape') clearTape();
+    if (mode !== before) onModeChange(mode);
+    return mode;
   }
   tapeBtn.addEventListener('click', () => setMode('tape'));
   noteBtn.addEventListener('click', () => setMode('note'));
@@ -584,6 +625,10 @@ export function createMeasurePanel({ mount, object, camera, renderer, scene, mod
     // How many tape points are placed (0-2), for the pointer's status line.
     get tapePoints() {
       return picks.length;
+    },
+    // Same as clicking the tape / note toggle (the host's T key): on, or off if already on.
+    toggleMode(which) {
+      return setMode(which);
     },
     // The pointer's click (hologram.js): same placement as a mouse click, at NDC coordinates.
     placeAtNdc(ndcX, ndcY, point = null) {

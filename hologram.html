@@ -6,24 +6,23 @@
   <title>Hologram Workshop — Gesture Demo</title>
   <link rel="stylesheet" href="theme.css" />
   <style>
-    /* Layout (2026-09-29 redo, shared tokens in theme.css): measurements on the left,
-       practice on the right, the hologram in its own cell that no panel covers. P and M
-       collapse their columns -- hologram.js toggles .hidden on the panels, and :has() turns
-       that into a narrower grid, so no layout logic lives in JS. */
+    /* Layout (2026-10-01 declutter, matching the Platform): a clean top bar, the hologram in
+       its own cell that no panel covers, ONE right-hand Tools panel with Practice / Measure /
+       Look tabs (the Platform Inspector's names), and a status bar. ⚙ / P / M collapse the
+       panel -- hologram.js toggles .hidden, and :has() turns that into a narrower grid, so no
+       layout logic lives in JS. */
     #app {
       height: 100%; display: grid;
       grid-template-rows: var(--bar-h) 1fr var(--status-h);
-      grid-template-columns: var(--left-w, 290px) 1fr var(--right-w, 280px);
-      grid-template-areas: "top top top" "left stage right" "status status status";
+      grid-template-columns: 1fr var(--right-w, 320px);
+      grid-template-areas: "top top" "stage tools" "status status";
     }
-    #app:has(#measure.hidden) { --left-w: 0px; }
-    #app:has(#panel.hidden) { --right-w: 0px; }
+    #app:has(#tools.hidden) { --right-w: 0px; }
     #topbar { grid-area: top; }
-    #measure { grid-area: left; border-right: 1px solid var(--line); }
     #stage { grid-area: stage; position: relative; min-width: 0; min-height: 0; overflow: hidden; }
-    #panel { grid-area: right; border-left: 1px solid var(--line); }
+    #tools { grid-area: tools; border-left: 1px solid var(--line); overflow: hidden; }
     #statusbar { grid-area: status; }
-    #measure.hidden, #panel.hidden { display: none; }
+    #tools.hidden { display: none; }
 
     /* Camera + tracking overlay live inside the view, behind the hologram. Hidden by default:
        seeing your own video broke the "object floating in space" illusion. D shows them. */
@@ -37,20 +36,41 @@
     #stage > canvas:not(#overlay) { z-index: 2; }
     .note-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 
-    /* Gesture state pill (hologram.js replaces #mode's class with the mode name). */
+    /* ---- top bar ---- */
+    #topbar { gap: 6px; }
+    /* Model picker "◂ Chair ▸": carousel.js still builds one card per model (sessionrec.js
+       reads #modelCarousel .active), but only the active one shows; the arrows step. */
+    .picker { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+    .picker > button { padding: 0 8px; font-size: 16px; color: var(--text); }
+    #modelCarousel { display: inline-flex; min-width: 0; }
+    #modelCarousel .model-card { display: none; }
+    #modelCarousel .model-card.active {
+      display: inline-block; opacity: 1; color: var(--text); background: none; border-color: transparent;
+      max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default;
+    }
+    #modelCarousel.busy .model-card.active { color: var(--muted); }
+    /* Gesture state chip: plain words + icon (hologram.js); colour by mode, never a blink. */
     #mode {
-      display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px;
-      border: 1px solid var(--line-2); color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+      display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 999px; white-space: nowrap;
+      border: 1px solid var(--line-2); color: var(--muted); font-size: 12px; transition: color 200ms ease, border-color 200ms ease;
     }
     #mode.grab { color: var(--warm); border-color: rgba(255,209,102,.5); }
     #mode.transform { color: var(--accent); border-color: rgba(79,209,255,.5); }
     #mode.explode { color: #ff9a7a; border-color: rgba(255,154,122,.5); }
+    #mode.aim { color: var(--accent); border-color: rgba(79,209,255,.35); }
     #status { color: var(--ok); }
     #status.error { color: var(--err); }
-    #fps { margin-left: auto; color: var(--faint); }
+    #recSlot { margin-left: auto; }
 
-    /* ---- practice panel (right) ---- */
-    #panel { padding: 0 12px 14px; }
+    /* ---- Tools panel (right): tabs as on the Platform Inspector ---- */
+    #tools { display: flex; flex-direction: column; }
+    .tabs { display: flex; gap: 2px; padding: 8px 10px 0; border-bottom: 1px solid var(--line); flex: none; }
+    .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); height: 34px; }
+    .tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+    .tabs button:hover:not(:disabled) { background: none; color: var(--text); }
+    .tabpanel { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 14px; }
+    .tabpanel[hidden] { display: none; }
+    #measure { padding-top: 12px; }
     .panel-title { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 14px 2px 8px; }
     .drill { display: grid; gap: 4px; }
     .drill button {
@@ -59,47 +79,78 @@
     }
     .drill button.active { background: var(--accent-soft); border-color: rgba(79,209,255,.55); color: var(--accent); }
     .drill button .sub { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
-    #live { display: flex; align-items: center; gap: 8px; padding: 10px; margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
-    /* The "firing now" lamp changes colour only -- no glow pulse, no blink. */
-    #lamp { width: 10px; height: 10px; border-radius: 50%; background: #33404e; flex: none; transition: background 120ms linear; }
-    #lamp.on { background: var(--ok); }
-    #liveText { font-size: 12px; color: var(--muted); }
+    details.pointer { margin-top: 14px; border-top: 1px solid var(--line); }
+    details.pointer > summary { cursor: pointer; list-style: none; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 12px 2px 4px; }
+    details.pointer > summary::after { content: "+"; float: right; color: var(--faint); }
+    details.pointer[open] > summary::after { content: "−"; }
     label.tune { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin: 12px 2px 4px; }
     label.tune b { color: var(--text); font-weight: 500; font-family: var(--mono); }
     input[type="range"] { width: 100%; }
     .row { display: flex; align-items: center; gap: 8px; margin: 12px 2px 0; font-size: 12px; color: var(--muted); }
-    #legend { display: grid; gap: 2px; }
-    .legend-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 4px 2px; border-bottom: 1px solid var(--line); }
-    .legend-k { color: var(--text); flex: none; }
-    .legend-v { color: var(--muted); text-align: right; }
 
-    /* Measurement panel styles live in theme.css (shared with index.html). */
-
-    /* ---- in-view overlays: model picker and the coaching line ---- */
-    #modelCarousel.carousel {
-      position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 4; display: flex; gap: 8px;
+    /* ---- ? Help popover ---- */
+    #help {
+      position: fixed; top: calc(var(--bar-h) + 6px); right: 10px; z-index: 50; width: min(380px, calc(100vw - 20px));
+      max-height: calc(100vh - var(--bar-h) - var(--status-h) - 20px); overflow-y: auto;
+      padding: 12px 14px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line-2);
+      box-shadow: 0 10px 40px rgba(0,0,0,.5); font-size: 12px; color: var(--muted);
     }
-    #modelCarousel .model-card { height: 32px; background: rgba(16,22,29,.9); color: var(--muted); }
-    #modelCarousel .model-card.active { color: var(--accent); border-color: rgba(79,209,255,.6); background: var(--accent-soft); }
-    #modelCarousel.busy .model-card { opacity: .5; cursor: default; }
+    #help[hidden] { display: none; }
+    #help h3 { margin: 0 0 6px; font-size: 13px; color: var(--text); }
+    #help h4 { margin: 12px 0 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    #help .help-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+    #help .help-row span:first-child { color: var(--text); flex: none; }
+    #help .help-row span:last-child { text-align: right; }
+
+    /* ---- the ONE coach slot: every prompt, one at a time (hologram.js picks by priority).
+       Eased opacity only; a new message swaps text in place, nothing flashes. */
     #coach {
-      position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 4;
-      text-align: center; width: min(640px, 92%); pointer-events: none;
-      padding: 10px 14px; border-radius: 10px; background: rgba(10,13,17,.72); border: 1px solid var(--line);
+      position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 4;
+      text-align: center; width: min(660px, calc(100% - 24px)); pointer-events: none;
+      padding: 10px 14px; border-radius: 10px; background: rgba(10,13,17,.78); border: 1px solid var(--line);
+      transition: opacity 300ms ease, border-color 300ms ease;
     }
+    #coach.empty { opacity: 0; }
+    /* Hovered part's name, next to the reticle (hologram.js moves it every frame). Opacity is
+       eased; amber = inferred (filled in, not scanned), the reticle outline's colour. */
+    #partChip {
+      position: absolute; left: 0; top: 0; z-index: 4; pointer-events: none; white-space: nowrap;
+      padding: 3px 9px; border-radius: 999px; font-size: 12px; color: var(--accent);
+      background: rgba(10,13,17,.78); border: 1px solid rgba(79,209,255,.45);
+      opacity: 0; transition: opacity 200ms ease, color 200ms ease, border-color 200ms ease;
+    }
+    #partChip.on { opacity: 1; }
+    #partChip.inferred { color: #ffb347; border-color: rgba(255,179,71,.55); }
+    #coach.error { border-color: rgba(255,154,122,.6); }
+    #coach.hint { border-color: rgba(255,209,102,.5); }
     #coachTitle { font-size: 14px; font-weight: 600; color: var(--accent); }
-    #coachBody { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
-    #coachKeys { font-size: 11px; color: var(--faint); margin-top: 6px; }
+    #coach.error #coachTitle { color: #ff9a7a; }
+    #coach.hint #coachTitle { color: var(--warm); }
+    #coach.toast #coachTitle { color: var(--text); }
+    #coachBody { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+    #coachBody:empty, #coachLive[hidden] { display: none; }
+    #coachLive { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--faint); }
+    /* The "firing now" lamp changes colour only -- no glow pulse, no blink. */
+    #lamp { width: 8px; height: 8px; border-radius: 50%; background: #33404e; flex: none; transition: background 120ms linear; }
+    #lamp.on { background: var(--ok); }
 
-    /* Narrow screens: the practice panel and measurements start collapsed-width drawers. */
+    /* Narrow screens: the Tools panel is a drawer over the hologram, closed at start. */
     @media (max-width: 960px) {
-      #app { grid-template-columns: 0 1fr 0; }
-      #measure:not(.hidden), #panel:not(.hidden) {
-        position: fixed; top: var(--bar-h); bottom: var(--status-h); width: min(300px, 86vw); z-index: 25;
+      #app { grid-template-columns: 1fr 0; }
+      #tools:not(.hidden) {
+        position: fixed; top: var(--bar-h); bottom: var(--status-h); right: 0; width: min(340px, 90vw); z-index: 25;
         box-shadow: 0 0 40px rgba(0,0,0,.55);
       }
-      #measure { left: 0; } #panel { right: 0; }
       .wide-only { display: none; }
+    }
+    /* Phones: icons carry the buttons, the model name shortens, the chip keeps its icon + verb. */
+    @media (max-width: 600px) {
+      #topbar { gap: 2px; padding: 0 6px; }
+      #topbar button { padding: 0 7px; }
+      .btn-word { display: none; }
+      #modelCarousel .model-card.active { max-width: 84px; padding: 0 4px; }
+      #mode { padding: 0 7px; max-width: 108px; overflow: hidden; text-overflow: ellipsis; }
+      #coachBody { font-size: 12px; }
     }
   </style>
   <script type="importmap">
@@ -116,70 +167,82 @@
     <header id="topbar" class="topbar">
       <div class="brand wide-only"><a href="platform/index.html" title="Open the full workshop">Hologram <span>Workshop</span></a></div>
       <div class="sep wide-only"></div>
-      <button id="start" class="primary" disabled>Start camera</button>
-      <button id="reset">Reset</button>
-      <span id="mode">idle</span>
+      <button id="start" class="primary" disabled title="Camera on / off: use your hands">▶<span class="btn-word"> Camera</span></button>
+      <button id="reset" title="Put the model back where it started (R; U undoes)">↺<span class="btn-word"> Reset</span></button>
+      <div class="picker" aria-label="Model">
+        <button id="prevModel" class="ghost" title="Previous model (←)" aria-label="Previous model">◂</button>
+        <div id="modelCarousel"></div>
+        <button id="nextModel" class="ghost" title="Next model (→)" aria-label="Next model">▸</button>
+      </div>
+      <span id="mode" class="off" role="status" aria-label="What your hands are doing">📷 Camera off</span>
       <div class="spacer"></div>
-      <span id="explodeMode" class="note wide-only">—</span>
-      <button id="togglePanel" class="ghost">hide panel</button>
+      <button id="helpBtn" class="ghost" title="Gestures and keys (?)" aria-controls="help" aria-expanded="false">?<span class="btn-word"> Help</span></button>
+      <button id="toolsBtn" class="ghost" title="Practice, Measure and Look (P / M)" aria-controls="tools" aria-expanded="true">⚙<span class="btn-word"> Tools</span></button>
     </header>
-
-    <aside id="measure" class="side" aria-label="Measurements"></aside>
 
     <main id="stage" aria-label="Hologram">
       <video id="cam" playsinline muted></video>
       <canvas id="overlay"></canvas>
-      <div id="modelCarousel"></div>
-      <div id="coach">
-        <div id="coachTitle">—</div>
+      <div id="partChip" aria-hidden="true"></div>
+      <div id="coach" class="empty" aria-live="polite">
+        <div id="coachTitle"></div>
         <div id="coachBody"></div>
-        <div id="coachKeys"><kbd>R</kbd> reset · <kbd>U</kbd> undo reset · click a part (exploded) to select it · <kbd>D</kbd> camera view · <kbd>P</kbd> practice · <kbd>M</kbd> measure · <kbd>←</kbd><kbd>→</kbd> switch model · drag to orbit</div>
+        <div id="coachLive" hidden><span id="lamp"></span><span id="liveText"></span></div>
       </div>
     </main>
 
-    <aside id="panel" class="side" aria-label="Practice">
-      <div class="panel-title">Practice — one at a time</div>
-      <div class="drill" id="drills"></div>
-
-      <div id="live">
-        <span id="lamp"></span>
-        <span id="liveText">camera off</span>
+    <aside id="tools" class="side" aria-label="Tools">
+      <div class="tabs" role="tablist">
+        <button id="tab-practice" role="tab" aria-selected="true" aria-controls="practice">Practice</button>
+        <button id="tab-measure" role="tab" aria-selected="false" aria-controls="measure">Measure</button>
+        <button id="tab-look" role="tab" aria-selected="false" aria-controls="look">Look</button>
       </div>
 
-      <div class="panel-title">Feel</div>
-      <label class="tune" for="sens">sensitivity <b id="sensVal">1.0×</b></label>
-      <input type="range" id="sens" min="0.2" max="2" step="0.1" value="1" />
+      <div id="practice" class="tabpanel" role="tabpanel" aria-label="Practice">
+        <div class="panel-title">Practice one gesture at a time</div>
+        <div class="drill" id="drills"></div>
+        <button id="selPractice" class="ghost wide" title="Try the three ways to select a part: 7 short rounds (Esc stops)">🎯 Selection practice</button>
 
-      <label class="tune" for="trig">trigger delay <b id="trigVal">3 frames</b></label>
-      <input type="range" id="trig" min="1" max="12" step="1" value="3" />
-
-      <div class="row">
-        <input type="checkbox" id="momentum" checked />
-        <label for="momentum">momentum (coast after release)</label>
+        <details class="pointer" id="pointerSection">
+          <summary>⚙ Pointer &amp; feel</summary>
+          <button id="recal" class="ghost wide" title="Calibrate the hand pointer (C)">🎯 Recalibrate the pointer <kbd>C</kbd></button>
+          <p class="note" id="calLine" style="margin: 6px 2px 0"></p>
+          <label class="tune" for="sens">sensitivity <b id="sensVal">1.0×</b></label>
+          <input type="range" id="sens" min="0.2" max="2" step="0.1" value="1" />
+          <label class="tune" for="trig">trigger delay <b id="trigVal">3 frames</b></label>
+          <input type="range" id="trig" min="1" max="12" step="1" value="3" />
+          <div class="row">
+            <input type="checkbox" id="momentum" checked />
+            <label for="momentum">momentum (coast after release)</label>
+          </div>
+          <p class="note" style="margin: 10px 2px 0">Display <span id="fps">—</span> fps</p>
+        </details>
       </div>
 
-      <div class="panel-title">Look</div>
-      <label class="tune" for="realism">realism <b id="realismVal">0%</b></label>
-      <input type="range" id="realism" min="0" max="1" step="0.05" value="0" />
-      <p class="note" style="margin: 6px 2px 0">Blend the scan's real colours into the hologram. Photosafe at every setting.</p>
+      <div id="measure" class="tabpanel" role="tabpanel" aria-label="Measure" hidden></div>
 
-      <div class="panel-title">Gesture reference</div>
-      <div id="legend"></div>
+      <div id="look" class="tabpanel" role="tabpanel" aria-label="Look" hidden>
+        <label class="tune" for="realism">realism <b id="realismVal">0%</b></label>
+        <input type="range" id="realism" min="0" max="1" step="0.05" value="0" />
+        <p class="note" style="margin: 6px 2px 0">Blend the scan's real colours into the hologram. Photosafe at every setting.</p>
+      </div>
     </aside>
 
     <footer id="statusbar" class="statusbar">
-      <span id="status">loading model…</span>
-      <span id="fps">— fps</span>
+      <span id="status">Loading the model…</span>
+      <!-- sessionrec.js may mount its SHADOW badge here (board request, 2026-10-01). -->
+      <span id="recSlot"></span>
     </footer>
   </div>
 
+  <div id="help" role="dialog" aria-label="Gestures and keys" hidden></div>
+
   <script>
-    // Narrow screens: panels are drawers over the hologram, so start with both closed (P / M
-    // or the button open them). hologram.js reads the .hidden class, so this is all it takes.
+    // Narrow screens: the Tools panel is a drawer over the hologram, so start with it closed
+    // (⚙, P or M open it). hologram.js reads the .hidden class, so this is all it takes.
     if (matchMedia('(max-width: 960px)').matches) {
-      document.getElementById('measure').classList.add('hidden');
-      document.getElementById('panel').classList.add('hidden');
-      document.getElementById('togglePanel').textContent = 'show panel';
+      document.getElementById('tools').classList.add('hidden');
+      document.getElementById('toolsBtn').setAttribute('aria-expanded', 'false');
     }
   </script>
   <script type="module">

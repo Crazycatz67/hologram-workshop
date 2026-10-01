@@ -37,6 +37,11 @@ const BONE_OPACITY = 0.55;
 const REST_OPACITY = 0.35;   // x the normal opacity while at rest
 const DIM_EASE_MS = 150;
 
+// The aiming hand is drawn riding the absolute cursor (pointer.js ghostOffset), so the beam
+// from its index tip lines up with the cursor (owner, 2026-10-01: "laser line not accurate").
+// The shift's weight eases in and out so entering or leaving the pose glides instead of teleporting.
+const OFFSET_EASE_MS = 120;
+
 const FINGERTIPS = new Set([4, 8, 12, 16, 20]);
 const PINCH_TIPS = new Set([4, 8]);
 // Wrist, then the four finger MCPs in hand order (thumb's CMC stands in for its MCP, since
@@ -112,7 +117,7 @@ function createHandPool(scene, connections) {
   palm.visible = false;
   group.add(palm);
 
-  return { group, joints, bones, palm, hand: null, dim: 1 };
+  return { group, joints, bones, palm, hand: null, dim: 1, ox: 0, oy: 0, ow: 0 };
 }
 
 export function createGhostHands(scene, connections) {
@@ -130,10 +135,13 @@ export function createGhostHands(scene, connections) {
     // hands: the tracked hands this frame (0-2), each already carrying .pinch and
     // whatever fist classification the caller computed. camera/object set where the flat
     // depth plane sits; aspect matches the video's own, same as everywhere else in Phase 1/4.
-    update(hands, { camera, object, aspect, mirror = true, isFist = () => false }) {
+    // offsetOf(hand) -> { dx, dy } (image units) or null: shift that hand's drawing (eased).
+    update(hands, { camera, object, aspect, mirror = true, isFist = () => false, offsetOf = null, nowMs = performance.now() }) {
       const depth = camera.position.distanceTo(object.position);
-      const now = performance.now();
+      const now = nowMs;
       const k = lastT === null ? 1 : 1 - Math.exp(-Math.max(0, now - lastT) / DIM_EASE_MS);
+      // First call: assume one 60 fps frame, so a shift present from the start still eases in.
+      const kOff = 1 - Math.exp(-(lastT === null ? 16 : Math.max(0, now - lastT)) / OFFSET_EASE_MS);
       lastT = now;
 
       for (let i = 0; i < pools.length; i++) {
@@ -141,6 +149,7 @@ export function createGhostHands(scene, connections) {
         const hand = hands[i];
         if (!hand) {
           hideAll(pool);
+          pool.ox = pool.oy = pool.ow = 0;
           continue;
         }
 
@@ -149,7 +158,16 @@ export function createGhostHands(scene, connections) {
         const dim = pool.dim;
         const pinching = hand.pinch?.pinching ?? false;
         const fisted = isFist(hand);
-        const points = hand.landmarks.map((lm) => landmarkToWorld(lm, camera, depth, mirror));
+        const off = offsetOf?.(hand) ?? null;
+        // Ease the WEIGHT of the shift, not the shift itself: while aiming the shift changes
+        // every frame with the cursor, and easing it would leave the beam trailing the cursor.
+        if (off) { pool.ox = off.dx; pool.oy = off.dy; }
+        pool.ow += ((off ? 1 : 0) - pool.ow) * kOff;
+        const sx = pool.ox * pool.ow;
+        const sy = pool.oy * pool.ow;
+        const shifted = Math.abs(sx) > 1e-5 || Math.abs(sy) > 1e-5;
+        const points = hand.landmarks.map((lm) =>
+          landmarkToWorld(shifted ? { x: lm.x + sx, y: lm.y + sy } : lm, camera, depth, mirror));
 
         points.forEach((p, idx) => {
           const joint = pool.joints[idx];

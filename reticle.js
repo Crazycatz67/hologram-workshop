@@ -18,8 +18,19 @@ import * as THREE from 'three';
 //       -> the probe result for this frame (or null). Call once per display frame.
 //       cursor null = hide (eased). beamFrom: world Vector3 of the aiming index tip, or null
 //       (mouse: no beam).
+//     hold (optional, 0..1): hold-to-select progress (pointer.js createSelector
+//       visibleProgress). Drawn as an arc filling clockwise just outside the ring; it fades in
+//       and out with EASE_MS and keeps its last fill while fading, so it never blinks off.
 //     reticle.pulse()   click feedback (a size bump, eased; never a brightness flash).
 //     reticle.dispose()
+//   createPartHighlight(scene) -> highlight      the hovered exploded part's outline
+//     highlight.update({ part | null, nowMs })    call once per display frame. The outline
+//       (the part's edges, drawn over everything) fades in and out with EASE_MS; a change of
+//       part fades the old one out before the new one fades in, so it never jumps or blinks.
+//       Amber when the part is inferred (filled in, not scanned).
+//     highlight.shown -> the part currently outlined (or fading out), or null
+//     highlight.dispose()
+//   partLabel(part) -> { name, inferred }   for the host's name chip ("part 3" when unnamed).
 //
 // Photosafety (BUGS #14): every change of colour, opacity and size is eased with a time
 // constant of EASE_MS, so no state change completes in under ~150 ms, and nothing here gets
@@ -37,6 +48,7 @@ const RING_OPACITY = 0.8;
 const FREE_OPACITY = 0.35;   // cursor over empty space: present but quiet
 const BEAM_OPACITY = 0.22;
 const PULSE_MS = 320;
+const HOLD_SEGMENTS = 64;
 
 const raycaster = new THREE.Raycaster();
 const tmpA = new THREE.Vector3();
@@ -115,8 +127,17 @@ export function createReticle(scene) {
     overlay(new THREE.MeshBasicMaterial({ color: COLOR.clone(), side: THREE.DoubleSide }))
   );
   ring.renderOrder = dot.renderOrder = 1000;
+  // Hold-to-select arc: drawRange reveals whole theta segments, 6 indices each (RingGeometry
+  // emits them in theta order). Mirrored in x so it fills clockwise from the top.
+  const arc = new THREE.Mesh(
+    new THREE.RingGeometry(1.12, 1.32, HOLD_SEGMENTS, 1, Math.PI / 2, Math.PI * 2),
+    overlay(new THREE.MeshBasicMaterial({ color: COLOR.clone(), side: THREE.DoubleSide }))
+  );
+  arc.scale.x = -1;
+  arc.renderOrder = 1000;
+  arc.geometry.setDrawRange(0, 0);
   const holder = new THREE.Group(); // oriented to the surface; ring and dot lie in its XY plane
-  holder.add(ring, dot);
+  holder.add(ring, dot, arc);
   group.add(holder);
 
   const beamGeo = new THREE.BufferGeometry();
@@ -127,7 +148,8 @@ export function createReticle(scene) {
   group.add(beam);
 
   // Eased values (current) and their targets.
-  const e = { vis: 0, onSurface: 0, snap: 0, amber: 0, beam: 0, pulse: 0 };
+  const e = { vis: 0, onSurface: 0, snap: 0, amber: 0, beam: 0, pulse: 0, hold: 0 };
+  let holdFill = 0; // last drawn fill, kept while the arc fades out
   let lastT = null;
   let pulseAt = -Infinity;
   let snapped = null;
@@ -137,7 +159,7 @@ export function createReticle(scene) {
   const Z = new THREE.Vector3(0, 0, 1);
 
   return {
-    update({ cursor, object, camera, viewport, beamFrom = null, nowMs = performance.now() }) {
+    update({ cursor, object, camera, viewport, beamFrom = null, nowMs = performance.now(), hold = 0 }) {
       const dt = lastT === null ? 16 : Math.min(100, Math.max(0, nowMs - lastT));
       lastT = nowMs;
       const k = 1 - Math.exp(-dt / EASE_MS);
@@ -169,6 +191,9 @@ export function createReticle(scene) {
       ease('snap', result?.vertex ? 1 : 0);
       ease('amber', result?.inferred ? 1 : 0);
       ease('beam', cursor && beamFrom ? 1 : 0);
+      const holding = cursor && hold > 0;
+      if (holding) holdFill = Math.min(1, hold);
+      ease('hold', holding ? 1 : 0);
       // Click pulse: a half-sine size bump over PULSE_MS, so it eases in as well as out.
       const sincePulse = nowMs - pulseAt;
       e.pulse = sincePulse >= 0 && sincePulse < PULSE_MS ? Math.sin((Math.PI * sincePulse) / PULSE_MS) : 0;
@@ -201,6 +226,10 @@ export function createReticle(scene) {
       ring.material.opacity = opacity;
       dot.material.color.copy(color);
       dot.material.opacity = opacity * e.snap;
+      arc.material.color.copy(color);
+      arc.material.opacity = e.vis * RING_OPACITY * e.hold;
+      arc.geometry.setDrawRange(0, 6 * Math.round(HOLD_SEGMENTS * holdFill));
+      arc.visible = arc.material.opacity > 0.002;
 
       const beamOpacity = BEAM_OPACITY * e.vis * e.beam;
       beam.material.color.copy(color);
@@ -222,7 +251,7 @@ export function createReticle(scene) {
 
     // Eased state, for tests and the live readout.
     get eased() {
-      return { ...e };
+      return { ...e, holdFill };
     },
 
     dispose() {
@@ -231,8 +260,71 @@ export function createReticle(scene) {
       ring.material.dispose();
       dot.geometry.dispose();
       dot.material.dispose();
+      arc.geometry.dispose();
+      arc.material.dispose();
       beamGeo.dispose();
       beam.material.dispose();
+    }
+  };
+}
+
+export function partLabel(part) {
+  if (!part) return null;
+  const idx = part.parent ? part.parent.children.filter((c) => c.isMesh).indexOf(part) : -1;
+  return { name: part.name || `part ${idx + 1}`, inferred: isInferred(part) };
+}
+
+const OUTLINE_OPACITY = 0.7;
+const OUTLINE_ANGLE_DEG = 30; // edges sharper than this are drawn (keeps a scan's noise out)
+
+export function createPartHighlight(scene) {
+  const edgesOf = new WeakMap();
+  const material = new THREE.LineBasicMaterial({ color: COLOR.clone(), transparent: true, depthTest: false, depthWrite: false, opacity: 0 });
+  const lines = new THREE.LineSegments(new THREE.BufferGeometry(), material);
+  lines.renderOrder = 998;
+  lines.frustumCulled = false;
+  lines.visible = false;
+  scene.add(lines);
+  let shown = null;
+  let vis = 0;
+  let amber = 0;
+  let lastT = null;
+  const edges = (part) => {
+    let g = edgesOf.get(part.geometry);
+    if (!g) {
+      g = new THREE.EdgesGeometry(part.geometry, OUTLINE_ANGLE_DEG);
+      edgesOf.set(part.geometry, g);
+    }
+    return g;
+  };
+  return {
+    update({ part = null, nowMs = performance.now() } = {}) {
+      const dt = lastT === null ? 16 : Math.min(100, Math.max(0, nowMs - lastT));
+      lastT = nowMs;
+      const k = 1 - Math.exp(-dt / EASE_MS);
+      // Swap only once the old outline has faded out.
+      if (part !== shown && vis < 0.02) {
+        shown = part?.geometry ? part : null;
+        if (shown) lines.geometry = edges(shown);
+        amber = shown && isInferred(shown) ? 1 : 0;
+      }
+      vis += ((part && part === shown ? 1 : 0) - vis) * k;
+      if (shown) {
+        shown.updateWorldMatrix(true, false);
+        lines.matrixAutoUpdate = false;
+        lines.matrix.copy(shown.matrixWorld);
+        lines.matrixWorld.copy(shown.matrixWorld);
+      }
+      material.color.copy(COLOR).lerp(INFERRED_COLOR, amber);
+      material.opacity = OUTLINE_OPACITY * vis;
+      lines.visible = !!shown && material.opacity > 0.002;
+      return shown;
+    },
+    get shown() { return shown; },
+    get opacity() { return material.opacity; },
+    dispose() {
+      scene.remove(lines);
+      material.dispose();
     }
   };
 }

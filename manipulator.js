@@ -214,6 +214,38 @@ const EXPLODE_PART_SELECT_THRESHOLD = 0.5;
 // Reset.
 const PART_GRAB_RANGE = 3;
 
+// One-hand selection (owner decision, plans/platform/ROADMAP.md 2026-10-01 (3)): the cursor
+// rarely lands exactly on a thin exploded part, so a miss falls back to the nearest part's
+// on-screen box. partsNear() ranks the candidates; the hysteresis that stops the target
+// flickering between two parts lives in pointer.js createSelector (pure, shared with the
+// calibration practice).
+export const PARTS_NEAR_PX = 80;
+// rankPx = box distance + this x centre distance: two boxes that both contain the cursor
+// (distance 0) are told apart by whose centre is nearer, without letting a big box's far
+// centre push it out of the 80 px gate (the gate uses the box distance alone).
+const CENTRE_WEIGHT = 0.1;
+const _corner = new THREE.Vector3();
+const _box = new THREE.Box3();
+
+// Screen-space rectangle (CSS px, y down) of a mesh's world bounding box, or null when any
+// corner is behind the camera (projection flips there, so the rectangle would be nonsense).
+function screenRect(mesh, camera, viewport) {
+  const g = mesh.geometry;
+  if (!g.boundingBox) g.computeBoundingBox();
+  _box.copy(g.boundingBox);
+  const r = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (let i = 0; i < 8; i++) {
+    _corner.set(i & 1 ? _box.max.x : _box.min.x, i & 2 ? _box.max.y : _box.min.y, i & 4 ? _box.max.z : _box.min.z);
+    _corner.applyMatrix4(mesh.matrixWorld).project(camera);
+    if (_corner.z > 1 || _corner.z < -1) return null;
+    const x = ((_corner.x + 1) / 2) * viewport.width;
+    const y = ((1 - _corner.y) / 2) * viewport.height;
+    r.x0 = Math.min(r.x0, x); r.x1 = Math.max(r.x1, x);
+    r.y0 = Math.min(r.y0, y); r.y1 = Math.max(r.y1, y);
+  }
+  return r;
+}
+
 function wristOf(hand) {
   return hand.landmarks[0];
 }
@@ -487,6 +519,12 @@ export function createManipulator(object, camera) {
   // pointer on the previous camera frame.
   let pointerGapSince = null;
   let wasPointing = false;
+  // A same-hand pinch on an aiming hand is a CLICK (pointer.js), never a grab (owner live test
+  // 2026-10-01; Cody-I: a held pinch whose hand read as a fist started a grab at 367 ms). Such a
+  // hand stays latched until the pinch opens or the hand leaves, and counts as still pointing.
+  const pinchLatch = new Set();   // handedness of an aiming hand holding a same-hand pinch
+  const wasGunBy = new Map();     // handedness -> was a pointer on its previous frame
+  const SAME_PINCH_CLOSE = 0.25;  // keep in step with pointer.js SAME_PINCH_CLOSE
   // Whether the current explode session has actually pulled the hands apart. Two open hands
   // are both the explode pose AND the clap's ready stance, so explode engages the moment the
   // hands come up; until they have pulled apart it is still "at rest" for the clap. Once
@@ -547,6 +585,8 @@ export function createManipulator(object, camera) {
     lastAdvanceTime = null;
     gap = null;
     pointerGapSince = null;
+    pinchLatch.clear();
+    wasGunBy.clear();
     mode = MODE.IDLE;
   }
 
@@ -809,12 +849,128 @@ export function createManipulator(object, camera) {
     // Raycasts against the exploded parts and selects whichever one was hit (or deselects,
     // back to whole-object mode, on a miss). No-ops below EXPLODE_PART_SELECT_THRESHOLD or on
     // a non-literalMode object. ndcX/ndcY are normalized device coordinates in [-1, 1].
-    selectPartAtScreenPoint(ndcX, ndcY) {
+    // { part } (optional): the part the hands runtime already targeted for this click (bubble
+    // targeting or hold-again cycling, which a plain raycast can't reproduce). Used when it is
+    // one of this object's parts; otherwise the raycast decides, exactly as before.
+    selectPartAtScreenPoint(ndcX, ndcY, { part } = {}) {
       if (!literalMode || explodeAmount <= EXPLODE_PART_SELECT_THRESHOLD) return null;
+      if (part && explodeParts.includes(part)) {
+        activePart = part;
+        return activePart;
+      }
       raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
       const hits = raycaster.intersectObjects(explodeParts, false);
       activePart = hits.length ? hits[0].object : null;
       return activePart;
+    },
+
+    // True while a click can pick a part (literal explode, past half-way).
+    get partsSelectable() {
+      return literalMode && explodeAmount > EXPLODE_PART_SELECT_THRESHOLD;
+    },
+
+    // 0..1 for literal explode (0 for a stretch object).
+    get explodeAmount() {
+      return literalMode ? explodeAmount : 0;
+    },
+
+    get parts() {
+      return literalMode ? explodeParts.slice() : [];
+    },
+
+    // Ranked parts around a screen point, for bubble targeting and hold-again cycling.
+    //   ndc: { x, y } (-1..1, y up); px: bubble radius in CSS px (PARTS_NEAR_PX);
+    //   viewport: { width, height } CSS px of the canvas (default 900 tall at camera.aspect).
+    //   -> [{ part, hit, depth, distPx, rankPx }], ray hits first (front to back, one entry per
+    //      part, distPx = rankPx = 0), then misses whose screen box is within px, nearest first.
+    //   Empty unless partsSelectable (pass { any: true } to rank an unexploded object too).
+    //   Reads matrixWorld as it stands (the render loop keeps it current; tests update it).
+    partsNear(ndc, px = PARTS_NEAR_PX, { viewport = null, any = false } = {}) {
+      if (!literalMode || (!any && explodeAmount <= EXPLODE_PART_SELECT_THRESHOLD)) return [];
+      if (!ndc || !Number.isFinite(ndc.x) || !Number.isFinite(ndc.y)) return [];
+      const vp = viewport ?? { width: 900 * camera.aspect, height: 900 };
+      raycaster.setFromCamera({ x: ndc.x, y: ndc.y }, camera);
+      const out = [];
+      const seen = new Set();
+      for (const h of raycaster.intersectObjects(explodeParts, false)) {
+        if (seen.has(h.object)) continue;
+        seen.add(h.object);
+        out.push({ part: h.object, hit: true, depth: h.distance, distPx: 0, rankPx: 0 });
+      }
+      const cx = ((ndc.x + 1) / 2) * vp.width;
+      const cy = ((1 - ndc.y) / 2) * vp.height;
+      const near = [];
+      for (const part of explodeParts) {
+        if (seen.has(part) || !part.visible) continue;
+        const r = screenRect(part, camera, vp);
+        if (!r) continue;
+        const dx = Math.max(r.x0 - cx, 0, cx - r.x1);
+        const dy = Math.max(r.y0 - cy, 0, cy - r.y1);
+        const distPx = Math.hypot(dx, dy);
+        if (distPx > px) continue;
+        const centre = Math.hypot((r.x0 + r.x1) / 2 - cx, (r.y0 + r.y1) / 2 - cy);
+        near.push({ part, hit: false, depth: camera.position.distanceTo(part.getWorldPosition(_corner)), distPx, rankPx: distPx + CENTRE_WEIGHT * centre });
+      }
+      near.sort((a, b) => a.rankPx - b.rankPx);
+      return out.concat(near);
+    },
+
+    // "Spread to fit": the smallest explode amount (from the current one up, in `step`s, max 1)
+    // at which every part shows at least minPx x minPx of itself in front of the others, so a
+    // fingertip-sized cursor can land on each (44 px: the usual touch-target minimum). Visible
+    // area is sampled on an 11 px grid over each part's screen box (front ray hit = visible);
+    // a part too small to ever show that much needs half its own box instead. Leaves the
+    // explode at the amount found and returns it, or null on a stretch object.
+    spreadToFit({ viewport = null, minPx = 44, step = 0.05 } = {}) {
+      if (!literalMode) return null;
+      const vp = viewport ?? { width: 900 * camera.aspect, height: 900 };
+      const GRID = 11;
+      const fits = () => {
+        object.updateMatrixWorld(true);
+        for (const part of explodeParts) {
+          if (!part.visible) continue;
+          const r = screenRect(part, camera, vp);
+          if (!r) continue;
+          let seen = 0;
+          let cells = 0;
+          for (let y = r.y0 + GRID / 2; y < r.y1; y += GRID) {
+            for (let x = r.x0 + GRID / 2; x < r.x1; x += GRID) {
+              cells++;
+              raycaster.setFromCamera({ x: (x / vp.width) * 2 - 1, y: 1 - (y / vp.height) * 2 }, camera);
+              if (raycaster.intersectObjects(explodeParts, false)[0]?.object === part) seen++;
+            }
+          }
+          const need = Math.min((minPx * minPx) / (GRID * GRID), cells / 2);
+          if (seen < need) return false;
+        }
+        return true;
+      };
+      let a = Math.max(explodeAmount, EXPLODE_PART_SELECT_THRESHOLD + step / 2);
+      for (;;) {
+        this.setExplode(a);
+        if (a >= 1 || fits()) return explodeAmount;
+        a = Math.min(1, a + step);
+      }
+    },
+
+    // Selects a part directly (or null = whole object). Same gate as a click.
+    selectPart(part) {
+      if (!literalMode || explodeAmount <= EXPLODE_PART_SELECT_THRESHOLD) return null;
+      activePart = part && explodeParts.includes(part) ? part : null;
+      return activePart;
+    },
+
+    // Sets the literal explode amount (0..1) directly ("spread to fit"). Parts go to
+    // home + dir x amount, as the explode gesture puts them. Returns the amount applied, or
+    // null on a stretch object.
+    setExplode(amount) {
+      if (!literalMode || !Number.isFinite(amount)) return null;
+      explodeAmount = THREE.MathUtils.clamp(amount, 0, 1);
+      explodeLiteralV = explodeAmount;
+      for (const part of explodeParts) {
+        part.position.copy(part.userData.explodeHome).addScaledVector(part.userData.explodeDir, explodeAmount * MAX_EXPLODE_OFFSET);
+      }
+      return explodeAmount;
     },
 
     // Live tuning surface for the UI. Changing triggerFrames rebuilds the stabilizers,
@@ -863,8 +1019,18 @@ export function createManipulator(object, camera) {
       // isFistLike trusts MediaPipe's own classifier when it has a confident opinion
       // either way, and only falls back to geometric curl detection when it doesn't.
       // fistOf also honours hand.pointer: a pointer is never a fist (BUGS #32).
-      const fisted = hands.some((h) => fistOf(h, aspect));
-      const pointing = hands.some((h) => h.pointer?.gun === true);
+      for (const h of hands) {
+        const k = h.handedness ?? '?';
+        const r = h.pinch?.ratio;
+        const closed = h.pinch?.pinching === true || (Number.isFinite(r) && r < SAME_PINCH_CLOSE);
+        if (closed && (h.pointer?.gun === true || wasGunBy.get(k) || pinchLatch.has(k))) pinchLatch.add(k);
+        else pinchLatch.delete(k);
+        wasGunBy.set(k, h.pointer?.gun === true);
+      }
+      for (const k of [...pinchLatch]) if (!hands.some((h) => (h.handedness ?? '?') === k)) pinchLatch.delete(k);
+      const latched = (h) => pinchLatch.has(h.handedness ?? '?');
+      const fisted = hands.some((h) => fistOf(h, aspect) && !latched(h));
+      const pointing = hands.some((h) => h.pointer?.gun === true || latched(h));
       // Explode's trigger occupies a hand-shape space disjoint from both pinch (transform)
       // and fist (grab) on purpose — two open hands, neither pinching nor fisted. Nor
       // pointing: once a pointer stopped reading as a fist, "pointer + relaxed other hand"
@@ -888,7 +1054,13 @@ export function createManipulator(object, camera) {
       if (wasPointing && !pointing && mode === MODE.IDLE) pointerGapSince = timestampMs;
       wasPointing = pointing;
       if (pointerGapSince !== null && timestampMs - pointerGapSince >= POINTER_GAP_MS) pointerGapSince = null;
-      const allowed = (m) => (!gap || gap.endedMode === m) && pointerGapSince === null;
+      // TRANSFORM is exempt from the neutral gap (owner live bug 2026-10-01, BUGS #45): the gap
+      // exists to stop the open hands a gesture LEAVES BEHIND from exploding (#26), and a
+      // two-hand pinch is never left behind by anything. But "neutral" means no gesture pose,
+      // and with everything armed the open hands raised before pinching are explode's pose:
+      // explode engaged, ended when the hands pinched, and its gap then needed a neutral moment
+      // that a held pinch can never give, so scale never started until the hands dropped.
+      const allowed = (m) => (!gap || gap.endedMode === m || m === MODE.TRANSFORM) && pointerGapSince === null;
 
       // Clap is a command, so it only fires from rest (BUGS #27): IDLE, or an explode that
       // has engaged but not pulled apart (the clap's own ready stance), and never inside a

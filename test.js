@@ -1178,6 +1178,47 @@ async function main() {
     };
   };
 
+  group('Two-hand scale starts with everything armed (BUGS #45)', () => {
+    // Owner live bug 2026-10-01 ("Everything on" drill): raising two open hands is explode's
+    // pose, so explode engaged; pinching then ended it, and its neutral gap waited for a
+    // neutral moment a held pinch never gives -- scale never started (0 of 76 pinching frames).
+    const FR = 1000 / 30;
+    const drive = (m, n, specs, t, seen) => {
+      for (let i = 0; i < n; i++) {
+        const mode = m.update(specs(i).map(([x, y, kind]) => hand(x, y, 0, kind)), 1.78, t);
+        seen?.add(mode);
+        t += FR;
+      }
+      return t;
+    };
+    const fresh = () => {
+      object.position.set(0, 0, 0);
+      object.quaternion.identity();
+      object.scale.set(1, 1, 1);
+      const m = createManipulator(object, camera);
+      m.reset();
+      m.configure({ channels: ALL_CHANNELS, sensitivity: 1, momentum: false, triggerFrames: 3 });
+      return m;
+    };
+    // Open hands up (explode engages), then both pinch and pull apart.
+    let m = fresh();
+    let t = 1000;
+    let seen = new Set();
+    t = drive(m, 12, () => [[0.4, 0.5, 'open'], [0.6, 0.5, 'open']], t, seen);
+    checkTrue('open hands raised first engage explode (the trigger)', seen.has(MODE.EXPLODE), [...seen].join(','));
+    seen = new Set();
+    t = drive(m, 15, () => [[0.4, 0.5, 'pinch'], [0.6, 0.5, 'pinch']], t, seen);
+    checkTrue('#45: pinching after open hands reaches transform within 0.5 s', seen.has(MODE.TRANSFORM), [...seen].join(','));
+    const s0 = object.scale.x;
+    t = drive(m, 20, (i) => [[0.4 - 0.01 * i, 0.5, 'pinch'], [0.6 + 0.01 * i, 0.5, 'pinch']], t);
+    checkTrue('#45: ... and pulling apart grows the model', object.scale.x > s0 + 0.1, `scale ${fmt(s0)} -> ${fmt(object.scale.x)}`);
+
+    // #26 still holds: releasing the pinch into open hands does not chain into explode.
+    seen = new Set();
+    t = drive(m, 30, () => [[0.4, 0.5, 'open'], [0.6, 0.5, 'open']], t, seen);
+    checkTrue('#26 kept: releasing the pinch into open hands does not explode', !seen.has(MODE.EXPLODE), [...seen].join(','));
+  });
+
   group('Pointer is never a grab (live probe 2026-10-01)', () => {
     // Owner's webcam, 2026-10-01: a pointer (index out, middle/ring/pinky curled) labelled
     // None was read as a grabbing fist on 100% of frames (isFistShape counts 3 curled fingers
@@ -1488,7 +1529,7 @@ async function main() {
   // ---- finger-gun pointer, slice 1 (pointer.js, reticle.js; 2026-10-01) ------------------
   const ptr = await import(`./pointer.js${V}`);
   const ret = await import(`./reticle.js${V}`);
-  group('Finger-gun pointer — engage, aim, clutch, click (pointer.js, reticle.js)', () => {
+  group('Finger-gun pointer — engage, aim, hold, click (pointer.js, reticle.js)', () => {
     // Replays owner-shaped synthetic hands through the live page's per-frame order:
     // smoothLandmarks -> annotateHand -> createEngagement -> manipulator.update -> pointer.update.
     const FR = 1000 / 50;
@@ -1562,46 +1603,51 @@ async function main() {
       for (let i = 0; i < 100; i++) rows.push(step(rig, [gun(0.5)]));
       const aim = rows.filter((r) => r.state.mode === 'aim').length;
       const drift = Math.hypot(rows[99].state.x - rows[5].state.x, rows[99].state.y - rows[5].state.y);
+      let maxStep = 0;
+      for (let i = 11; i < 100; i++) maxStep = Math.max(maxStep, Math.hypot(rows[i].state.x - rows[i - 1].state.x, rows[i].state.y - rows[i - 1].state.y));
       checkTrue('still pointer (2 s, realistic jitter): aiming on >= 95% of frames', aim >= 95, `${aim}%`);
-      checkTrue('still pointer: cursor drift < 0.01 NDC over 2 s (PRISM tremor floor)', drift < 0.01, drift.toFixed(5));
+      checkTrue('still pointer: cursor drift < 0.01 NDC over 2 s (absolute + One Euro)', drift < 0.01, drift.toFixed(5));
+      checkTrue('still pointer: largest frame-to-frame step < 0.004 NDC (< 2 px on 900 px)', maxStep < 0.004, maxStep.toFixed(5));
       checkTrue('a pointer never grabs or transforms while aiming', rows.every((r) => r.mode === MODE.IDLE), 'all idle');
     }
 
-    // 4. PRISM gain: the same 0.1-frame palm move, slow vs fast, mirrored like the ghost hands.
+    // 4. Absolute: the same 0.1-frame palm move gives the same cursor move, slow or fast,
+    //    = 0.1 x 2 / reach-box width, mirrored like the ghost hands.
     {
       const move = (frames) => {
         const rig = fresh();
         for (let i = 0; i < 10; i++) step(rig, [gun(0.5, 0.55, { jitter: 0 })]);
         const x0 = rig.p.state.x;
         for (let i = 1; i <= frames; i++) step(rig, [gun(0.5 + (0.1 * i) / frames, 0.55, { jitter: 0 })]);
-        for (let i = 0; i < 10; i++) step(rig, [gun(0.6, 0.55, { jitter: 0 })]);
+        for (let i = 0; i < 40; i++) step(rig, [gun(0.6, 0.55, { jitter: 0 })]);
         return rig.p.state.x - x0;
       };
-      const slow = move(200); // 4 s: 0.044 frame heights/s
-      const fast = move(5);   // 0.1 s: 1.8 frame heights/s
-      check('slow move: cursor moves 0.1 x 2 x 0.3 (precision gain), mirrored', slow, -0.06, 0.25);
-      check('fast move: cursor moves 0.1 x 2 x 2.5 (reach gain), mirrored', fast, -0.5, 0.25);
+      const want = (-0.1 * 2) / (ptr.DEFAULT_REACH.x1 - ptr.DEFAULT_REACH.x0);
+      const slow = move(200);
+      const fast = move(5);
+      check('slow move: cursor moves 0.1 x 2 / reach width, mirrored', slow, want, 0.01);
+      check('fast move: the same distance (no speed gain, nothing to drift)', fast, want, 0.01);
     }
 
-    // 5. Clutch: leave the pose, move back, re-enter -- the cursor stays put; then it hides.
+    // 5. Pose lost: the cursor holds still; re-entering goes straight to where the hand is; hides.
     {
       const rig = fresh();
-      for (let i = 0; i < 10; i++) step(rig, [gun(0.4, 0.55, { jitter: 0 })]);
-      for (let i = 1; i <= 5; i++) step(rig, [gun(0.4 + 0.02 * i, 0.55, { jitter: 0 })]);
-      for (let i = 0; i < 10; i++) step(rig, [gun(0.5, 0.55, { jitter: 0 })]);
+      for (let i = 0; i < 30; i++) step(rig, [gun(0.5, 0.55, { jitter: 0 })]);
       const held = rig.p.state.x;
       const blip = step(rig, [frame('open', 'palm', 'None', { cx: 0.5, jitter: 0 })]);
-      checkTrue('one-frame pose dropout is not a clutch (cursor held, still aiming)', blip.state.mode === 'aim' && blip.state.x === held, blip.state.mode);
-      let clutched = true;
+      checkTrue('one-frame pose dropout: cursor held, still aiming', blip.state.mode === 'aim' && blip.state.x === held, blip.state.mode);
+      let holding = true;
       for (let i = 1; i <= 25; i++) {
         const r = step(rig, [frame('open', 'palm', 'None', { cx: 0.5 - 0.004 * i, jitter: 0 })]);
-        if (i > 6 && r.state.mode !== 'clutch') clutched = false;
+        if (i > 6 && r.state.mode !== 'clutch') holding = false;
       }
-      checkTrue('leaving the pose clutches (cursor frozen while the open hand moves back)', clutched && rig.p.state.x === held, `x ${rig.p.state.x} vs ${held}`);
-      for (let i = 0; i < 10; i++) step(rig, [gun(0.4, 0.55, { jitter: 0 })]);
-      check('re-entering the pose elsewhere: no cursor jump', rig.p.state.x, held, 0.01);
+      checkTrue('pose lost: cursor held still while the open hand moves', holding && rig.p.state.x === held, `x ${rig.p.state.x} vs ${held}`);
+      let r;
+      for (let i = 0; i < 10; i++) r = step(rig, [gun(0.4, 0.55, { jitter: 0 })]);
+      const at = ptr.mapReach(ptr.palmCentroid(r.hands[0].landmarks));
+      check('re-entering the pose elsewhere: cursor is where the hand is (absolute)', rig.p.state.x, at.x, 0.005);
       for (let i = 0; i < 90; i++) step(rig, []);
-      checkTrue('a clutched cursor hides after 1.5 s without the pose', rig.p.state.mode === 'off', rig.p.state.mode);
+      checkTrue('a held cursor hides after 1.5 s without the pose', rig.p.state.mode === 'off', rig.p.state.mode);
     }
 
     // 6. Click = the other hand's pinch: one click per pinch, held pinches don't repeat.
@@ -1657,7 +1703,8 @@ async function main() {
       const mc = rig.p.mouseClick(0.31, -0.2, t.now);
       const r = step(rig, [gun(0.5, 0.55, { jitter: 0 })]);
       checkTrue('mouse drives the cursor and clicks (source mouse)', ms.mode === 'aim' && ms.source === 'mouse' && mc.source === 'mouse' && mc.x === 0.31, JSON.stringify({ mode: ms.mode, src: mc.source }));
-      checkTrue('the pointer pose takes over from the mouse with no jump', r.state.source === 'hand' && r.state.x === 0.31 && r.state.y === -0.2, `${r.state.source} ${r.state.x},${r.state.y}`);
+      const want = ptr.mapReach(ptr.palmCentroid(r.hands[0].landmarks));
+      checkTrue('the pointer pose takes over from the mouse at the hand\'s absolute position', r.state.source === 'hand' && Math.abs(r.state.x - want.x) < 1e-9 && Math.abs(r.state.y - want.y) < 1e-9, `${r.state.source} ${r.state.x.toFixed(3)},${r.state.y.toFixed(3)}`);
       rig.p.mouseLeave();
       checkTrue('mouse leaving the canvas does not hide a hand cursor', rig.p.state.mode === 'aim', rig.p.state.mode);
     }
@@ -1712,6 +1759,675 @@ async function main() {
         sc.children[sc.children.length - 1].children[1].material.opacity <= 0.25, sc.children[sc.children.length - 1].children[1].material.opacity.toFixed(3));
       reticle.dispose();
       delete box.userData.inferred;
+    }
+  });
+
+  const ghostMod = await import(`./ghostHands.js${V}`);
+  group('Pointer — absolute cursor, smoothing, beam line-up (owner decision 1, 2026-10-01)', () => {
+    const R = ptr.DEFAULT_REACH;
+    // mapReach: the reach box's corners are the canvas corners, mirrored; outside is clamped.
+    const tl = ptr.mapReach({ x: R.x0, y: R.y0 });
+    const br = ptr.mapReach({ x: R.x1, y: R.y1 });
+    const mid = ptr.mapReach({ x: (R.x0 + R.x1) / 2, y: (R.y0 + R.y1) / 2 });
+    const out = ptr.mapReach({ x: -0.5, y: 2 });
+    checkTrue('reach box -> canvas: image top-left = screen top-right (mirrored), bottom-right = bottom-left, centre = 0',
+      tl.x === 1 && tl.y === 1 && br.x === -1 && br.y === -1 && Math.abs(mid.x) < 1e-9 && Math.abs(mid.y) < 1e-9,
+      `${tl.x},${tl.y} ${br.x},${br.y} ${mid.x.toFixed(3)},${mid.y.toFixed(3)}`);
+    checkTrue('outside the reach box: clamped to the canvas edge', out.x === 1 && out.y === -1, `${out.x},${out.y}`);
+
+    // One Euro on the cursor: still-hand jitter cut, a deliberate step followed quickly,
+    // and the same result at 30 and 60 fps.
+    const run = (fps, ms, src) => {
+      const f = ptr.createOneEuro2D();
+      const outv = [];
+      for (let t = 0; t <= ms; t += 1000 / fps) outv.push({ t, ...f.filter(...src(t), t) });
+      return outv;
+    };
+    seed = 7;
+    const noisy = run(30, 3000, () => [(rnd() - 0.5) * 0.02, (rnd() - 0.5) * 0.02]);
+    const sd = (a) => Math.sqrt(a.reduce((q, v) => q + v * v, 0) / a.length);
+    const outSd = sd(noisy.slice(15).map((p) => p.x));
+    checkTrue('still hand, ±0.01 NDC jitter (sd 0.0058): filtered sd < 0.0025', outSd < 0.0025, outSd.toFixed(5));
+    const stepAt = (fps) => {
+      const o = run(fps, 1000, (t) => (t < 200 ? [0, 0] : [0.5, 0]));
+      return o.find((p) => p.t >= 200 && p.x >= 0.45)?.t - 200;
+    };
+    const s30 = stepAt(30);
+    const s60 = stepAt(60);
+    checkTrue('a 0.5 NDC step reaches 90% within 150 ms (30 and 60 fps)', s30 <= 150 && s60 <= 150, `${s30?.toFixed(0)} ms @30, ${s60?.toFixed(0)} ms @60`);
+
+    // setProfile: a narrower calibrated box makes the same hand move go further; junk is ignored.
+    const p = ptr.createPointer();
+    p.setProfile({ reach: { x0: 0.4, x1: 0.6, y0: 0.4, y1: 0.6 } });
+    const narrow = p.profile.reach.x1 - p.profile.reach.x0;
+    p.setProfile({ reach: { x0: 0.5, x1: 0.5, y0: 0, y1: 1 }, smoothing: { minCutoff: NaN } });
+    checkTrue('setProfile applies a valid reach box and ignores a degenerate one / NaN smoothing',
+      Math.abs(narrow - 0.2) < 1e-9 && Math.abs(p.profile.reach.x1 - p.profile.reach.x0 - 0.2) < 1e-9 && Number.isFinite(p.profile.smoothing.minCutoff),
+      JSON.stringify(p.profile.reach));
+    p.setProfile({ smoothing: ptr.SMOOTHING.steady });
+    checkTrue('setProfile switches the smoothing preset', p.profile.smoothing.minCutoff === ptr.SMOOTHING.steady.minCutoff, String(p.profile.smoothing.minCutoff));
+
+    // Beam line-up: shift a side-on pointer by ghostOffset; its tip + BEAM_LEN along wrist->tip
+    // lands exactly on the cursor, in screen space, for cursors all over the canvas.
+    const g = frame('pointer', 'side', 'None', { jitter: 0 });
+    const va = 16 / 9;
+    let worst = 0;
+    for (const c of [{ x: 0, y: 0 }, { x: 0.9, y: -0.8 }, { x: -1, y: 1 }, { x: 0.3, y: 0.6 }]) {
+      const o = ptr.ghostOffset(g, c, va);
+      const w = g.landmarks[0];
+      const tp = g.landmarks[8];
+      const tipN = { x: 1 - 2 * (tp.x + o.dx), y: 1 - 2 * (tp.y + o.dy) };
+      let ux = -(tp.x - w.x) * va;
+      let uy = -(tp.y - w.y);
+      const n = Math.hypot(ux, uy); ux /= n; uy /= n;
+      const end = { x: tipN.x + (ux * ptr.BEAM_LEN) / va, y: tipN.y + uy * ptr.BEAM_LEN };
+      worst = Math.max(worst, Math.hypot(end.x - c.x, end.y - c.y));
+    }
+    checkTrue('ghostOffset: shifted index tip + beam along the finger ends on the cursor (4 cursors)', worst < 1e-9, worst.toExponential(2));
+
+    // ghostHands draws the aim hand shifted (weight eased in), the beam's start follows.
+    const sc = new THREE.Scene();
+    const obj = new THREE.Object3D();
+    sc.add(obj);
+    const cam = new THREE.PerspectiveCamera(50, va, 0.1, 100);
+    cam.position.set(0, 0, 3);
+    cam.lookAt(0, 0, 0);
+    cam.updateMatrixWorld(true);
+    const gh = ghostMod.createGhostHands(sc, []);
+    const cursor = { x: 0.6, y: -0.5 };
+    const o = ptr.ghostOffset(g, cursor, va);
+    const want = { x: 1 - 2 * (g.landmarks[8].x + o.dx), y: 1 - 2 * (g.landmarks[8].y + o.dy) };
+    let nowMs = 0;
+    const tipNdc = () => gh.landmarkOf(g, 8).project(cam);
+    gh.update([g], { camera: cam, object: obj, aspect: va, nowMs: (nowMs += 16), offsetOf: () => o });
+    const first = tipNdc();
+    const firstErr = Math.hypot(first.x - want.x, first.y - want.y);
+    for (let i = 0; i < 60; i++) gh.update([g], { camera: cam, object: obj, aspect: va, nowMs: (nowMs += 16), offsetOf: () => o });
+    const settled = tipNdc();
+    const err = Math.hypot(settled.x - want.x, settled.y - want.y);
+    checkTrue('ghost aim hand: shift eases in (not a teleport), then the drawn tip sits on the line-up point',
+      firstErr > 0.05 && err < 1e-3, `first frame ${firstErr.toFixed(3)} NDC off, after 1 s ${err.toExponential(1)}`);
+    gh.dispose();
+  });
+
+  group('Pointer — tracking reset and struggle hints (owner decision 3, 2026-10-01)', () => {
+    const FR = 1000 / 30;
+    const up = (x = 0.4) => { const h = hand(x, 0.6, 0, 'open'); h.engaged = true; return h; };
+    const down = (x = 0.4) => { const h = hand(x, 0.97, 0, 'open'); h.engaged = false; return h; };
+    // Reset gate.
+    {
+      const gate = ptr.createResetGate();
+      let t = 0;
+      const fires = [];
+      const feed = (n, mk) => { for (let i = 0; i < n; i++) { if (gate.update(mk(), t)) fires.push(t); t += FR; } };
+      feed(20, () => [down(0.3), down(0.7)]);
+      checkTrue('hands already lowered at start (never raised): no reset', fires.length === 0, `${fires.length}`);
+      feed(20, () => [up(0.3), up(0.7)]);
+      const t0 = t;
+      feed(60, () => [down(0.3), down(0.7)]);
+      checkTrue('raise, then lower both hands: exactly one reset, after 1.0-1.1 s', fires.length === 1 && fires[0] - t0 >= 1000 && fires[0] - t0 < 1100,
+        fires.map((f) => (f - t0).toFixed(0)).join());
+      feed(20, () => []);
+      feed(20, () => [down(0.3)]);
+      checkTrue('staying lowered: no second reset', fires.length === 1, `${fires.length}`);
+      const g2 = ptr.createResetGate();
+      let n = 0;
+      t = 0;
+      const feed2 = (k, mk) => { for (let i = 0; i < k; i++) { if (g2.update(mk(), t)) n++; t += FR; } };
+      feed2(5, () => [up()]);
+      feed2(20, () => [down()]);       // 0.66 s lowered
+      feed2(3, () => [up()]);          // raised again: hold restarts
+      feed2(20, () => [down()]);       // 0.66 s
+      checkTrue('a raise mid-hold restarts the 1 s count (no reset after two 0.66 s lowerings)', n === 0, `${n}`);
+      feed2(6, () => []);              // 200 ms hands-lost blip...
+      feed2(14, () => [down()]);       // ...doesn't break the hold: 0.66 + 0.2 + 0.46 s > 1 s
+      checkTrue('a short hands-lost blip (< 300 ms) does not break the hold', n === 1, `${n}`);
+    }
+    // Hint monitor.
+    {
+      const mon = ptr.createTrackingMonitor();
+      let t = 0;
+      const gun = (g) => { const h = up(); h.pointer = { gun: g }; return h; };
+      const aim = { mode: 'aim', source: 'hand', x: 0.2, y: 0.1 };
+      let seen = new Set();
+      for (let i = 0; i < 90; i++) { const h = mon.update([gun(true)], aim, t); if (h) seen.add(h.key); t += FR; }
+      checkTrue('steady pointing for 3 s: no hint at all', seen.size === 0, [...seen].join());
+      seen = new Set();
+      for (let i = 0; i < 40; i++) { const h = mon.update([gun(Math.floor(i / 4) % 2 === 0)], aim, t); if (h) seen.add(h.key); t += FR; }
+      checkTrue('pose flickering on/off every 130 ms: "flicker" hint', seen.has('flicker'), [...seen].join() || 'none');
+      let last = null;
+      for (let i = 0; i < 150; i++) { last = mon.update([gun(true)], aim, t); t += FR; }
+      checkTrue('after recovering, the hint clears within HINT_HOLD_MS (+ the 2 s flicker window)', last === null, JSON.stringify(last));
+      const edge = { ...aim, x: -1 };
+      const keys = [];
+      for (let i = 0; i < 45; i++) { keys.push(mon.update([gun(true)], edge, t)?.key ?? null); t += FR; }
+      const firstEdge = keys.indexOf('edge');
+      checkTrue('cursor pinned at the edge: "edge" hint after ~1 s, not before', firstEdge >= 29 && firstEdge <= 32, `frame ${firstEdge}`);
+      mon.reset();
+      for (let i = 0; i < 10; i++) { mon.update([gun(true)], aim, t); t += FR; }
+      const lostKeys = [];
+      for (let i = 0; i < 30; i++) { lostKeys.push(mon.update([], { mode: 'clutch', source: 'hand', x: 0, y: 0 }, t)?.key ?? null); t += FR; }
+      checkTrue('aiming hand vanishes: "lost" hint after ~0.5 s', lostKeys.indexOf('lost') >= 14 && lostKeys.indexOf('lost') <= 17, `frame ${lostKeys.indexOf('lost')}`);
+      mon.reset();
+      const restKeys = [];
+      for (let i = 0; i < 5; i++) { mon.update([gun(true)], aim, t); t += FR; }
+      for (let i = 0; i < 5; i++) { mon.update([down()], { mode: 'clutch', source: 'hand', x: 0, y: 0 }, t); t += FR; }
+      for (let i = 0; i < 40; i++) { restKeys.push(mon.update([], { mode: 'off', source: 'hand', x: 0, y: 0 }, t)?.key ?? null); t += FR; }
+      checkTrue('hands lowered then out of view (resting): no "lost" hint', restKeys.every((k) => k === null), restKeys.filter(Boolean).join());
+    }
+    // pointer.reset() recentres; engagement.setLine moves the engage line.
+    {
+      const p = ptr.createPointer();
+      p.mouseMove(0.7, -0.4, 0);
+      p.reset();
+      const st = p.state;
+      const eng = ptr.createEngagement();
+      eng.setLine(0.7);
+      const h = hand(0.5, 0.75, 0, 'open');
+      eng.update([h]);
+      checkTrue('reset recentres the cursor and turns it off; setLine(0.7) makes wrist y 0.75 "lowered"',
+        st.x === 0 && st.y === 0 && st.mode === 'off' && h.engaged === false && eng.line.exitY > 0.7, `${st.x},${st.y},${st.mode},${h.engaged}`);
+    }
+  });
+
+  const cal = await import(`./calibrate.js${V}`);
+  group('Pointer calibration — helpers and a full synthetic run (calibrate.js, owner decision 2)', () => {
+    const memStore = () => ({ data: {}, getItem(k) { return this.data[k] ?? null; }, setItem(k, v) { this.data[k] = String(v); } });
+    // Storage: round-trip, corrupt JSON, blocked storage.
+    {
+      const st = memStore();
+      const okSave = cal.saveProfile({ v: 1, reach: { x0: 0.3, x1: 0.7, y0: 0.2, y1: 0.6 } }, st);
+      const back = cal.loadProfile(st);
+      st.data[cal.PROFILE_KEY] = '{not json';
+      const bad = cal.loadProfile(st);
+      const throwing = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('quota'); } };
+      checkTrue('profile save/load round-trips; corrupt JSON and blocked storage give null/false without throwing',
+        okSave && back?.reach?.x1 === 0.7 && bad === null && cal.loadProfile(throwing) === null && cal.saveProfile({ v: 1 }, throwing) === false,
+        `${okSave} ${back?.reach?.x1} ${bad}`);
+    }
+    // Reach box from palms: percentiles, too-few and too-small guards.
+    {
+      const palms = [];
+      for (let i = 0; i < 200; i++) palms.push({ x: 0.3 + 0.4 * (i / 199), y: 0.25 + 0.4 * ((i * 7) % 200) / 199 });
+      const r = cal.reachFromPalms(palms, palms.map((p) => p.y + 0.12));
+      checkTrue('reach box = 5th-95th percentile of the traced palm (x 0.32-0.68), engage line just below the lowest wrist',
+        Math.abs(r.reach.x0 - 0.32) < 0.005 && Math.abs(r.reach.x1 - 0.68) < 0.005 && r.engageY > 0.75 && r.engageY <= 0.92,
+        JSON.stringify(r.reach) + ' engageY ' + r.engageY);
+      const few = cal.reachFromPalms(palms.slice(0, 20));
+      const tiny = cal.reachFromPalms(palms.map((p) => ({ x: 0.5 + (p.x - 0.5) * 0.1, y: p.y })));
+      checkTrue('too few samples or a tiny trace: reach not changed, with a warning', few.reach === null && tiny.reach === null && few.warnings.length && tiny.warnings.length, few.warnings[0]);
+    }
+    // ISO ring and the throughput formula.
+    {
+      const tg = cal.makeTargets(1600, 900);
+      const R = 0.32 * 900;
+      let dmin = Infinity;
+      for (let i = 1; i < tg.length; i++) dmin = Math.min(dmin, Math.hypot(tg[i].x - tg[i - 1].x, tg[i].y - tg[i - 1].y));
+      checkTrue('8 targets on a ring, each move at least 0.75 of a diameter, two sizes alternating',
+        tg.length === 8 && dmin > 1.5 * R && tg[0].r !== tg[1].r && tg[0].r === tg[2].r, `min move ${dmin.toFixed(0)} px, R ${R.toFixed(0)}`);
+      // Hand-computed case: 4 moves of 400 px, along-axis errors +-5 px (sd 5.77, We 23.9),
+      // 1 s each: TP = log2(400 / 23.86 + 1) = 4.15 bits/s.
+      const trials = [5, -5, 5, -5].map((e, i) => ({ target: { x: 400, y: 0, r: 20 }, from: { x: 0, y: 0 }, click: { x: 400 + e, y: 0 }, ms: 1000, entries: i === 0 ? 2 : 1 }));
+      const sc = cal.scoreTrials(trials);
+      check('effective throughput (ISO 9241-9) on a hand-computed case', sc.throughput, 4.15, 0.02);
+      checkTrue('score: 4/4 hits, median error 5 px, one overshoot', sc.hits === 4 && sc.errMedianPx === 5 && sc.overshoots === 1, JSON.stringify(sc));
+    }
+    // A whole calibration, driven with synthetic hands and direct clicks.
+    {
+      const p = ptr.createPointer();
+      const eng = ptr.createEngagement();
+      const st = memStore();
+      let done = null;
+      const view = { left: 0, top: 0, width: 1600, height: 900 };
+      const c = cal.createCalibration({ pointer: p, engagement: eng, rect: () => view, storage: st, onDone: (x) => (done = x) });
+      let t = 1000;
+      const FR = 1000 / 30;
+      c.start(t);
+      const steps = [c.step];
+      for (let i = 0; i < 100; i++) { const h = frame('open', 'palm', 'None', { cx: 0.5, cy: 0.5 }); c.onFrame([h], (t += FR)); }
+      steps.push(c.step);
+      // Trace a rectangle x 0.30-0.70, y 0.30-0.62 (palm centre offsets from cx/cy are small).
+      const path = (u) => {
+        const per = [0.4, 0.32, 0.4, 0.32];
+        let d = (u % 1) * 1.44;
+        const pts = [[0.3, 0.3], [0.7, 0.3], [0.7, 0.62], [0.3, 0.62]];
+        for (let k = 0; k < 4; k++) {
+          if (d <= per[k]) { const a = pts[k]; const b = pts[(k + 1) % 4]; const f = d / per[k]; return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]; }
+          d -= per[k];
+        }
+        return pts[0];
+      };
+      const palm0 = ptr.palmCentroid(frame('pointer', 'side', 'None', { cx: 0.5, cy: 0.5, jitter: 0 }).landmarks);
+      for (let i = 0; i < 190; i++) {
+        const [cx, cy] = path(i / 95);
+        const h = frame('pointer', 'side', 'None', { cx: cx - (palm0.x - 0.5), cy: cy - (palm0.y - 0.5) });
+        h.pointer = { gun: true };
+        c.onFrame([h], (t += FR));
+      }
+      steps.push(c.step);
+      const reach = p.profile.reach;
+      checkTrue('steps run hand -> reach -> targets; reach box applied to the pointer (traced 0.30-0.70 x 0.30-0.62)',
+        steps.join() === 'hand,reach,targets' && Math.abs(reach.x0 - 0.3) < 0.04 && Math.abs(reach.x1 - 0.7) < 0.04 && Math.abs(reach.y0 - 0.3) < 0.04 && Math.abs(reach.y1 - 0.62) < 0.04,
+        steps.join() + ' ' + JSON.stringify(reach));
+      // Targets: round 1 lands tight (±3 px), round 2 sloppy (±18 px) -> round 1's preset wins.
+      const tg = cal.makeTargets(view.width, view.height);
+      const smoothSeen = [];
+      for (let round = 0; round < 2; round++) {
+        for (let k = 0; k < 8; k++) {
+          for (let i = 0; i < 24; i++) { c.onFrame([], (t += FR)); c.tick(t); }
+          if (k === 0) smoothSeen.push(p.profile.smoothing.minCutoff);
+          const e = (round === 0 ? 3 : 18) * (k % 2 ? 1 : -1);
+          const px = { x: tg[k].x + e, y: tg[k].y };
+          c.onClick({ type: 'click', source: 'hand', t, x: (px.x / view.width) * 2 - 1, y: 1 - (px.y / view.height) * 2 });
+        }
+      }
+      const saved = cal.loadProfile(st);
+      checkTrue('two rounds use the two smoothing presets', smoothSeen[0] === ptr.SMOOTHING.responsive.minCutoff && smoothSeen[1] === ptr.SMOOTHING.steady.minCutoff, smoothSeen.join());
+      checkTrue('finished: profile saved (v1), better round kept (responsive), 16 clicks scored, cursor uses it',
+        done && saved && saved.v === 1 && !saved.skipped && saved.smoothing.name === 'responsive' && saved.score.n === 8 &&
+        saved.score.perSetting.steady.n === 8 && saved.score.errMedianPx === 3 && !c.active && p.profile.smoothing.minCutoff === ptr.SMOOTHING.responsive.minCutoff,
+        saved ? cal.scoreLine(saved) : 'not saved');
+      checkTrue('profile records palm length, fps (~30) and tracking rate', saved?.palmPx > 10 && Math.abs(saved.fps - 30) <= 1 && saved.trackRate === 1, `palm ${saved?.palmPx} px, ${saved?.fps} fps, rate ${saved?.trackRate}`);
+      // End to end: the palm at the traced box's top-left corner puts the cursor top-right (mirrored).
+      const corner = ptr.mapReach({ x: reach.x0, y: reach.y0 }, p.profile.reach);
+      checkTrue('after calibration the reach-box corner maps to the canvas corner', corner.x === 1 && corner.y === 1, `${corner.x},${corner.y}`);
+      c.dispose();
+    }
+    // Skip: saves a skipped profile, keeps the default reach.
+    {
+      const p = ptr.createPointer();
+      const st = memStore();
+      let cancelled = null;
+      const c = cal.createCalibration({ pointer: p, engagement: ptr.createEngagement(), rect: () => ({ left: 0, top: 0, width: 800, height: 600 }), storage: st, onCancel: (x) => (cancelled = x) });
+      c.start(0);
+      c.cancel();
+      const saved = cal.loadProfile(st);
+      checkTrue('skip (Esc): skipped profile saved, default reach kept, calibration closed', cancelled && saved?.skipped === true && saved.reach.x0 === ptr.DEFAULT_REACH.x0 && !c.active, cal.scoreLine(saved));
+      c.dispose();
+    }
+  });
+
+  // ---- One-hand selection (owner decisions 2026-10-01 (3)): bubble targeting, hold-to-select,
+  // same-hand pinch. Synthetic parts and hands; the thresholds still need a live session.
+  const holdMod = await import(`./holdGate.js${V}`);
+  // Four exploded parts: A in front, C straight behind it (hidden from the camera), B, D.
+  const selRig = () => {
+    const g = new THREE.Group();
+    const mk = (name, x, y, z) => {
+      const p = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12));
+      p.name = name;
+      p.position.set(x, y, z);
+      g.add(p);
+      return p;
+    };
+    // A and C sit on the camera's line of sight, and explode pushes them along it (the
+    // centroid is at x 0), so C stays hidden behind A; B and D are left and right.
+    const A = mk('A', 0, 0.2, 0.4);
+    const B = mk('B', -0.6, 0.2, 0);
+    const C = mk('C', 0, 0.2, -0.4);
+    mk('D', 0.6, 0.2, 0);
+    const m = createManipulator(g, camera);
+    m.setExplode(0.6);
+    g.updateMatrixWorld(true);
+    camera.updateMatrixWorld(true);
+    const ndcOf = (p) => { const v = p.getWorldPosition(new THREE.Vector3()).project(camera); return { x: v.x, y: v.y }; };
+    return { g, m, A, B, C, ndcOf };
+  };
+  const VP = { width: 1600, height: 900 };
+  const pxToNdc = (x, y) => ({ x: (x / VP.width) * 2 - 1, y: 1 - (y / VP.height) * 2 });
+  const ndcToPx = (n) => ({ x: ((n.x + 1) / 2) * VP.width, y: ((1 - n.y) / 2) * VP.height });
+
+  group('One-hand selection — bubble targeting (manipulator.partsNear, pointer.createSelector)', () => {
+    const { m, A, B, C, ndcOf } = selRig();
+    checkTrue('exploded past half-way: parts are selectable', m.partsSelectable && Math.abs(m.explodeAmount - 0.6) < 1e-9, `explode ${m.explodeAmount}`);
+    const onA = m.partsNear(ndcOf(A), 80, { viewport: VP });
+    checkTrue('cursor on A: A is a ray hit, ranked first', onA[0]?.part === A && onA[0].hit && onA[0].rankPx === 0, onA.map((c) => `${c.part.name}${c.hit ? '*' : ''}`).join(' '));
+    checkTrue('cursor on A: C (hidden behind A) is the next hit, depth-sorted', onA[1]?.part === C && onA[1].hit && onA[1].depth > onA[0].depth, onA.map((c) => `${c.part.name}@${c.depth.toFixed(2)}`).join(' '));
+    // 40 px left of B's screen box: a miss that the bubble still catches.
+    const pB = ndcToPx(ndcOf(B));
+    let edge = pB.x;
+    while (m.partsNear(pxToNdc(edge - 1, pB.y), 0, { viewport: VP }).some((c) => c.part === B)) edge--;
+    const near = m.partsNear(pxToNdc(edge - 40, pB.y), 80, { viewport: VP });
+    checkTrue('40 px off B\'s box: B is the bubble target (no ray hit)', near[0]?.part === B && !near[0].hit, near.map((c) => `${c.part.name} ${c.distPx.toFixed(1)}px`).join(', '));
+    check('...its box distance is 40 px', near[0]?.distPx ?? -1, 40, 0.05);
+    const far = m.partsNear(pxToNdc(edge - 120, pB.y), 80, { viewport: VP });
+    checkTrue('120 px off every box: no candidates', far.length === 0, `${far.length} candidates`);
+    m.setExplode(0.3);
+    checkTrue('below half-way explode: partsNear is empty (nothing is selectable)', m.partsNear(ndcOf(A), 80, { viewport: VP }).length === 0 && !m.partsSelectable);
+    m.setExplode(0.6);
+    const viaPart = m.selectPartAtScreenPoint(0.99, 0.99, { part: B });
+    checkTrue('selectPartAtScreenPoint(x, y, { part }) selects the targeted part where a raycast misses', viaPart === B && m.activePart === B);
+    checkTrue('...and a plain miss still deselects, as before', m.selectPartAtScreenPoint(0.99, 0.99) === null && m.activePart === null);
+
+    // Hysteresis on synthetic candidates: the current target is kept until another is 15% closer.
+    const sel = ptr.createSelector();
+    const c = (id, rankPx, hit = false) => ({ id, hit, distPx: rankPx, rankPx });
+    const at = { x: 100, y: 100 };
+    let t = 0;
+    const tgt = (cands) => sel.update({ candidates: cands, cursorPx: at, t: (t += 16), canHold: false }).target?.id ?? null;
+    const seq = [
+      tgt([c('A', 30), c('B', 40)]),
+      tgt([c('B', 27), c('A', 30)]),   // B 10% closer: keep A
+      tgt([c('B', 25), c('A', 30)]),   // B 17% closer: switch
+      tgt([c('A', 26), c('B', 25)]),   // A 4% closer than B... B is current, keep B
+      tgt([c('C', 0, true), c('B', 5)]), // a ray hit always wins
+      tgt([c('B', 90)])                 // outside 80 px: nothing
+    ];
+    checkTrue('bubble hysteresis: keep A at 10% closer, switch at 17%, hit wins, nothing past 80 px', seq.join() === 'A,A,B,B,C,', seq.join());
+    const hits = [{ part: A, hit: true }, { part: C, hit: true }];
+    checkTrue('nextInStack: after A comes C, after C wraps to A, unknown starts at the front',
+      ptr.nextInStack(hits, A).part === C && ptr.nextInStack(hits, C).part === A && ptr.nextInStack(hits, B).part === A);
+  });
+
+  group('One-hand selection — hold still to select (createSelector over holdGate)', () => {
+    const FR = 1000 / 60;
+    const tgtA = [{ id: 'A', hit: true, distPx: 0, rankPx: 0 }];
+    // Runs `ms` of frames; pos(t) gives the cursor; returns fire times and the progress trace.
+    const run = (sel, ms, pos, { cands = () => tgtA, canHold = true, t0 = 0 } = {}) => {
+      const fires = [];
+      const vis = [];
+      for (let t = t0; t <= t0 + ms; t += FR) {
+        const s = sel.update({ candidates: cands(t), cursorPx: pos(t), t, canHold });
+        vis.push(s.visibleProgress);
+        if (s.fired) fires.push(t - t0);
+      }
+      return { fires, vis };
+    };
+    const jitter = (amp) => () => ({ x: 400 + (rnd() - 0.5) * 2 * amp, y: 300 + (rnd() - 0.5) * 2 * amp });
+    {
+      const r = run(ptr.createSelector(), 3000, jitter(0));
+      checkTrue('steady on a target: fires once, ~650 ms', r.fires.length === 1 && Math.abs(r.fires[0] - 650) <= FR + 1, r.fires.map((f) => f.toFixed(0)).join(', '));
+      const firstVis = r.vis.findIndex((v) => v > 0) * FR;
+      checkTrue('ring invisible for the first 200 ms of the hold', firstVis >= 200 - FR && firstVis <= 200 + 2 * FR, `first drawn at ${firstVis.toFixed(0)} ms`);
+      let rises = true;
+      const upTo = Math.round(r.fires[0] / FR);
+      for (let i = 1; i < upTo; i++) if (r.vis[i] < r.vis[i - 1] - 1e-9) rises = false;
+      checkTrue('ring only grows while charging (calm: no flicker)', rises);
+    }
+    {
+      const r = run(ptr.createSelector(), 3000, jitter(3));
+      checkTrue('±3 px hand tremor: still fires once', r.fires.length === 1, r.fires.map((f) => f.toFixed(0)).join(', '));
+    }
+    {
+      // Sweeping 20 px per 200 ms (> 12 px steady radius): never charges.
+      const r = run(ptr.createSelector(), 2000, (t) => ({ x: 400 + 0.1 * t, y: 300 }));
+      checkTrue('cursor moving 20 px / 200 ms: never fires in 2 s', r.fires.length === 0, `${r.fires.length} fires`);
+      // 300 ms of motion in the middle pauses the ring; it resumes rather than restarting.
+      const r2 = run(ptr.createSelector(), 2000, (t) => ({ x: 400 + (t > 300 && t < 600 ? (t - 300) * 0.15 : t >= 600 ? 45 : 0), y: 300 }));
+      checkTrue('a 300 ms move mid-hold pauses the ring (fires at ~650 ms of stillness + the pause)',
+        r2.fires.length === 1 && r2.fires[0] > 850 && r2.fires[0] < 1250, r2.fires.map((f) => f.toFixed(0)).join(', '));
+    }
+    {
+      // After firing: resting there never re-fires; moving 30 px away and back re-arms it.
+      const sel = ptr.createSelector();
+      const r = run(sel, 2500, (t) => ({ x: 400 + (t > 1200 && t < 1400 ? 30 : 0), y: 300 }));
+      checkTrue('hold again: rest = 1 fire; move 30 px off and back = a second fire', r.fires.length === 2 && r.fires[1] > 1400 + 600,
+        r.fires.map((f) => f.toFixed(0)).join(', '));
+    }
+    {
+      const sel = ptr.createSelector();
+      sel.update({ candidates: tgtA, cursorPx: { x: 400, y: 300 }, t: 0 });
+      sel.block({ x: 400, y: 300 });
+      const r = run(sel, 1500, jitter(2), { t0: 16 });
+      checkTrue('after a pinch click on the target, resting on it does not also fire by hold', r.fires.length === 0, `${r.fires.length} fires`);
+    }
+    {
+      const r = run(ptr.createSelector(), 2000, jitter(0), { canHold: false });
+      checkTrue('mouse (canHold false): never fires', r.fires.length === 0);
+      // Target switch at 400 ms restarts the ring for the new target.
+      const r2 = run(ptr.createSelector(), 2000, jitter(0), { cands: (t) => [{ id: t < 400 ? 'A' : 'B', hit: true, distPx: 0, rankPx: 0 }] });
+      checkTrue('a new target restarts the ring (fires ~650 ms after the switch)', r2.fires.length === 1 && Math.abs(r2.fires[0] - 1050) <= 2 * FR, r2.fires.map((f) => f.toFixed(0)).join(', '));
+    }
+    {
+      // holdGate's new option keeps its default (ASL behaviour unchanged for other callers).
+      checkTrue('holdGate: releaseOnUnsteady defaults to true', holdMod.HOLD_GATE.releaseOnUnsteady === true);
+    }
+  });
+
+  group('One-hand selection — same-hand quick pinch (pointer.js)', () => {
+    const FR = 1000 / 50;
+    let now = 90000;
+    const rig = (o) => ({ eng: ptr.createEngagement(), p: ptr.createPointer(o) });
+    const step = (r, hands) => {
+      hands.forEach((h) => gestures.annotateHand(h, ASPECT));
+      r.eng.update(hands);
+      const click = r.p.update(hands, ASPECT, now);
+      const out = { t: now, click, st: r.p.state, gun: hands[0]?.pointer?.gun, ratio: hands[0]?.pinch?.ratio };
+      now += FR;
+      return out;
+    };
+    const gun = (cx, o = {}) => frame('pointer', 'side', 'None', { cx, cy: 0.55, jitter: 0, ...o });
+    // Aim, drift right, pinch (thumb onto the index tip) while the palm keeps drifting, open.
+    const script = (r, pinchPose = 'pointer') => {
+      const rows = [];
+      for (let i = 0; i < 30; i++) rows.push(step(r, [gun(0.5)]));
+      for (let i = 1; i <= 10; i++) rows.push(step(r, [gun(0.5 + 0.003 * i)]));
+      for (let i = 1; i <= 10; i++) rows.push(step(r, [frame(pinchPose, 'side', 'None', { cx: 0.53 + 0.003 * i, cy: 0.55, jitter: 0, thumbTo: 8 })]));
+      for (let i = 0; i < 20; i++) rows.push(step(r, [gun(0.56)]));
+      return rows;
+    };
+    {
+      const rows = script(rig());
+      const clicks = rows.filter((x) => x.click);
+      const c = clicks[0]?.click;
+      checkTrue('aiming hand pinches: exactly one click, via "pinch"', clicks.length === 1 && c.via === 'pinch' && c.source === 'hand',
+        `${clicks.length} clicks · via ${c?.via} · pinch ratio ${rows[40].ratio?.toFixed(2)} · gun while pinched ${rows[40].gun}`);
+      // Rewind: the click lands where the cursor was REWIND_MS before the onset.
+      const before = rows.filter((x) => x.t <= c.t - ptr.REWIND_MS).at(-1);
+      checkTrue('click lands at the cursor 120 ms before the pinch (rewind)', Math.abs(c.x - before.st.x) < 1e-9,
+        `click x ${c.x.toFixed(4)} vs ${before.st.x.toFixed(4)} at -120 ms; cursor at onset ${rows[39].st.x.toFixed(4)}`);
+      const pinched = rows.slice(41, 50);
+      checkTrue('cursor frozen while the pinch is held (palm drifts 0.027)', pinched.every((x) => x.st.x === c.x && x.st.frozen && x.st.mode === 'aim'),
+        pinched.map((x) => x.st.x.toFixed(3)).join(' '));
+      const last = rows.at(-1).st;
+      checkTrue('pinch opened: cursor follows the hand again', !last.frozen && Math.abs(last.x - c.x) > 0.05, `x ${last.x.toFixed(3)}`);
+    }
+    {
+      // Pose drops while pinching (index curls with the other three): the hand is still the
+      // aiming hand (matched by palm), so the pinch still clicks and the cursor stays.
+      const rows = script(rig(), 'fist');
+      const clicks = rows.filter((x) => x.click);
+      checkTrue('pose drops during the pinch: still one "pinch" click, cursor held (no clutch)',
+        clicks.length === 1 && clicks[0].click.via === 'pinch' && rows.slice(41, 50).every((x) => x.st.mode === 'aim'),
+        `${clicks.length} clicks · gun while pinched ${rows[42].gun} · modes ${[...new Set(rows.slice(41, 50).map((x) => x.st.mode))].join('/')}`);
+    }
+    {
+      const rows = script(rig({ sameHandPinch: false }));
+      checkTrue('sameHandPinch: false -> no same-hand click (old behaviour)', rows.every((x) => !x.click));
+    }
+    {
+      const r = rig();
+      let n = 0;
+      for (let i = 0; i < 150; i++) if (step(r, [frame('pointer', 'side', 'None', { cx: 0.5, cy: 0.55 })]).click) n++;
+      checkTrue('still pointer, realistic jitter, 3 s: no false clicks', n === 0, `${n} clicks`);
+    }
+    {
+      const r = rig();
+      const other = (p) => frame('open', 'palm', 'None', { cx: 0.25, cy: 0.55, jitter: 0, thumbTo: p ? 1 : null });
+      const rows = [];
+      for (let i = 0; i < 20; i++) rows.push(step(r, [gun(0.6), other(false)]));
+      for (let i = 0; i < 5; i++) rows.push(step(r, [gun(0.6), other(true)]));
+      const clicks = rows.filter((x) => x.click);
+      checkTrue('other hand\'s pinch still clicks, via "other-pinch"', clicks.length === 1 && clicks[0].click.via === 'other-pinch', clicks.map((x) => x.click.via).join());
+    }
+  });
+
+  group('Exploded parts — spread to fit, hover outline (manipulator, reticle.js)', () => {
+    // Two overlapping parts side by side: explode pulls them apart along x.
+    const g = new THREE.Group();
+    const P = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12));
+    const Q = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12));
+    P.position.set(-0.03, 0, 0.02);
+    Q.position.set(0.03, 0, -0.02);
+    g.add(P, Q);
+    const m = createManipulator(g, camera);
+    camera.updateMatrixWorld(true);
+    const a = m.spreadToFit({ viewport: VP });
+    const visiblePx = (part) => {
+      g.updateMatrixWorld(true);
+      const rc = new THREE.Raycaster();
+      let n = 0;
+      for (let y = 0; y < VP.height; y += 4) for (let x = 0; x < VP.width; x += 4) {
+        const nd = pxToNdc(x, y);
+        rc.setFromCamera(nd, camera);
+        if (rc.intersectObjects([P, Q], false)[0]?.object === part) n++;
+      }
+      return n * 16;
+    };
+    const vp = visiblePx(P);
+    const vq = visiblePx(Q);
+    checkTrue('spread to fit: each part shows >= 44 x 44 px of itself', a > 0.5 && a < 1 && vp >= 44 * 44 && vq >= 44 * 44,
+      `explode ${a?.toFixed(2)} · visible ${vp} / ${vq} px² (need 1936)`);
+    m.setExplode(a - 0.05);
+    const tight = Math.min(visiblePx(P), visiblePx(Q));
+    m.setExplode(a);
+    checkTrue('...and it is the smallest such amount (one step less is too tight, or the threshold)', a - 0.05 <= 0.5 + 1e-9 || tight < 44 * 44, `one step less: ${tight} px²`);
+    const one = new THREE.Group();
+    one.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1)));
+    checkTrue('spread to fit on a single-mesh (stretch) object: null', createManipulator(one, camera).spreadToFit({ viewport: VP }) === null);
+
+    const scene = new THREE.Scene();
+    const hl = ret.createPartHighlight(scene);
+    let t = 0;
+    const trace = [];
+    for (let i = 0; i < 40; i++) trace.push({ shown: hl.update({ part: P, nowMs: (t += 16) }), o: hl.opacity });
+    for (let i = 0; i < 80; i++) trace.push({ shown: hl.update({ part: Q, nowMs: (t += 16) }), o: hl.opacity });
+    let maxStep = 0;
+    for (let i = 1; i < trace.length; i++) maxStep = Math.max(maxStep, Math.abs(trace[i].o - trace[i - 1].o));
+    const swapAt = trace.findIndex((x) => x.shown === Q);
+    checkTrue('outline fades in on the hovered part', trace[39].shown === P && trace[39].o > 0.6, `opacity ${trace[39].o.toFixed(2)}`);
+    checkTrue('hover change: the old outline fades out before the new one appears', swapAt > 40 && trace[swapAt - 1].o < 0.02 && trace.at(-1).o > 0.6,
+      `swap after ${(swapAt - 40) * 16} ms · final ${trace.at(-1).o.toFixed(2)}`);
+    checkTrue('outline never jumps (largest per-frame opacity change < 0.1)', maxStep < 0.1, maxStep.toFixed(3));
+    Q.userData.inferred = true;
+    checkTrue('part label: name, or "part N"; inferred flag for the amber chip', ret.partLabel(P).name === 'part 1' && ret.partLabel(Q).inferred === true, JSON.stringify(ret.partLabel(Q)));
+    hl.dispose();
+  });
+
+  group('Selection practice — A/B rounds, cluster, scoring (calibrate.js)', () => {
+    const W = 800, H = 600;
+    const fakeState = { mode: 'aim', source: 'hand', x: 0, y: 0, frozen: false };
+    const fake = { get state() { return fakeState; } };
+    const aimPx = (x, y) => { fakeState.x = (x / W) * 2 - 1; fakeState.y = 1 - (y / H) * 2; };
+    const toNdc = (x, y) => ({ x: (x / W) * 2 - 1, y: 1 - (y / H) * 2 });
+    const hadHologram = 'hologram' in globalThis;
+    const saved = globalThis.hologram;
+    globalThis.hologram = {};
+    let done = null;
+    const pr = cal.createSelectionPractice({
+      pointer: fake, rect: () => ({ left: 0, top: 0, width: W, height: H }), parent: document.createElement('div'),
+      rounds: [{ commit: 'hold', targeting: 'point' }, { commit: 'hold', targeting: 'bubble' }, { commit: 'pinch', targeting: 'point' }],
+      onDone: (r) => (done = r)
+    });
+    let t = 0;
+    pr.start(t);
+    // Rounds 1-2: the cursor rests 25 px beside each lit target (outside its 18 px ring).
+    let guard = 0;
+    while (pr.active && pr.round.index < 2 && guard++ < 20000) {
+      const tg = pr.targets[pr.cue];
+      aimPx(tg.x + 25, tg.y);
+      pr.onFrame((t += 16));
+    }
+    const cueTargets = pr.targets;
+    // Pinch round: one wrong click, one other-hand click (ignored), then the right one each time.
+    let k = 0;
+    while (pr.active && k < 6) {
+      const tg = cueTargets[k];
+      const wrong = cueTargets[(k + 3) % 6];
+      pr.onClick({ x: toNdc(wrong.x, wrong.y).x, y: toNdc(wrong.x, wrong.y).y, t: (t += 300), via: k === 0 ? 'pinch' : 'other-pinch' });
+      pr.onClick({ x: toNdc(tg.x + 5, tg.y).x, y: toNdc(tg.x + 5, tg.y).y, t: (t += 300), via: 'pinch' });
+      k++;
+    }
+    const [pt, bub, pin] = done?.rounds ?? [];
+    checkTrue('hold + point, cursor 25 px beside each target: 6 misses (timeouts), 0 false selects', pt?.misses === 6 && pt.falseSelects === 0, JSON.stringify(pt));
+    checkTrue('hold + bubble, same cursor: 6/6 selected, ~650 ms, error 25 px', bub?.hits === 6 && Math.abs(bub.errMedianPx - 25) < 1 && bub.timeMedianMs >= 650 && bub.timeMedianMs < 700, JSON.stringify(bub));
+    checkTrue('pinch round: 6/6, the wrong-target click counted as 1 false select, other-hand clicks ignored (offMode 5)',
+      pin?.hits === 6 && pin.falseSelects === 1 && pin.offMode === 5 && pin.errMedianPx === 5, JSON.stringify(pin));
+    checkTrue('results exposed on window.hologram.selectionPractice (sessionrec)', globalThis.hologram.selectionPractice === done && done.rounds.length === 3);
+    if (hadHologram) globalThis.hologram = saved; else delete globalThis.hologram;
+    // Cluster: centres 30-60 px apart.
+    const cl = cal.makeClusterTargets(W, H, 6, rnd);
+    let minD = Infinity, maxNN = 0;
+    for (const a of cl) {
+      let nn = Infinity;
+      for (const b of cl) if (a !== b) { const d = Math.hypot(a.x - b.x, a.y - b.y); minD = Math.min(minD, d); nn = Math.min(nn, d); }
+      maxNN = Math.max(maxNN, nn);
+    }
+    checkTrue('cluster round: 6 targets, every pair >= 30 px, each within 60 px of a neighbour', cl.length === 6 && minD >= 30 && maxNN <= 60, `min ${minD.toFixed(1)} · max nearest ${maxNN.toFixed(1)}`);
+    checkTrue('default practice: 3 commits x (point, bubble) + 1 cluster round', cal.PRACTICE_ROUNDS.length === 7 && cal.PRACTICE_ROUNDS.filter((r) => r.cluster).length === 1);
+  });
+
+  const { createHandsRuntime } = await import(`./handsRuntime.js${V}`);
+  group('One-hand selection — hands runtime end to end (hold, hold again, pinch + bubble)', () => {
+    const { g, m, A, B, C, ndcOf } = selRig();
+    const scene = new THREE.Scene();
+    scene.add(g);
+    const cv = document.createElement('canvas');
+    Object.assign(cv.style, { position: 'fixed', left: '-4000px', top: '0', width: `${VP.width}px`, height: `${VP.height}px` });
+    document.body.appendChild(cv);
+    const rt = createHandsRuntime({
+      scene, camera, renderer: { domElement: cv }, overlay: document.createElement('canvas'),
+      video: document.createElement('video'), pickTargets: () => g, manipulator: () => m
+    });
+    try {
+      const clicks = [];
+      const targets = [];
+      // The host's part of the contract (hologram.js act()).
+      rt.on('click', (c) => { clicks.push(c); m.selectPartAtScreenPoint(c.x, c.y, { part: c.part }); });
+      rt.on('target', (x) => targets.push(x?.part?.name ?? null));
+      const FR = 1000 / 60;
+      let now = 300000;
+      const reach = rt.pointer.profile.reach;
+      const probe = frame('pointer', 'side', 'None', { cx: 0.5, cy: 0.55, jitter: 0 });
+      const c0 = ptr.palmCentroid(probe.landmarks);
+      const handAt = (ndc, o = {}) => frame('pointer', 'side', 'None', {
+        cx: reach.x0 + ((1 - ndc.x) * (reach.x1 - reach.x0)) / 2 - (c0.x - 0.5),
+        cy: reach.y0 + ((1 - ndc.y) * (reach.y1 - reach.y0)) / 2 - (c0.y - 0.55), jitter: 0, ...o
+      });
+      const run = (ms, hands) => {
+        // The camera path is off here, so the pointer's own clicks go in through injectClick
+        // (the same router the camera path uses).
+        for (let e = 0; e < ms; e += FR) {
+          const hs = hands();
+          hs.forEach((h) => gestures.annotateHand(h, ASPECT));
+          rt.engagement.update(hs);
+          const click = rt.pointer.update(hs, ASPECT, now);
+          if (click) rt.injectClick(click);
+          rt.update(now);
+          now += FR;
+        }
+      };
+      const nA = ndcOf(A);
+      run(1000, () => [handAt(nA)]);
+      checkTrue('hold still on A for 1 s: one "hold" click, A selected', clicks.length === 1 && clicks[0].via === 'hold' && m.activePart === A,
+        `${clicks.map((c) => `${c.via}:${c.part?.name}`).join(', ')} · cursor ${rt.pointer.state.x.toFixed(3)},${rt.pointer.state.y.toFixed(3)} vs A ${nA.x.toFixed(3)},${nA.y.toFixed(3)}`);
+      checkTrue('the hovered target was announced (target event: A)', targets.includes('A'), targets.join());
+      const off = pxToNdc(ndcToPx(nA).x + 40, ndcToPx(nA).y);
+      run(300, () => [handAt(off)]);
+      run(1000, () => [handAt(nA)]);
+      checkTrue('hold again on the same spot: the next part behind (C) is selected', clicks.length === 2 && clicks[1].part === C && m.activePart === C,
+        clicks.map((c) => `${c.via}:${c.part?.name}`).join(', '));
+      // Same-hand pinch beside B (a miss): the bubble target B is selected.
+      const pB = ndcToPx(ndcOf(B));
+      let edge = pB.x;
+      while (m.partsNear(pxToNdc(edge - 1, pB.y), 0, { viewport: VP }).some((c) => c.part === B)) edge--;
+      const nearB = pxToNdc(edge - 30, pB.y);
+      run(300, () => [handAt(nearB)]);
+      run(100, () => [handAt(nearB, { thumbTo: 8 })]);
+      const last = clicks.at(-1);
+      checkTrue('quick same-hand pinch 30 px beside B: "pinch" click selects B (bubble)', clicks.length === 3 && last.via === 'pinch' && last.part === B && m.activePart === B,
+        clicks.map((c) => `${c.via}:${c.part?.name ?? '-'}`).join(', '));
+      run(1200, () => [handAt(nearB)]);
+      checkTrue('resting after the pinch never also fires by hold', clicks.length === 3, `${clicks.length} clicks`);
+      const s = rt.stats.selects;
+      checkTrue('stats.selects counts each commit kind (for sessionrec)', s.hold === 2 && s.pinch === 1 && rt.stats.clicks === 3, JSON.stringify(s));
+      // Tab (keyboard): with the cursor on A, the stack under it is A then C.
+      run(300, () => [handAt(nA)]);
+      const tabs = [rt.cycleTarget(), rt.cycleTarget(), rt.cycleTarget()].map((p) => p?.name);
+      checkTrue('Tab cycles the parts under the cursor front to back: A, C, A', tabs.join() === 'A,C,A', tabs.join());
+    } finally {
+      rt.dispose();
+      cv.remove();
     }
   });
 
