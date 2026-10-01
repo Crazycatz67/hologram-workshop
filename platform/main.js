@@ -5,7 +5,7 @@ const V = new URL(import.meta.url).search;
 const THREE = await import('three');
 const { createScene, startRenderLoop } = await import('../scene.js' + V);
 const { createLook } = await import('./look.js' + V);
-const { createDisplayLod } = await import('./lod.js' + V);
+const { createDisplayLod, PREPASS_LAYER } = await import('./lod.js' + V);
 const { groupFiles, parseGroup, countTriangles, sha256Hex, filesFromDrop, ACCEPT, separateInferred, readSidecar } = await import('./upload.js' + V);
 const { createLibrary } = await import('./library.js' + V);
 const exporter = await import('./export.js' + V);
@@ -47,6 +47,11 @@ const hoverPlain = new THREE.MeshStandardMaterial({ color: 0x8fd3ff, emissive: 0
 const selectedPlain = new THREE.MeshStandardMaterial({ color: 0x8fd3ff, emissive: 0xb07020, roughness: 0.6 });
 
 const edits = [];
+// Polygon mode (wired below). Up here because the render loop and objectMode's onChange read it.
+const polyBtn = $('polyBtn');
+let polygon = null;
+let polyHome = null;   // the item polygon mode was entered from, reselected on the way out
+let polyWasActive = false;
 let library = null; // created below; object-mode callbacks may run before it exists
 let measurements = null;
 // items: id -> library item. Shape (also what export.js reads):
@@ -79,7 +84,9 @@ startRenderLoop({
   onTick: (now) => {
     look.update();
     objectMode.tick();
+    polygon?.tick();
     measurements?.tick();
+    window.hologram.hands?.update(now);   // hands on the Platform (hands.js): runs in THIS loop, no second rAF
     lib.ring?.update(Math.min(100, now - (lib.lastTick ?? now)));
     lib.lastTick = now;
   }
@@ -111,6 +118,7 @@ function applyMaterials() {
     });
   }
   objectMode.refresh(); // re-applies hover/selected tints on top of the base look
+  polygon?.refreshMaterials();
   plainBtn.textContent = plain ? 'Hologram look' : 'Plain material';
 }
 plainBtn.addEventListener('click', () => { plain = !plain; applyMaterials(); });
@@ -137,6 +145,9 @@ const objectMode = createObjectMode({
     showAllBtn.disabled = st.hidden === 0;
     showAllBtn.textContent = st.hidden ? `Show all (${st.hidden} hidden)` : 'Show all';
     syncLibraryVisibility();
+    // Tab back into object mode while the polygon lens is up: the lens steps aside.
+    if (st.mode === 'object' && polygon?.active) polygon.exit();
+    syncPolygonBtn(st);
     measurements?.onState(st);
     noteEdits();
   }
@@ -150,6 +161,57 @@ modeBtn.addEventListener('click', () => objectMode.toggleMode());
 undoBtn.addEventListener('click', () => { objectMode.undo(); syncLibrary(); });
 showAllBtn.addEventListener('click', () => objectMode.showAll());
 plainBtn.textContent = plain ? 'Hologram look' : 'Plain material';
+
+// ---- Polygon mode (polygon.js) ---------------------------------------------------------------
+// The selected item's real triangles in a lens under the mouse; non-destructive edits (hide,
+// mark inferred) go into the same edit log. Loaded lazily: three-mesh-bvh comes from jsDelivr,
+// and a CDN hiccup must cost only this button, never the page.
+const selectedItemId = (st = objectMode.state()) => {
+  const sel = st.selection;
+  if (!sel) return null;
+  return sel.kind === 'item' ? Number(sel.id.slice(5)) : objectMode.target(sel.id)?.userData.itemId ?? null;
+};
+function syncPolygonBtn(st = objectMode.state()) {
+  const on = !!polygon?.active;
+  polyBtn.disabled = !polygon || (!on && !readyItems().some((i) => i.root?.isObject3D));   // no selection = whole scene
+  polyBtn.textContent = on ? 'Polygon: on' : 'Polygon';
+  polyBtn.setAttribute('aria-pressed', String(on));
+}
+function togglePolygon() {
+  if (!polygon) return;
+  if (polygon.active) { polygon.exit(); return; }
+  const id = selectedItemId();   // null: nothing selected -> the whole scene (BUGS #46)
+  polyHome = id;
+  objectMode.setMode('scene');   // the camera orbits; clicks go to the lens, not to part picking
+  if (!polygon.enter(id)) { polyHome = null; setStatus('Polygon: nothing with triangles here (point cloud?)', true); syncPolygonBtn(); return; }
+  setStatus(`Polygon: ${polygon.state().name} as triangles · point at it to aim the lens, click to select faces · Esc leaves`);
+  syncPolygonBtn();
+}
+import('./polygon.js' + V).then(({ createPolygonMode }) => {
+  polygon = createPolygonMode({
+    scene, camera, canvas: renderer.domElement, objectMode, getItem: (id) => items.get(id) ?? null, getItems: readyItems,
+    onSkin: (k) => look.setSkin(k),   // the hologram eases to a faint skin under the wire
+    materialFor: (m) => (plain ? (look.plainFor(m) ?? plainMaterial) : look.materialFor(m, 'base')),
+    prepassLayer: PREPASS_LAYER,
+    onChange: (st) => {
+      if (!st.active && polyHome != null && polyWasActive) {   // left (Esc, button, P, item removed): back where we were
+        const id = polyHome; polyHome = null;
+        if (objectMode.mode !== 'object') objectMode.setMode('object');
+        if (items.has(id)) objectMode.selectItem(id);
+      }
+      polyWasActive = st.active;
+      syncPolygonBtn();
+    }
+  });
+  // Hidden / relabelled faces are swapped in only for the frame (the scan stays whole).
+  scene.userData.renderSingleLayer = polygon.wrapRender(lod.render);
+  window.hologram.polygon = polygon;
+  syncPolygonBtn();
+}).catch((err) => {
+  polyBtn.title = `Polygon mode unavailable: ${err.message}`;
+  console.warn('polygon.js failed to load', err);
+});
+polyBtn.addEventListener('click', togglePolygon);
 
 
 function setStatus(msg, isError = false) {
@@ -208,6 +270,7 @@ function disposeRoot(root) {
 function removeItem(id, { quiet = false } = {}) {
   const it = items.get(id);
   if (!it) return;
+  if (polygon?.active && polygon.itemId === id) polygon.exit();
   objectMode.removeItem(id);
   measurements.removeItem(id);
   scene.remove(it.root);
@@ -369,7 +432,14 @@ async function registerItem(id, group, built, t0) {
   lod.add(item.root);   // after applyMaterials: the LOD shares the smoothed shading normals
   window.hologram.model ??= item.root;
   if (built.completion) item.root.userData.inferredShare = built.completion.share;
-  library.update(id, { status: 'ready', message: '', tris: built.tris, points: built.points, progress: 1, completion: built.completion });
+  // Determine the display label: flatPreview shows badge+hint, photo mode shows photo→3D label
+  let kindLabel = group.kind;
+  if (item.parts[0]?.mesh.userData.flatPreview) {
+    kindLabel = `${item.parts[0].mesh.userData.badge} · ${item.parts[0].mesh.userData.hint}`;
+  } else if (built.completion?.mode === 'photo') {
+    kindLabel = 'photo → 3D (TripoSR, inferred)';
+  }
+  library.update(id, { status: 'ready', message: '', tris: built.tris, points: built.points, progress: 1, completion: built.completion, kindLabel });
   updateInfo();
   measurements.addItem(item);
   window.hologram.stats = { name: group.name, tris: built.tris, points: built.points, parts: item.parts.length, components: built.components, splitMs: built.ms, parseMs: performance.now() - t0 };
@@ -1262,8 +1332,20 @@ window.addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
   if (k === 'r') controls.autoRotate = !controls.autoRotate;
+  else if (k === 'p') togglePolygon();   // P: polygon lens on the selected item
   else if (k === 'i' && hasInferred()) setShowInferred(!look.showInferred);   // I: inferred on/off
 });
 
+
 lib.ready = initLibrary();
 window.hologram.library.ready = lib.ready;
+
+// ---- Hands (hands.js, P1 step 2) ---------------------------------------------------------------
+// The Camera button; the shared hands runtime loads on first press. Aim = hover, click = select,
+// both through objectMode. Hand clicks wait while the polygon lens or the Library ring is up.
+const { createPlatformHands } = await import('./hands.js' + V);
+window.hologram.hands = createPlatformHands({
+  scene, camera, renderer, controls, objectMode, getItems: readyItems, setStatus,
+  button: $('handsBtn'), expose: window.hologram,
+  busy: () => !!polygon?.active || !!lib.ring?.isOpen?.()
+});

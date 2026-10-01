@@ -289,7 +289,8 @@
     {
       "imports": {
         "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+        "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/",
+        "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.15/build/index.module.js"
       }
     }
   </script>
@@ -320,7 +321,9 @@
         </div>
       </div>
       <div class="spacer"></div>
+      <button id="handsBtn" aria-pressed="false" aria-label="Camera off: turn it on" title="Camera on / off: point at items with your hand (C calibrates)">📷</button>
       <button id="mode" title="Tab: switch between moving the camera and editing objects">Scene mode</button>
+      <button id="polyBtn" disabled aria-pressed="false" title="P: Polygon mode: the selected item (or the whole scene) turns into its triangles; a lens under the mouse picks faces. Click selects, Shift-click adds, wheel sizes the lens, Delete hides, I marks inferred, Esc leaves">Polygon</button>
       <button id="undo" disabled title="Undo (Ctrl/Cmd+Z)">Undo</button>
       <button id="showall" disabled>Show all</button>
       <button id="inferredBtn" hidden aria-pressed="false" title="I: switch between the completed scan (filled-in surfaces shown ghosted and hatched) and the scan as captured">View: Completed</button>
@@ -332,7 +335,7 @@
     <aside id="left" class="side" aria-label="Items in this scene">
       <div id="library" style="display:contents">
         <h2>In this scene <span id="libCount"></span></h2>
-        <div id="libEmpty">Drop scans or photos anywhere on the page. Include an OBJ's .mtl and textures, or a .gltf's .bin, in the same drop and they're matched automatically. Photos become 2.5D holograms.</div>
+        <div id="libEmpty">Drop scans or photos anywhere on the page. Include an OBJ's .mtl and textures, or a .gltf's .bin, in the same drop and they're matched automatically. Photos become a flat 2.5D preview only (not 3D, not a scan); for real 3D run completion/photo3d.py on a Mac.</div>
         <div id="libList"></div>
       </div>
     </aside>
@@ -341,7 +344,7 @@
       <div id="empty">
         <div class="card">
           <h1>Drop a scan or photo to begin</h1>
-          <p>GLB, glTF, OBJ (with its .mtl and textures) or PLY scans, or JPG/PNG photos. Everything stays in this browser tab.</p>
+          <p>GLB, glTF, OBJ (with its .mtl and textures) or PLY scans, or JPG/PNG photos (flat 2.5D preview only; for real 3D run completion/photo3d.py). Everything stays in this browser tab.</p>
           <div class="row">
             <button class="primary" data-proxy="pick">Add files…</button>
             <button data-proxy="sample">Open the sample chair</button>

@@ -23,6 +23,9 @@ import * as THREE from 'three';
 //   Edits touching several targets at once (showAll, arrange, importLayout) carry
 //   `changes: [{ item, part, before, after }]` instead of one top-level before/after.
 //   Human-readable extras ride along (dx/dz for move, dy for rotate, factor for scale).
+//   Other modules may add their own ops (polygon.js: polyHide, polyInfer) whose entries carry
+//   no transform states; they register an applier with registerOp(op, fn(entry, 'before'|
+//   'after')) and undo / replayTo / adoptHistory call it instead of applying states.
 // Undo applies `before`, so it is exact, and replayTo(seq) rebuilds any point of the
 // history from the states alone. That is what a later timelapse plays back.
 
@@ -84,6 +87,7 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
   let hoverId = null;          // part id or itemKey
   let selectedId = null;       // part id or itemKey
   const legacyUndo = new WeakMap(); // entry -> closure, only for callers that pass one without states
+  const opAppliers = new Map();     // op -> fn(entry, 'before'|'after'), for ops other modules own
   let seq = 0;
   const T0 = performance.now();
   let drag = null;             // {id, startPos, before, plane, startHit, dx, dz}
@@ -134,6 +138,8 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
   }
 
   function applyEntry(e, which) {
+    const own = opAppliers.get(e.op);
+    if (own) { own(e, which); return; }
     const list = changesOf(e);
     const ordered = which === 'before' ? [...list].reverse() : list;
     for (const c of ordered) applyState(resolve(c.item, c.part), c[which]);
@@ -212,6 +218,9 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
     },
     record(edit, undo) { ensureLive(); lastWheel = null; return record(edit, undo); },
     ensureLive,
+    // Lets another module own an op in the shared log (see HISTORY above). The applier must
+    // be idempotent: replayTo calls it with 'before' for every entry, then 'after' forward.
+    registerOp(op, fn) { opAppliers.set(op, fn); },
     resolve,
     target,
 
@@ -412,6 +421,7 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
       if (edits.length || !list.length) return false;
       const first = new Map();
       for (const e of list) {
+        if (opAppliers.has(e.op)) continue;   // the owning module checks its own entries
         const ch = changesOf(e);
         if (!ch.length || ch.some((c) => !c.before || !c.after || !resolve(c.item, c.part))) return false;
         for (const c of ch) { const k = `${c.item}|${c.part}`; if (!first.has(k)) first.set(k, c); }

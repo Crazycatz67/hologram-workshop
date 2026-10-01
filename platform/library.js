@@ -43,7 +43,7 @@ export function createLibrary(panel, { onToggle, onFocus, onRemove }) {
     if (!r) return;
     Object.assign(r.data, patch);
     const d = r.data;
-    const parts = [d.kind];
+    const parts = [d.kindLabel ?? d.kind];
     if (d.tris != null) parts.push(d.points ? `${d.points.toLocaleString()} pts` : `${d.tris.toLocaleString()} tris`);
     parts.push(d.status === 'error' ? `error: ${d.message}` : d.message ? `${d.status} - ${d.message}` : d.status);
     r.meta.textContent = parts.join('  ·  ');

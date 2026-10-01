@@ -23,7 +23,7 @@ const V = new URL(import.meta.url).search;
 const { default: HolographicMaterial } = await import('../HolographicMaterial.js' + V);
 const { prepareHologram, enableSingleLayer } = await import('../hologramLook.js' + V);
 
-const { MeshStandardMaterial } = await import('three');
+const { MeshStandardMaterial, ShaderMaterial, MeshBasicMaterial, Color, Vector2, DoubleSide } = await import('three');
 
 const STORE_KEY = 'hologram-platform-look';
 
@@ -56,6 +56,84 @@ const BASE = {
   hologramColor: '#4fd1ff', hologramBrightness: 1.25, fresnelAmount: 0.45, fresnelOpacity: 1.0,
   scanlineSize: 40.0, signalSpeed: 0.6, hologramOpacity: 1.0, blinkFresnelOnly: true
 };
+
+// ---- Polygon lens (polygon.js) -----------------------------------------------------------
+// The scan's real triangles, drawn as a barycentric wireframe only inside a circle under the
+// mouse. Photosafety (BUGS #14) shapes every choice here:
+//   * normal blending at low opacity, never additive: lines can't stack into a bright blob;
+//   * no time term at all: the wire only changes when the mouse or camera moves;
+//   * DENSITY FADE: a triangle smaller than ~LENS_FADE_FROM_PX on screen fades its lines out
+//     (gone by LENS_FADE_TO_PX), so a dense patch reads as a soft tint, not a shimmering
+//     moire of 1-px lines (dense high-contrast line patterns are a trigger, ITU-R BT.1702);
+//   * the circle's edge is a soft falloff, so faces entering the lens fade in, not pop;
+//   * inferred faces are dimmer AND dashed (dashes anchored to the edge, so they don't crawl).
+// Per-vertex attributes: bary (vec3, one corner each), inferred (0/1).
+export const LENS_OPACITY = 0.55;
+export const LENS_INFERRED_DIM = 0.6;
+export const LENS_FADE_FROM_PX = 12;   // triangle size (px across) where lines start to fade
+export const LENS_FADE_TO_PX = 4;      // ...and are gone
+// The FULL wire (polygon mode on, BUGS #46): the whole model as triangles, calmer than the lens.
+// polygon.js picks a simplification level whose triangles are ~WIRE_EDGE_PX across on screen,
+// so it reads as a mesh at any zoom; the same density fade still covers what's left too small.
+export const WIRE_OPACITY = 0.38;
+// While polygon mode is on the hologram skin eases down to this (x its normal opacity), so the
+// wire is the obvious thing on screen. A dimming, eased over ~0.4 s: never a flash.
+export const SKIN_FAINT = 0.3;
+// full = false: the lens (lines only inside the circle under the mouse);
+// full = true:  the whole-model wire (no circle, WIRE_OPACITY).
+export function createLensMaterial({ full = false } = {}) {
+  return new ShaderMaterial({
+    transparent: true, depthWrite: false, depthTest: true, side: DoubleSide,
+    // Pull the wire a hair toward the camera so it wins the depth test against its own surface.
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
+    uniforms: {
+      uCentre: { value: new Vector2() }, uRadius: { value: 80 }, uFade: { value: 0 },
+      uUseLens: { value: full ? 0 : 1 }, uOpacity: { value: full ? WIRE_OPACITY : LENS_OPACITY },
+      uColor: { value: new Color('#c8f6ff') }, uInfColor: { value: new Color('#9ec3d0') }
+    },
+    vertexShader: `
+      attribute vec3 bary; attribute float inferred;
+      varying vec3 vBary; varying float vInf;
+      void main() { vBary = bary; vInf = inferred; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+      uniform vec2 uCentre; uniform float uRadius; uniform float uFade; uniform float uUseLens; uniform float uOpacity;
+      uniform vec3 uColor; uniform vec3 uInfColor;
+      varying vec3 vBary; varying float vInf;
+      void main() {
+        vec3 w = fwidth(vBary);
+        vec3 a = smoothstep(vec3(0.0), w * 1.25, vBary);
+        float line = 1.0 - min(min(a.x, a.y), a.z);
+        // fwidth(bary) ~ 1 / (triangle size in px): small on screen -> fade the lines out.
+        float density = smoothstep(${(1 / LENS_FADE_TO_PX).toFixed(4)}, ${(1 / LENS_FADE_FROM_PX).toFixed(4)}, max(w.x, max(w.y, w.z)));
+        float lens = mix(1.0, 1.0 - smoothstep(0.7 * uRadius, uRadius, distance(gl_FragCoord.xy, uCentre)), uUseLens);
+        float alpha = line * density * lens * uFade * uOpacity;
+        vec3 col = uColor;
+        if (vInf > 0.5) {
+          // Dashed: position along the nearest edge, 3 dashes per edge.
+          float t = vBary.x < vBary.y ? (vBary.x < vBary.z ? vBary.y : vBary.x) : (vBary.y < vBary.z ? vBary.z : vBary.x);
+          alpha *= ${LENS_INFERRED_DIM.toFixed(3)} * step(0.5, fract(t * 3.0));
+          col = uInfColor;
+        }
+        if (alpha < 0.004) discard;
+        gl_FragColor = vec4(col, alpha);
+      }`
+  });
+}
+// Depth for the full wire: the wire is a simplified copy, not the surface the hologram drew, so
+// it gets its own depth (polygon.js clears depth just before this draws, then the wire tests
+// against it): hidden lines stay hidden at every LOD level and nothing z-fights.
+export function createWireDepthMaterial() {
+  return new MeshBasicMaterial({ colorWrite: false, side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+}
+// The selected patch: a flat, static amber tint (the object-mode selection colour), low enough
+// that the hologram still shows through.
+export const PATCH_OPACITY = 0.28;
+export function createPatchMaterial() {
+  return new MeshBasicMaterial({
+    color: 0xffb040, transparent: true, opacity: PATCH_OPACITY, depthWrite: false, side: DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2
+  });
+}
 
 function loadSettings() {
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -134,6 +212,11 @@ export function createLook({ scene, mount }) {
 
   function update() { for (const m of Object.values(parents)) m.update(); }
 
+  // Polygon mode's faint skin: k = 1 normal .. SKIN_FAINT. hologramOpacity is shared by reference
+  // with every variant and inferred parent, so this reaches every hologram mesh. (Realism > 0
+  // blends opacity toward 1, so the skin fades less there; Plain mode is opaque and unaffected.)
+  function setSkin(k) { for (const m of Object.values(parents)) m.uniforms.hologramOpacity.value = BASE.hologramOpacity * k; }
+
   // Controls
   if (mount) {
     mount.innerHTML = `
@@ -160,7 +243,7 @@ export function createLook({ scene, mount }) {
   applySettings();
 
   return {
-    materialFor, plainFor, prepare, update, settings, parents, inferredParents,
+    materialFor, plainFor, prepare, update, settings, parents, inferredParents, setSkin,
     setShowInferred, get showInferred() { return showInferred; },
     set(k, v) { settings[k] = v; applySettings(); }
   };

@@ -24,9 +24,15 @@ The ring below is driven by the test; nothing on it flashes. The press-and-hold 
 <pre id="out">running…</pre>
 </div>
 <script type="module">
-  import('./ring-test.js?v=' + Date.now()).catch((e) => {
+  // Test recorder (docs/testing/README.md): localhost only; the run lands in docs/testing/runs/ring-test/.
+  const rec = await import('../testrec.js').then((m) => m.startRun({ page: 'ring-test', title: document.title })).catch(() => null);
+  import('./ring-test.js?v=' + Date.now()).then(() => {
+    for (const r of window.ringResults?.results ?? []) rec?.result(r.name, r.detail ?? '', { pass: !!r.ok });
+    rec?.end();
+  }).catch((e) => {
     document.getElementById('out').textContent += '\nERROR ' + (e.stack || e);
     console.error(e);
+    rec?.end('crashed');
   });
 </script>
 </body></html>

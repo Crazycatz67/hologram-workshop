@@ -1,4 +1,8 @@
-// photo.js -- turn a dropped PHOTO into a relief hologram mesh, entirely in the browser.
+// photo.js -- turn a dropped PHOTO into a FLAT 2.5D relief preview, entirely in the browser.
+// It is not a 3D object: one depth map pushed out of the picture plane, no sides, no back.
+// Real 3D from a photo is the Mac tool completion/photo3d.py (TripoSR), whose output loads
+// as a completed scan with every surface marked inferred. Owner decision 2026-10-01: label
+// this result so it is never mistaken for a scan or for 3D (FLAT_PREVIEW below).
 // No server, no account, free. The image never leaves the visitor's machine (only the model
 // weights are downloaded, once, from the Hugging Face CDN, then cached by the browser).
 //
@@ -29,6 +33,14 @@ const RELIEF = 0.35;         // relief depth as a fraction of image width
 const EDGE_CUT = 0.10;       // drop quads whose normalised depth range exceeds this (silhouettes)
 const BG_CUT = 0.04;         // drop the farthest pixels (normalised depth below this)
 const LONGEST_M = 1.0;
+
+// What the UI shows for a photo result. Consumers read mesh.userData.flatPreview /
+// .label / .badge / .hint (measurements.js already shows userData.label as the part name).
+export const FLAT_PREVIEW = Object.freeze({
+  label: 'Flat photo preview (2.5D)',
+  badge: '2.5D preview',
+  hint: 'Flat photo preview (2.5D) \u2014 for real 3D run completion/photo3d.py'
+});
 
 let pipePromise = null;
 let pipeDevice = null;
@@ -218,15 +230,20 @@ export async function photoToMesh(file, { onProgress } = {}) {
   const meshMs = performance.now() - tMesh;
   mesh.userData.original = mat;
   mesh.userData.kind = 'photo-relief';
+  mesh.userData.flatPreview = true;
+  mesh.userData.label = FLAT_PREVIEW.label;
+  mesh.userData.badge = FLAT_PREVIEW.badge;
+  mesh.userData.hint = FLAT_PREVIEW.hint;
   mesh.userData.provenance = {
-    method: 'monocular depth (Depth Anything V2 small)',
-    note: 'front surface only; depth is estimated, not measured; no back side',
+    method: 'flat 2.5D preview: monocular depth (Depth Anything V2 small)',
+    note: 'not a scan and not 3D: front surface only; depth is estimated, not measured; no sides or back. ' +
+      'For real 3D run completion/photo3d.py',
   };
   mesh.userData.sizeNote = `photo has no real scale: longest side set to ${LONGEST_M} m, relief depth ${Math.round(RELIEF * 100)}% of width`;
   mesh.userData.device = pipeDevice;
   mesh.userData.timings = { modelMs: lastModelMs, depthMs, meshMs };
   mesh.userData.source = { width: bmp.width, height: bmp.height, grid: [W, H] };
-  report(onProgress, 'mesh', 1, `${idxList.length / 3} triangles`);
+  report(onProgress, 'mesh', 1, `${FLAT_PREVIEW.label}: ${idxList.length / 3} triangles`);
   bmp.close?.();
   return mesh;
 }
