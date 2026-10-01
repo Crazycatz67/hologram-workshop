@@ -31,7 +31,11 @@
 //     prepassLayer  camera layer of the single-layer depth pre-pass (lod.js PREPASS_LAYER)
 //   api.enter(itemId|null) -> bool   null = whole scene; builds BVHs (lazily, once per mesh), shows wire + lens
 //   api.exit()                  hides the lens, keeps the edits
-//   api.active, api.itemId, api.radius (CSS px, settable; clamped to RADIUS_MIN..RADIUS_MAX)
+//   api.active, api.itemId, api.radius (CSS px, settable; clamped to RADIUS_MIN..RADIUS_MAX).
+//     Any radius change shows a size label on the lens circle for SIZE_LABEL_MS (eased). Keys
+//     [ / ] shrink / grow it one wheel notch (x 1/1.16, x 1.16) while the mode is on.
+//     By hand (platform/hands.js): the lens follows the hand cursor (setPointer), the other
+//     hand's pinch selects, pinch-hold + vertical move sets the radius.
 //   api.setPointer(clientX, clientY) / api.clearPointer()   (the canvas listeners call these)
 //   api.select({ add }) -> patch summary      faces in the lens become (or join) the patch
 //   api.clearPatch(); api.hidePatch() -> entry|null; api.toggleInferredPatch() -> entry|null
@@ -58,7 +62,8 @@ const { loadSimplifier } = await import('./parts.js' + V);
 const { wheelPixels } = await import('./objectmode.js' + V);
 
 export const RADIUS_MIN = 12, RADIUS_MAX = 400, RADIUS_DEFAULT = 70;   // CSS px
-const RADIUS_PER_NOTCH = 0.15;      // x exp(0.15) = 1.16 per wheel notch
+const RADIUS_PER_NOTCH = 0.15;      // x exp(0.15) = 1.16 per wheel notch (and per [ / ] press)
+const SIZE_LABEL_MS = 1200;         // the lens size label stays this long after a change
 const NOTCH_PX = 100;
 const CLICK_PX = 3;                 // same drag threshold as objectmode
 const MAX_LENS_FACES = 60000;       // draw cap; the read-out still counts every face
@@ -337,13 +342,19 @@ export function createPolygonMode({ scene, camera, canvas, objectMode, getItem, 
   readout.className = 'poly-readout';
   readout.setAttribute('role', 'status');
   readout.style.cssText = 'position:absolute;left:10px;bottom:10px;pointer-events:none;font:12px ui-monospace,monospace;color:#cfe;background:rgba(8,14,20,.78);border:1px solid #2a4250;border-radius:6px;padding:6px 8px;line-height:1.5;z-index:5;display:none;white-space:pre';
+  // Lens size label ("⌀ 140 px"), shown on the circle's lower edge while the radius changes.
+  const sizeLabel = document.createElement('div');
+  sizeLabel.className = 'poly-size';
+  sizeLabel.style.cssText = 'position:absolute;left:50%;bottom:-22px;transform:translateX(-50%);font:12px ui-monospace,monospace;color:#cfe;background:rgba(8,14,20,.78);border-radius:4px;padding:1px 6px;white-space:nowrap;opacity:0;transition:opacity .18s ease';
+  ring.append(sizeLabel);
+  let sizeShownAt = -Infinity;
   stage.append(ring, readout);
 
   const fmt = (S) => (S ? `${S.faces.toLocaleString()} faces · ${S.area < 0.01 ? (S.area * 1e4).toFixed(1) + ' cm²' : S.area.toFixed(3) + ' m²'} · ${S.inferredPct.toFixed(0)}% inferred` : '—');
   let lensSummary = null;
   // One line: what to do next.
   const coach = (st) => st.patch ? 'Del hides the patch · I marks it inferred · Shift-click adds · Esc clears'
-    : st.lens ? 'Click selects the faces in the lens · Shift-click adds · wheel sizes the lens · Esc leaves'
+    : st.lens ? 'Click (or pinch your other hand) selects the faces in the lens · Shift-click adds · wheel, [ ] or pinch-hold + up/down sizes the lens · Esc leaves'
     : 'Point at the model: the lens shows its real triangles · Esc leaves';
   function notify() {
     const st = api.state();
@@ -351,7 +362,7 @@ export function createPolygonMode({ scene, camera, canvas, objectMode, getItem, 
     if (active) {
       const w = st.wire;
       const wire = !w.total ? 'building…' : w.shown >= w.total ? `all ${w.total.toLocaleString()} triangles` : `${w.shown.toLocaleString()} of ${w.total.toLocaleString()} triangles · zoom in for finer`;
-      readout.textContent = `Polygon · ${st.name}\nwire   ${wire}\nlens   ${fmt(st.lens)}\npatch  ${fmt(st.patch)}\n` + coach(st);
+      readout.textContent = `Polygon · ${st.name}\nwire   ${wire}\nlens   ⌀ ${Math.round(st.radius * 2)} px · ${fmt(st.lens)}\npatch  ${fmt(st.patch)}\n` + coach(st);
     }
     onChange?.(st);
   }
@@ -538,6 +549,8 @@ export function createPolygonMode({ scene, camera, canvas, objectMode, getItem, 
       ring.style.width = ring.style.height = `${radius * 2}px`;
     }
     ring.style.opacity = active && pointer && fadeTarget ? '1' : '0';
+    sizeLabel.textContent = `⌀ ${Math.round(radius * 2)} px`;
+    sizeLabel.style.opacity = now - sizeShownAt < SIZE_LABEL_MS ? '1' : '0';
   }
 
   // ---- render wrapper -------------------------------------------------------------------------
@@ -589,6 +602,7 @@ export function createPolygonMode({ scene, camera, canvas, objectMode, getItem, 
     if (k === 'Delete' || k === 'Backspace') { e.preventDefault(); e.stopImmediatePropagation(); api.hidePatch(); }
     else if (k.toLowerCase() === 'i' && patch.size) { e.stopImmediatePropagation(); api.toggleInferredPatch(); }   // no patch: I stays "show inferred"
     else if (k === 'Escape') { e.stopImmediatePropagation(); if (patch.size) api.clearPatch(); else api.exit(); }
+    else if (k === '[' || k === ']') { e.preventDefault(); e.stopImmediatePropagation(); api.radius = radius * Math.exp((k === ']' ? 1 : -1) * RADIUS_PER_NOTCH); }
   }, { capture: true });
 
   // ---- API ------------------------------------------------------------------------------------
@@ -620,7 +634,11 @@ export function createPolygonMode({ scene, camera, canvas, objectMode, getItem, 
     get active() { return active; },
     get itemId() { return itemId; },
     get radius() { return radius; },
-    set radius(px) { radius = Math.max(RADIUS_MIN, Math.min(RADIUS_MAX, px)); lensSig = ''; },
+    set radius(px) {
+      const r = Math.max(RADIUS_MIN, Math.min(RADIUS_MAX, px));
+      if (r !== radius) sizeShownAt = performance.now();
+      radius = r; lensSig = '';
+    },
     setPointer(x, y) { pointer = { x, y }; tick(); },
     clearPointer() { pointer = null; lensSig = ''; },
     select({ add = false } = {}) {
@@ -674,7 +692,7 @@ export function createPolygonMode({ scene, camera, canvas, objectMode, getItem, 
       return ms && { faces: ms.faces, hidden: ms.hidden, inferred: (f) => inferredFace(ms, f), display: ms.display, overlay: ms.overlay };
     },
     lensFaces() { return new Map([...lens].map(([ms, f]) => [ms.partId, f.slice()])); },
-    get objects() { return { group, lensMesh, wireMesh, wireDepth, ring, readout }; }
+    get objects() { return { group, lensMesh, wireMesh, wireDepth, ring, readout, sizeLabel }; }
   };
   return api;
 }

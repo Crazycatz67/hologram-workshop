@@ -125,6 +125,7 @@ const REALISTIC_JITTER = 0.002;
 async function main() {
   const V = `?v=${Date.now()}`;
   const { createManipulator, MODE } = await import(`./manipulator.js${V}`);
+  const mn = await import(`./manipulator.js${V}`);
   const measure = await import(`./measure.js${V}`);
   const gestures = await import(`./gestures.js${V}`);
   const { gunFeatures } = await import(`./gunPose.js${V}`);
@@ -1081,8 +1082,18 @@ async function main() {
     t = drive(m, 10, () => [[0.14, 0.5, 'open'], [0.86, 0.5, 'open']], t);
     const resets0 = m.resetCount;
     t = drive(m, 6, (i) => { const s = 0.72 - 0.68 * (i + 1) / 6; return [[0.5 - s / 2, 0.5, 'open'], [0.5 + s / 2, 0.5, 'open']]; }, t);
-    check('#27: a fast reverse of an explode does not fire the clap', m.resetCount - resets0, 0);
-    check('#27: ... so the model keeps its position', object.position.x, 0.3, 1e-9);
+    // Superseded 2026-10-01 by the owner-approved clap E2 (Ricky gesture feedback): a clap
+    // during an explode, pulled apart or not, resets. This close (0.72 -> 0.04 apart in 200 ms)
+    // is a physical clap, so it now resets; a slow un-explode still never does (below).
+    check('#27 → E2: a fast close (a clap) during a pulled-apart explode now resets', m.resetCount - resets0, 1);
+    check('#27 → E2: ... so the model goes home', object.position.x, 0, 1e-9);
+    m = fresh();
+    t = 1000;
+    t = drive(m, 8, () => [[0.45, 0.5, 'open'], [0.55, 0.5, 'open']], t);
+    t = drive(m, 18, (i) => [[0.45 - 0.017 * i, 0.5, 'open'], [0.55 + 0.017 * i, 0.5, 'open']], t);
+    const resetsSlow = m.resetCount;
+    t = drive(m, 40, (i) => { const s = 0.72 - 0.68 * (i + 1) / 40; return [[0.5 - s / 2, 0.5, 'open'], [0.5 + s / 2, 0.5, 'open']]; }, t);
+    check('#27: a slow un-explode (1.3 s) never resets', m.resetCount - resetsSlow, 0);
 
     // A clap straight after letting go of another gesture (inside the gap) is also blocked.
     m = fresh();
@@ -1639,15 +1650,18 @@ async function main() {
       let holding = true;
       for (let i = 1; i <= 25; i++) {
         const r = step(rig, [frame('open', 'palm', 'None', { cx: 0.5 - 0.004 * i, jitter: 0 })]);
-        if (i > 6 && r.state.mode !== 'clutch') holding = false;
+        // Sticky pointer (round G): label None is wobble, held as 'aim' until STICKY_MS.
+        if (i * FR > ptr.STICKY_MS + FR && r.state.mode !== 'clutch') holding = false;
       }
       checkTrue('pose lost: cursor held still while the open hand moves', holding && rig.p.state.x === held, `x ${rig.p.state.x} vs ${held}`);
       let r;
       for (let i = 0; i < 10; i++) r = step(rig, [gun(0.4, 0.55, { jitter: 0 })]);
       const at = ptr.mapReach(ptr.palmCentroid(r.hands[0].landmarks));
       check('re-entering the pose elsewhere: cursor is where the hand is (absolute)', rig.p.state.x, at.x, 0.005);
-      for (let i = 0; i < 90; i++) step(rig, []);
-      checkTrue('a held cursor hides after 1.5 s without the pose', rig.p.state.mode === 'off', rig.p.state.mode);
+      const hideLog = [];
+      // STICKY_MS of held aim, then CLUTCH_SHOW_MS visible-held: 1.85 s; 100 frames @ 50 fps = 2 s.
+      for (let i = 0; i < 100; i++) { step(rig, []); if (i % 10 === 0) hideLog.push(rig.p.state.mode); }
+      checkTrue('a held cursor hides after 0.35 + 1.5 s without the pose', rig.p.state.mode === 'off', hideLog.join(','));
     }
 
     // 6. Click = the other hand's pinch: one click per pinch, held pinches don't repeat.
@@ -2039,8 +2053,19 @@ async function main() {
       const st = memStore();
       let cancelled = null;
       const c = cal.createCalibration({ pointer: p, engagement: ptr.createEngagement(), rect: () => ({ left: 0, top: 0, width: 800, height: 600 }), storage: st, onCancel: (x) => (cancelled = x) });
+      // Hidden card must not take the mouse (owner report: an invisible card at the top centre
+      // blocked clicks/drags). Probe the hit test at the card's centre before, during and after.
+      const cards = document.querySelectorAll('[data-role="calibration-card"]');
+      const cardEl = cards[cards.length - 1];
+      const hits = () => { const r = cardEl.getBoundingClientRect(); const el = document.elementFromPoint(r.left + r.width / 2, r.top + 6); return !!el && cardEl.contains(el); };
+      const pe = [];
+      pe.push(getComputedStyle(cardEl).pointerEvents + ':' + hits());
       c.start(0);
+      pe.push(getComputedStyle(cardEl).pointerEvents);
       c.cancel();
+      pe.push(getComputedStyle(cardEl).pointerEvents + ':' + hits());
+      checkTrue('calibration card takes no clicks while hidden (before start and after skip), clicks while shown',
+        pe.join() === 'none:false,auto,none:false', pe.join());
       const saved = cal.loadProfile(st);
       checkTrue('skip (Esc): skipped profile saved, default reach kept, calibration closed', cancelled && saved?.skipped === true && saved.reach.x0 === ptr.DEFAULT_REACH.x0 && !c.active, cal.scoreLine(saved));
       c.dispose();
@@ -2355,6 +2380,258 @@ async function main() {
     }
     checkTrue('cluster round: 6 targets, every pair >= 30 px, each within 60 px of a neighbour', cl.length === 6 && minD >= 30 && maxNN <= 60, `min ${minD.toFixed(1)} · max nearest ${maxNN.toFixed(1)}`);
     checkTrue('default practice: 3 commits x (point, bubble) + 1 cluster round', cal.PRACTICE_ROUNDS.length === 7 && cal.PRACTICE_ROUNDS.filter((r) => r.cluster).length === 1);
+  });
+
+  group('Gesture fixes round G (owner-approved 2026-10-01: sticky pointer, clap, tilt, scale, aim→grab, outline, practice, thumb-tap)', () => {
+    const FR = 1000 / 30;
+    // Pointer hands: the same side-on pointer landmarks, with the pose verdict, label and pinch set.
+    const ph = (gun, { gesture = 'None', cx = 0.5, ratio = 1, world = null } = {}) => {
+      const h = frame('pointer', 'side', gesture, { cx, cy: 0.5, jitter: 0 });
+      if (world) h.worldLandmarks = world;
+      h.pointer = { gun };
+      h.pinch = { ratio, pinching: ratio < 0.25 };
+      h.engaged = true;
+      return h;
+    };
+    // 1. Sticky pointer.
+    {
+      const p = ptr.createPointer({ thumbTap: false });
+      let t = 0;
+      for (let i = 0; i < 20; i++) p.update([ph(true)], 1.78, (t += FR));
+      const modes = [];
+      for (let i = 0; i < 8; i++) { p.update([ph(false)], 1.78, (t += FR)); modes.push(p.state.mode); }  // 267 ms of wobble
+      checkTrue('#G1 sticky pointer: 267 ms of pose wobble (label None) stays "aim", cursor held', modes.every((m) => m === 'aim'), modes.join(','));
+      const x0 = p.state.x;
+      p.update([ph(true, { cx: 0.42 })], 1.78, (t += FR));
+      const raw = p.state.raw.x;
+      checkTrue('#G1 re-entry within 400 ms keeps the filter: the cursor glides (no snap to the new hand spot)',
+        Math.abs(p.state.x - raw) > 0.02 && Math.abs(p.state.x - x0) > 0.001, `x ${p.state.x.toFixed(3)} raw ${raw.toFixed(3)} was ${x0.toFixed(3)}`);
+      for (let i = 0; i < 10; i++) p.update([ph(true)], 1.78, (t += FR));
+      p.update([ph(false, { gesture: 'Open_Palm' })], 1.78, (t += FR));
+      const palmMode = p.state.mode;
+      for (let i = 0; i < 10; i++) p.update([ph(true)], 1.78, (t += FR));
+      const ends = [];
+      for (let i = 0; i < 14; i++) { p.update([], 1.78, (t += FR)); ends.push(p.state.mode); }
+      const firstClutch = ends.indexOf('clutch');
+      checkTrue('#G1 a clear Open_Palm ends aiming at once; a lost pose ends it at 350 ms, not before',
+        palmMode === 'clutch' && firstClutch >= 0 && (firstClutch + 1) * FR >= ptr.STICKY_MS && firstClutch * FR < ptr.STICKY_MS + FR,
+        `palm → ${palmMode}; lost → clutch after ${((firstClutch + 1) * FR).toFixed(0)} ms`);
+      // The other hand's click still lands during wobble.
+      const q = ptr.createPointer({ thumbTap: false });
+      t = 0;
+      for (let i = 0; i < 20; i++) q.update([ph(true, { cx: 0.4 }), ph(false, { cx: 0.75, ratio: 0.6 })], 1.78, (t += FR));
+      let click = null;
+      for (let i = 0; i < 6; i++) click = q.update([ph(false, { cx: 0.4 }), ph(false, { cx: 0.75, ratio: i >= 4 ? 0.1 : 0.6 })], 1.78, (t += FR)) ?? click;
+      checkTrue('#G1 other-hand pinch 170 ms into a wobble still clicks (was lost after 100 ms)', click?.via === 'other-pinch', JSON.stringify(click));
+    }
+    // 2. Clap.
+    {
+      const fresh = (channels = ALL_CHANNELS) => {
+        object.position.set(0, 0, 0); object.quaternion.identity(); object.scale.set(1, 1, 1);
+        const m = createManipulator(object, camera);
+        m.reset();
+        m.configure({ channels, sensitivity: 1, momentum: false, triggerFrames: 3 });
+        return m;
+      };
+      const two = (sep, cy = 0.5, kindA = 'open', kindB = 'open') => [hand(0.5 - sep / 2, cy, 0, kindA), hand(0.5 + sep / 2, cy, 0, kindB)];
+      let m = fresh();
+      let t = 1000;
+      for (let i = 0; i < 6; i++) m.update(two(0.4), 1.78, (t += FR));
+      const r0 = m.resetCount;
+      for (const sep of [0.34, 0.28, 0.22, 0.16]) m.update(two(sep), 1.78, (t += FR));
+      m.update([hand(0.5, 0.5, 0, 'open')], 1.78, (t += FR)); // one hand lost at contact
+      check('#G2 clap E1: approach then merge (one hand drops at contact) resets', m.resetCount - r0, 1);
+      // E1 must not fire when a hand leaves the frame moving apart.
+      m = fresh();
+      t = 1000;
+      for (let i = 0; i < 6; i++) m.update(two(0.3), 1.78, (t += FR));
+      const r1 = m.resetCount;
+      for (const sep of [0.34, 0.4]) m.update(two(sep), 1.78, (t += FR));
+      m.update([hand(0.3, 0.5, 0, 'open')], 1.78, (t += FR));
+      check('#G2 clap E1: hands moving apart, then one leaves the frame: no reset', m.resetCount - r1, 0);
+      // E3: a clap blocked by a pointer keeps its arm.
+      m = fresh();
+      t = 1000;
+      const gunOpen = (x) => { const h = hand(x, 0.5, 0, 'open'); h.pointer = { gun: true }; return h; };
+      for (let i = 0; i < 6; i++) m.update([gunOpen(0.3), hand(0.7, 0.5, 0, 'open')], 1.78, (t += FR));
+      const r2 = m.resetCount;
+      for (const sep of [0.3, 0.2, 0.1]) m.update([gunOpen(0.5 - sep / 2), hand(0.5 + sep / 2, 0.5, 0, 'open')], 1.78, (t += FR));
+      const blocked = m.resetCount - r2;
+      for (let i = 0; i < 20; i++) m.update(two(0.15), 1.78, (t += FR));   // span ~2.2: never re-arms (needs > 2.5)
+      for (const sep of [0.1, 0.06]) m.update(two(sep), 1.78, (t += FR));
+      checkTrue('#G2 clap E3: a clap blocked by a pointer does not spend the arm (the next clap fires)', blocked === 0 && m.resetCount - r2 === 1, `blocked ${blocked}, total ${m.resetCount - r2}`);
+      // E2: a clap during a pulled-apart explode resets.
+      m = fresh();
+      t = 1000;
+      for (let i = 0; i <= 20; i++) m.update(two(0.14 + i * 0.02), 1.78, (t += FR));
+      const exploding = m.mode === MODE.EXPLODE;
+      const r3 = m.resetCount;
+      for (const sep of [0.4, 0.3, 0.2, 0.1, 0.05]) m.update(two(sep), 1.78, (t += FR));
+      checkTrue('#G2 clap E2: a clap during a pulled-apart explode resets', exploding && m.resetCount - r3 === 1, `exploding ${exploding}, resets ${m.resetCount - r3}`);
+    }
+    // 3. Tilt: hybrid position/rate.
+    {
+      const tiltRun = (dy) => {
+        object.position.set(0, 0, 0); object.quaternion.identity(); object.scale.set(1, 1, 1);
+        const m = createManipulator(object, camera);
+        m.reset();
+        m.configure({ channels: ['tilt'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+        let t = 1000;
+        const step = (y) => m.update([hand(0.35, 0.5, 0, 'fist'), hand(0.65, y, 0, 'open')], 1.78, (t += FR));
+        for (let i = 0; i < 8; i++) step(0.6);
+        for (let i = 1; i <= 10; i++) step(0.6 + (dy * i) / 10);
+        for (let i = 0; i < 15; i++) step(0.6 + dy);
+        const qa = object.quaternion.clone();
+        for (let i = 0; i < 15; i++) step(0.6 + dy);
+        return object.quaternion.angleTo(qa); // turned during 0.5 s of holding still
+      };
+      const inZone = tiltRun(-0.06);
+      const beyond = tiltRun(-0.15);
+      const far = tiltRun(-0.5);
+      checkTrue('#G3 tilt: still inside ±0.08 = position only (no drift); held beyond it keeps turning; speed capped',
+        inZone < 0.01 && beyond > 0.2 && far <= mn.TILT_RATE_MAX * 0.5 + 0.05 && far > beyond,
+        `0.5 s held: in-zone ${inZone.toFixed(3)} · 0.15 out ${beyond.toFixed(3)} · 0.5 out ${far.toFixed(3)} rad (cap ${(mn.TILT_RATE_MAX * 0.5).toFixed(2)})`);
+    }
+    // 4. Scale: vertical gives the same range (direction gain), still uniform.
+    {
+      const scaleRun = (vertical) => {
+        object.position.set(0, 0, 0); object.quaternion.identity(); object.scale.set(1, 1, 1);
+        const m = createManipulator(object, camera);
+        m.reset();
+        m.configure({ channels: ['scale'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+        let t = 1000;
+        const at = (sep) => vertical
+          ? [hand(0.5, 0.55 - sep / 2, 0, 'pinch'), hand(0.5, 0.55 + sep / 2, 0, 'pinch')]
+          : [hand(0.5 - sep / 2, 0.5, 0, 'pinch'), hand(0.5 + sep / 2, 0.5, 0, 'pinch')];
+        for (let i = 0; i < 8; i++) m.update(at(0.2), 1.78, (t += FR));
+        for (let i = 1; i <= 20; i++) m.update(at(0.2 + (0.1 * i) / 20), 1.78, (t += FR));
+        for (let i = 0; i < 40; i++) m.update(at(0.3), 1.78, (t += FR));
+        return { k: Math.log(object.scale.x), uniform: Math.abs(object.scale.x - object.scale.y) < 1e-9 && Math.abs(object.scale.x - object.scale.z) < 1e-9 };
+      };
+      const h = scaleRun(false);
+      const v = scaleRun(true);
+      const ratio = v.k / h.k;
+      checkTrue('#G4 scale: the same 1.5x hand spread zooms ~1.75x as far (log) stacked vertically as side by side; uniform',
+        h.k > 0.1 && ratio >= 1.4 && ratio <= 2.1 && h.uniform && v.uniform, `ln scale: side ${h.k.toFixed(3)} · stacked ${v.k.toFixed(3)} · ratio ${ratio.toFixed(2)}`);
+    }
+    // 5 + 6. aim -> grab and the pointer-blocks-grab guard.
+    {
+      const run = (fistOpts, frames = 20) => {
+        object.position.set(0, 0, 0); object.quaternion.identity(); object.scale.set(1, 1, 1);
+        const m = createManipulator(object, camera);
+        m.reset();
+        m.configure({ channels: ALL_CHANNELS, sensitivity: 1, momentum: false, triggerFrames: 3 });
+        let t = 1000;
+        const gun = () => { const h = hand(0.5, 0.5, 0, 'open'); h.gesture = 'None'; h.pointer = { gun: true }; h.pinch = { pinching: false, ratio: 0.6 }; return h; };
+        for (let i = 0; i < 10; i++) m.update([gun()], 1.78, (t += FR));
+        const t0 = t;
+        for (let i = 0; i < frames; i++) {
+          const f = hand(0.5, 0.5, 0, 'fist');
+          f.score = fistOpts.score; f.pinch = { pinching: fistOpts.ratio < 0.25, ratio: fistOpts.ratio }; f.pointer = { gun: false };
+          if (m.update([f], 1.78, (t += FR)) === MODE.GRAB) return t - t0;
+        }
+        return Infinity;
+      };
+      const sure = run({ score: 0.9, ratio: 0.6 });
+      const unsure = run({ score: 0.6, ratio: 0.6 });
+      const pinched = run({ score: 0.95, ratio: 0.1 });
+      checkTrue('#G5 aim → grab ≤ 250 ms for a sure Closed_Fist (≥ 0.8, thumb off the index); unsure fist still waits the 300 ms gap; #47 pinch never grabs',
+        sure <= 250 && unsure > 300 && pinched === Infinity, `sure ${sure.toFixed(0)} ms · unsure ${unsure.toFixed(0)} ms · pinched ${pinched}`);
+      object.position.set(0, 0, 0); object.quaternion.identity(); object.scale.set(1, 1, 1);
+      const m = createManipulator(object, camera);
+      m.reset();
+      m.configure({ channels: ALL_CHANNELS, sensitivity: 1, momentum: false, triggerFrames: 3 });
+      let t = 1000;
+      const seen = new Set();
+      for (let i = 0; i < 30; i++) {
+        const a = hand(0.3, 0.5, 0, 'open'); a.pointer = { gun: true };
+        const b = hand(0.7, 0.5, 0, 'fist'); b.handedness = 'Left'; b.score = 0.9; b.pinch = { pinching: true, ratio: 0.1 };
+        seen.add(m.update([a, b], 1.78, (t += FR)));
+      }
+      checkTrue('#G6 pointer up + other hand click-pinch read as Closed_Fist: never grabs (Platform POINTER_GRAB_BLOCK equivalent)', !seen.has(MODE.GRAB), [...seen].join(','));
+    }
+    // 7. Selected-part outline: brighter, eased.
+    {
+      const sc = new THREE.Scene();
+      const P = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2));
+      sc.add(P);
+      const hover = ret.createPartHighlight(sc);
+      const sel = ret.createPartHighlight(sc, ret.SELECTED_OUTLINE);
+      let t = 0;
+      const ops = [];
+      for (let i = 0; i < 40; i++) { hover.update({ part: P, nowMs: (t += 16) }); sel.update({ part: P, nowMs: t }); ops.push(sel.opacity); }
+      const hoverOn = hover.opacity;
+      const shownSel = sel.shown;
+      for (let i = 0; i < 40; i++) { sel.update({ part: null, nowMs: (t += 16) }); ops.push(sel.opacity); }
+      let maxStep = 0;
+      for (let i = 1; i < ops.length; i++) maxStep = Math.max(maxStep, Math.abs(ops[i] - ops[i - 1]));
+      checkTrue('#G7 selected outline: second instance, brighter than hover, eased in and out (no step > 0.15)',
+        ops[39] > hoverOn + 0.2 && ops[0] < 0.2 && ops.at(-1) < 0.02 && maxStep < 0.15 && shownSel === P && sel.shown === null,
+        `sel ${ops[39].toFixed(2)} vs hover ${hoverOn.toFixed(2)} · first ${ops[0].toFixed(2)} · max step ${maxStep.toFixed(3)}`);
+      hover.dispose(); sel.dispose();
+    }
+    // 8. Practice targets at least the hands-mode minimum.
+    {
+      const tg = cal.makeTargets(1600, 900, 6, [cal.PRACTICE_RADIUS_PX]);
+      checkTrue('#G8 practice targets ≥ 48 px across (HANDS-UX-SPEC §2; was 36 px)', 2 * cal.PRACTICE_RADIUS_PX >= 48 && tg.every((x) => 2 * x.r >= 48), String(cal.PRACTICE_RADIUS_PX));
+    }
+    // 9. Thumb-tap click: off by default, rewinds to the onset, A/B in practice.
+    {
+      const base = frame('pointer', 'side', 'None', { jitter: 0 }).worldLandmarks;
+      const withThumb = (g) => {
+        const w = base.map((q) => ({ ...q }));
+        const mid = { x: (w[5].x + w[6].x) / 2, y: (w[5].y + w[6].y) / 2, z: (w[5].z + w[6].z) / 2 };
+        const palm = Math.hypot(w[0].x - w[9].x, w[0].y - w[9].y, w[0].z - w[9].z);
+        w[4] = { x: mid.x, y: mid.y, z: mid.z + g * palm };
+        return w;
+      };
+      const gapOf = (w) => gunFeatures(w).thumbGap;
+      const cocked = withThumb(1.0);
+      const dropped = withThumb(0.05);
+      const mk = (on) => ptr.createPointer({ thumbTap: on });
+      const drive = (p) => {
+        let t = 0;
+        let click = null;
+        let xAtOnset = null;
+        for (let i = 0; i < 15; i++) p.update([ph(true, { cx: 0.5, world: cocked })], 1.78, (t += FR));
+        // Tap: the thumb drops over 3 frames while the hand (and cursor) drifts right.
+        const gs = [1.0, 0.5, 0.2, 0.05];
+        for (let i = 0; i < gs.length; i++) {
+          const r = p.update([ph(true, { cx: 0.5 + 0.02 * i, world: withThumb(gs[i]) })], 1.78, (t += FR));
+          if (i === 0) xAtOnset = p.state.x;
+          click = r ?? click;
+        }
+        return { click, xAtOnset };
+      };
+      const off = drive(mk(false));
+      const on = drive(mk(true));
+      checkTrue('#G9 thumb-tap: off by default = no click; on = a click via thumb-tap at the onset cursor (rewound)',
+        gapOf(cocked) > 0.55 && gapOf(dropped) < 0.3 && off.click === null && on.click?.via === 'thumb-tap' && Math.abs(on.click.x - on.xAtOnset) < 1e-9,
+        `gaps ${gapOf(cocked)}/${gapOf(dropped)} · off ${JSON.stringify(off.click)} · on ${on.click?.via} x ${on.click?.x?.toFixed(3)} onset ${on.xAtOnset?.toFixed(3)}`);
+      const p = mk(false);
+      let t = 0;
+      for (let i = 0; i < 15; i++) p.update([ph(true, { world: cocked })], 1.78, (t += FR));
+      p.setThumbTap(true);
+      const slowOn = [];
+      for (let i = 0; i < 15; i++) p.update([ph(true, { world: cocked })], 1.78, (t += FR));
+      for (let i = 0; i <= 50; i++) slowOn.push(p.update([ph(true, { world: withThumb(1.0 - i * 0.02) })], 1.78, (t += FR)));
+      checkTrue('#G9 thumb-tap: a slow thumb lowering (1.7 s; 0.55 → 0.30 gap in ~420 ms) never clicks', slowOn.every((c) => c === null) && p.thumbTap === true, String(slowOn.filter(Boolean).length));
+      // Practice A/B: thumb-tap rounds switch the pointer's trial on, and back off after.
+      const fp = { thumbTap: false, log: [], get state() { return { mode: 'aim', source: 'hand', x: 0, y: 0, frozen: false }; }, setThumbTap(v) { this.thumbTap = v; this.log.push(v); } };
+      const hadH = 'hologram' in globalThis; const savedH = globalThis.hologram; globalThis.hologram = {};
+      const pr = cal.createSelectionPractice({ pointer: fp, rect: () => ({ left: 0, top: 0, width: 800, height: 600 }), parent: document.createElement('div'),
+        rounds: [{ commit: 'other-pinch', targeting: 'point' }, { commit: 'thumb-tap', targeting: 'point' }] });
+      pr.start(0);
+      const during1 = fp.thumbTap;
+      let tt = 0;
+      while (pr.active && pr.round.index === 0) pr.onFrame((tt += 100));
+      const during2 = fp.thumbTap;
+      while (pr.active) pr.onFrame((tt += 100));
+      if (hadH) globalThis.hologram = savedH; else delete globalThis.hologram;
+      checkTrue('#G9 practice A/B: PRACTICE_ROUNDS_THUMB adds thumb-tap point + bubble; the trial is on only in its rounds',
+        cal.PRACTICE_ROUNDS_THUMB.filter((r) => r.commit === 'thumb-tap').length === 2 && during1 === false && during2 === true && fp.thumbTap === false,
+        `${during1} → ${during2} → ${fp.thumbTap}`);
+    }
   });
 
   const { createHandsRuntime } = await import(`./handsRuntime.js${V}`);

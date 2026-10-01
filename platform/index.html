@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Hologram Workshop</title>
+  <link rel="icon" href="../assets/site/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="../theme.css" />
   <style>
     /* One design system for the whole page (2026-09-29 UI overhaul): every panel, button and
@@ -323,6 +324,7 @@
     <header id="topbar">
       <button id="toggleLeft" class="ghost" data-icon="☰" title="Show / hide the items in this scene" aria-controls="left">☰ Items</button>
       <div class="brand">Hologram <span>Workshop</span></div>
+      <span id="site-nav"></span>
       <div class="sep"></div>
       <button id="libraryBtn" data-icon="▤" title="Library: your saved scenes and their versions (L)" aria-controls="libraryRing" aria-expanded="false">Library</button>
       <button id="saveVersionBtn" data-icon="💾" title="Save a version of this scene (Ctrl/⌘+S)">Save version</button>
@@ -429,5 +431,6 @@
   <script type="module">
     import(`./main.js?v=${Date.now()}`);
   </script>
+  <script type="module" src="../site-nav.js"></script>
 </body>
 </html>

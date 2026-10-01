@@ -11,7 +11,16 @@
 //     getItems(): the ready library items ({ root, parts: [{ id, mesh }] }), read every frame.
 //     button: the top-bar Camera toggle (label, aria-pressed and .active are kept in sync).
 //     setStatus(msg, isError): the page's status line.
-//     busy(): true while hand clicks must not select (polygon lens up, Library ring open).
+//     busy(): true while hands must do nothing in the scene (no hover, select or gesture). Default
+//       false. (The polygon lens and the Library ring no longer gate the hands: see ring/polygon.)
+//     ring(): the Library ring (ring.js) or null. While it is open the scene is behind it: aim +
+//       other-pinch works its cards through handUI.js (the ring's surface is data-hand=surface),
+//       a fist-drag spins it (ring.spinBy / spinEnd) and a flick coasts; nothing else moves.
+//     polygon(): the polygon lens (polygon.js) or null. While it is on, the lens follows the hand
+//       cursor; the other hand's pinch selects the faces in it (on the release); pinch-hold +
+//       vertical move sets its radius (up = bigger, x2 per LENS_PX_PER_E2 px), shown on the lens.
+//     resetView(): what a clap does on the Platform (main.js: frame everything; no edit).
+//     helpEl: the Help popover; gets the "remember the camera" checkbox (handUI.js).
 //     expose: an object (window.hologram) that gets handsRuntime / pointerStats / pointerProfile /
 //       calibration once the runtime exists, under the same names hologram.html uses, so
 //       sessionrec.js and tests read both pages the same way.
@@ -21,6 +30,11 @@
 //   hands.update(nowMs)   call once per display frame from the Platform's render loop (main.js
 //     onTick); never starts its own rAF. Cheap no-op until the camera has been started.
 //   hands.start() -> Promise<boolean>  / hands.stop() / hands.toggle()
+//   hands.autoStart() -> Promise<state>   page load: start the camera if it was remembered and
+//     the browser already allows it; else pulse the Camera button (handUI.js autoStartCamera).
+//   The runtime is built with handUI: true and cursorSpace 'page': the hand cursor reaches the
+//   top bar and both side panels and clicks / drags / scrolls them; over them nothing in the 3D
+//   view is hovered, held or picked.
 //   hands.calibrate() -> runtime.calibrate() result, or 'not-tracking'
 //   hands.handleAim({ state, hit }) / hands.handleClick(click)   what the runtime's 'aim' and
 //     'click' events do; exported so tests can drive the adapter without a camera.
@@ -44,7 +58,12 @@
 // camera frame instead of a model; every display frame this adapter reads the proxy's change
 // and turns it into objectMode calls, then puts the proxy back. So the Platform never moves
 // an object itself, and every hand edit lands in objectMode's edit log (undo, autosave,
-// versions). Channels: move, spin, push, scale (no tilt, explode or clap on the Platform).
+// versions). Channels: move, spin, push, scale, tilt, clap.
+//   Fist, nothing selected: orbit; push / pull while orbiting = zoom (dolly to the orbit centre,
+//     clamped to controls.minDistance..maxDistance); the second hand's tilt raises / lowers the
+//     view (like the fist's own up/down). A selected item never tilts (furniture stays upright).
+//   Clap (from rest): resetView() (no edit, so nothing to undo; the camera view autosaves).
+//   Explode: not on the Platform yet (objectMode has no explode op); the gesture says so.
 //   Fist, something selected     -> objectMode.beginMove(sel) ... moveBy(dx, dz, dy) ...
 //                                   endMove(): ONE 'move' edit per grab. Hand left/right ->
 //                                   along the screen's right on the floor; push/pull -> along
@@ -79,6 +98,7 @@ const isItemKey = (k) => typeof k === 'string' && k.startsWith('item:');
 export function createPlatformHands({
   scene, camera, renderer, controls, objectMode, getItems,
   button = null, setStatus = () => {}, busy = () => false, expose = null,
+  ring = () => null, polygon = () => null, resetView = null, helpEl = null,
   loadRuntime = () => import('../handsRuntime.js' + V).then((m) => m.createHandsRuntime)
 }) {
   let runtime = null;
@@ -88,8 +108,12 @@ export function createPlatformHands({
   const stats = {
     clicks: 0, selects: 0, misses: 0, ignored: 0, bvhBuilt: 0, bvhMs: 0,
     // step 3: gestures started, by what they did; refused = blocked by a pin
-    grabs: 0, moves: 0, orbits: 0, scales: 0, refused: 0
+    grabs: 0, moves: 0, orbits: 0, scales: 0, refused: 0,
+    // hands on the page: ring spins, lens selects / resizes, claps, page clicks (handUI)
+    ringSpins: 0, lensSelects: 0, lensResizes: 0, claps: 0, zooms: 0
   };
+  const ringOpen = () => !!ring()?.isOpen?.();
+  const lens = () => { const p = polygon(); return p?.active ? p : null; };
 
   // The camera stream and the debug skeleton canvas: the runtime needs both. Hidden, like on
   // hologram.html (seeing your own video breaks the illusion); visibility rather than display,
@@ -178,16 +202,38 @@ export function createPlatformHands({
     objectMode.hover(key);
   }
 
-  function handleAim({ state, hit } = {}) {
+  // The lens follows the hand cursor (only a pointer the hand set is cleared by the hand).
+  let lensByHand = false;
+  function aimLens(px) {
+    const L = lens();
+    if (!L) { lensByHand = false; return; }
+    if (px) { L.setPointer(px.x, px.y); lensByHand = true; } else if (lensByHand) { L.clearPointer(); lensByHand = false; }
+  }
+
+  function handleAim({ state, hit, px = null, ui = false } = {}) {
     const handAim = state && state.source === 'hand' && state.mode !== 'off' && !busy() && !runtime?.calibration?.active;
-    if (!handAim) { setHover(null); return; }
+    aimLens(handAim && !ui && !ringOpen() ? px : null);
+    // Over the page UI or the open ring, the scene behind is not hovered.
+    if (!handAim || ui || ringOpen()) { setHover(null); return; }
     const obj = hit?.hit?.object ?? null;
     setHover(obj ? keyFor({ partId: obj.userData.partId ?? null, itemId: obj.userData.itemId ?? null }) : null);
   }
 
   function handleClick(click) {
     if (!click || click.source !== 'hand') return null;
-    if (busy()) { stats.ignored++; return null; }
+    if (busy() || ringOpen()) { stats.ignored++; return null; }
+    // Polygon lens: the click selects the lens's faces on the release (a pinch-hold that moves
+    // up or down resizes the lens instead; see updateLensPress).
+    const L = lens();
+    if (L) {
+      stats.clicks++;
+      runtime?.pulse();
+      const px = click.px ?? runtime?.cursorPx ?? null;
+      if (px) L.setPointer(px.x, px.y);
+      lensPress = { y0: px?.y ?? 0, r0: L.radius, resized: false, tap: click.via !== 'other-pinch' };
+      if (lensPress.tap) finishLensPress();
+      return 'lens';
+    }
     stats.clicks++;
     runtime?.pulse();
     const h = hitAt(click.x, click.y);
@@ -200,6 +246,33 @@ export function createPlatformHands({
     if (key) stats.selects++; else stats.misses++;
     objectMode.select(key);
     return key;
+  }
+
+  // ---- polygon lens by hand ---------------------------------------------------------------------
+  // Pinch-hold + vertical move = lens radius (spec section 2: one "drag a value" meaning). Moving
+  // the cursor up LENS_PX_PER_E2 px doubles it; LENS_SLOP_PX of wobble still counts as a click.
+  const LENS_PX_PER_E2 = 160, LENS_SLOP_PX = 12;
+  let lensPress = null;      // { y0, r0, resized, tap }
+  function finishLensPress() {
+    const p = lensPress;
+    lensPress = null;
+    const L = lens();
+    if (!p || !L) return;
+    if (p.resized) { stats.lensResizes++; return; }
+    L.select({ add: false });
+    stats.lensSelects++;
+  }
+  function updateLensPress() {
+    if (!lensPress) return;
+    const L = lens();
+    const px = runtime?.cursorPx;
+    if (!L) { lensPress = null; return; }
+    if (px) {
+      const dy = lensPress.y0 - px.y;   // up = positive
+      if (!lensPress.resized && Math.abs(dy) > LENS_SLOP_PX) lensPress.resized = true;
+      if (lensPress.resized) L.radius = lensPress.r0 * Math.pow(2, dy / LENS_PX_PER_E2);
+    }
+    if (!runtime?.pinchHeld) finishLensPress();
   }
 
   // ---- gestures: the v1 manipulator on a proxy, read back as objectMode calls ----------------
@@ -227,7 +300,7 @@ export function createPlatformHands({
   // pointer -> fist switch past this, so that still grabs (hands-test G4).
   const POINTER_GRAB_BLOCK_MS = 200;
   let lastPointerAt = -Infinity;
-  const GESTURE_CHANNELS = ['move', 'spin', 'push', 'scale'];
+  const GESTURE_CHANNELS = ['move', 'spin', 'push', 'scale', 'tilt', 'clap', 'explode'];
 
   function ensureGesture() {
     gestureLoad ??= import('../manipulator.js' + V).then((m) => {
@@ -259,15 +332,18 @@ export function createPlatformHands({
       x: p.x - PROXY_HOME.x, y: p.y - PROXY_HOME.y,
       depth: len > 0 ? Math.log(len / PROXY_HOME.length()) : 0,
       spin: 2 * Math.atan2(qTmp.y, qTmp.w),
+      // Tilt (the manipulator's pitch about the screen's x): only the orbit uses it.
+      pitch: 2 * Math.atan2(qTmp.x, qTmp.w),
       scale: proxy.scale.x
     };
+    if (step.pitch > Math.PI) step.pitch -= 2 * Math.PI;
     if (step.spin > Math.PI) step.spin -= 2 * Math.PI;
     proxy.position.copy(PROXY_HOME);
     proxy.quaternion.identity();
     proxy.scale.set(1, 1, 1);
     return step;
   }
-  const isStill = (d) => Math.abs(d.x) < 1e-9 && Math.abs(d.y) < 1e-9 && Math.abs(d.depth) < 1e-9 && Math.abs(d.spin) < 1e-9 && Math.abs(d.scale - 1) < 1e-9;
+  const isStill = (d) => Math.abs(d.x) < 1e-9 && Math.abs(d.y) < 1e-9 && Math.abs(d.depth) < 1e-9 && Math.abs(d.spin) < 1e-9 && Math.abs(d.pitch ?? 0) < 1e-9 && Math.abs(d.scale - 1) < 1e-9;
 
   const nameOf = (key) => {
     if (isItemKey(key)) return getItems().find((it) => String(it.id) === key.slice(5))?.name ?? 'This item';
@@ -286,6 +362,11 @@ export function createPlatformHands({
   function openSession(kind, nowMs) {
     const sel = objectMode.selectedId;
     if (kind === 'grab') stats.grabs++;
+    // The Library ring is up: a fist spins it, nothing else moves.
+    if (ringOpen()) {
+      if (kind === 'grab') { stats.ringSpins++; return { kind: 'ring', id: null, gesture: kind }; }
+      return { kind: 'held', id: null, gesture: kind };
+    }
     if (kind === 'grab' && nowMs - lastPointerAt < POINTER_GRAB_BLOCK_MS) return { kind: 'held', id: sel, gesture: kind };
     // A mouse drag already owns the selection; the hand waits.
     if (objectMode.dragging) return { kind: 'held', id: sel, gesture: kind };
@@ -331,15 +412,32 @@ export function createPlatformHands({
       s.dz += flatRight.z * lateral + flatFwd.z * along;
       s.dy += d.spin;
       if (d.x || d.depth || d.spin) objectMode.moveBy(s.dx, s.dz, s.dy);
+    } else if (s.kind === 'ring') {
+      // Hand right = the ring follows right (like a pointer drag): cards per proxy unit = the
+      // view's width in px at depth 1 over the ring's px per card.
+      const r = ring();
+      if (!r || !d.x) return;
+      const vw = renderer.domElement.clientWidth || 800;
+      const unitsAcross = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * camera.aspect;
+      r.spinBy?.(-(d.x * vw / unitsAcross) / (r._state?.().pxPerCard || 160));
     } else if (s.kind === 'orbit') {
-      if (!d.x && !d.y) return;
+      // Push / pull = zoom: dolly toward the orbit centre by the same ln-ratio the hand moved.
+      if (d.depth) {
+        const off = camera.position.clone().sub(controls.target);
+        const lo = controls.minDistance ?? 0.01, hi = Number.isFinite(controls.maxDistance) ? controls.maxDistance : Infinity;
+        const len = THREE.MathUtils.clamp(off.length() * Math.exp(-d.depth), Math.max(0.01, lo), hi);
+        camera.position.copy(controls.target).add(off.setLength(len));
+        s.zoomed = true;
+      }
+      const tilt = d.pitch ?? 0;
+      if (!d.x && !d.y && !tilt) { if (d.depth) controls.update(); return; }
       // The world follows the fist: hand right turns the scene right (camera goes left), hand
       // up tips its near edge up (camera goes down). At depth 1 the step is already ~radians.
       const off = camera.position.clone().sub(controls.target);
       sph.setFromVector3(off);
       sph.theta -= d.x;
       const lo = Math.max(0.05, controls.minPolarAngle ?? 0), hi = Math.min(Math.PI - 0.05, controls.maxPolarAngle ?? Math.PI);
-      sph.phi = THREE.MathUtils.clamp(sph.phi + d.y, lo, hi);
+      sph.phi = THREE.MathUtils.clamp(sph.phi + d.y - tilt, lo, hi);
       camera.position.copy(controls.target).add(off.setFromSpherical(sph));
       camera.lookAt(controls.target);
       controls.update();
@@ -351,6 +449,8 @@ export function createPlatformHands({
   function closeSession() {
     if (!session) return;
     if (session.kind === 'move' && objectMode.dragging) objectMode.endMove();
+    if (session.kind === 'ring') ring()?.spinEnd?.();
+    if (session.kind === 'orbit' && session.zoomed) stats.zooms++;
     session = null;
   }
 
@@ -359,6 +459,13 @@ export function createPlatformHands({
     const MODE = gestureLib.MODE;
     const d = takeProxyStep();
     const mode = busy() || runtime?.calibration?.active ? MODE.IDLE : manip.mode;
+    // Clap (manipulator resetCount): the Platform's reset is the view, not an edit.
+    if (manip.resetCount !== lastResets) {
+      lastResets = manip.resetCount;
+      if (!busy() && !ringOpen()) { stats.claps++; resetView?.(); setStatus('👏 View reset · a fist orbits, push / pull zooms'); }
+    }
+    if (mode === MODE.EXPLODE && !explodeSaid) { explodeSaid = true; setStatus('👐 Explode isn\'t on the Platform yet · select a part to move it on its own'); }
+    if (mode !== MODE.EXPLODE) explodeSaid = false;
     const want = mode === MODE.GRAB ? 'grab' : mode === MODE.TRANSFORM ? 'scale' : null;
     if (session && session.gesture !== want) {
       // The gesture ended (or changed): let the spring land, then commit the one edit.
@@ -374,8 +481,9 @@ export function createPlatformHands({
     if (session) feed(session, d);
   }
 
+  let lastResets = 0, explodeSaid = false;
   // What the runtime calls "the manipulator" (handsRuntime.js: update on camera frames, tick
-  // every display frame). Busy (polygon lens, Library ring): hands are not read at all.
+  // every display frame). busy(): hands are not read at all.
   const gesture = {
     update(hands, aspect, t) {
       if (!manip) return 'idle';
@@ -395,6 +503,7 @@ export function createPlatformHands({
   function onAction(type, detail) {
     if (type === 'aim') handleAim(detail);
     else if (type === 'click') handleClick(detail);
+    else if (type === 'ui-type') setStatus('⌨ Type (optional) · or pinch elsewhere to carry on');
     else if (type === 'reset') setStatus(`↻ Tracking reset · ${detail.why} · raise a hand to carry on`);
     else if (type === 'hint') { if (detail) setStatus(HINT_TEXT[detail.key] ?? detail.text ?? ''); }
     else if (type === 'calibrated') {
@@ -414,9 +523,12 @@ export function createPlatformHands({
         manipulator: () => gesture,
         // A steady cursor on any drawn surface selects what is there (hold-to-select); off while
         // the lens or the ring owns the input.
-        holdOn: () => (busy() ? null : 'surface'),
+        holdOn: () => (busy() || ringOpen() || lens() ? null : 'surface'),
+        handUI: true,
+        cursorSpace: 'page',
         onAction
       });
+      lastResets = manip?.resetCount ?? 0;
       if (expose) {
         expose.handsRuntime = runtime;
         expose.pointerStats = runtime.stats;
@@ -446,6 +558,7 @@ export function createPlatformHands({
     try {
       const rt = await ensureRuntime();
       await rt.start();
+      button?.classList.remove('hand-pulse');
       syncButton();
       if (rt.profile) setStatus('Camera on · raise a hand, point at an item, pinch your other hand (or hold still) to select');
       else { setStatus('Camera on · first, a 45 s pointer calibration (Esc skips)'); rt.calibrate(); }
@@ -489,6 +602,16 @@ export function createPlatformHands({
     pickRoot.position.copy(controls.target);
     pickRoot.updateMatrixWorld();
     runtime.update(nowMs);
+    updateLensPress();
+  }
+
+  // Spec section 3: remember the camera (checkbox in Help, default on) and start it on load.
+  let uiLib = null;
+  const loadUiLib = () => (uiLib ??= import('../handUI.js' + V));
+  if (helpEl) loadUiLib().then((m) => m.mountRememberToggle(helpEl)).catch((err) => console.warn('hands: no remember toggle', err));
+  async function autoStart() {
+    const m = await loadUiLib();
+    return m.autoStartCamera({ start, button, setStatus });
   }
 
   // C calibrates, Esc skips a running calibration. Capture phase, so Esc during calibration
@@ -507,7 +630,8 @@ export function createPlatformHands({
   syncButton();
 
   return {
-    update, start, stop, toggle, calibrate, handleAim, handleClick, pickRoot,
+    update, start, stop, toggle, calibrate, handleAim, handleClick, pickRoot, autoStart,
+    get lensPress() { return lensPress && { ...lensPress }; },
     ensureRuntime, ensureGesture, gesture,
     get session() { return session && { kind: session.kind, id: session.id }; },
     get runtime() { return runtime; },

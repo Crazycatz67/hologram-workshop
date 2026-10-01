@@ -18,6 +18,11 @@
 //   H. (step 3) Pins: pin/unpin are edits; a pinned target refuses hand and mouse moves (no
 //      orbit either) and the API refuses; a part of a pinned item can still be moved alone;
 //      K toggles; undo and replay keep pins; mouse moves keep their old log shape.
+//   I. Hands on the page (fake ring / lens with the real widgets' surface): ring open = a fist-drag
+//      spins it (and back), clicks reach nothing; the lens follows the hand cursor, lets go over
+//      the page UI, pinch-hold + up resizes it (x2 per 160 px), a still pinch selects; push-zoom
+//      (fist with nothing selected: push away = in, pull = out); clap = resetView, not with the
+//      ring open.
 //   F. (?camera=1) Camera on: tracking, button state, overlay sized, frames driven by the host
 //      loop only (no requestAnimationFrame from hands code), first-use calibration starts and
 //      Esc skips it without clearing the selection; camera off. The saved pointer profile is
@@ -96,10 +101,13 @@ const statuses = [];
 const button = document.createElement('button');
 let busyFlag = false;
 let itemsShown = true;
+let fakeRing = null, fakeLens = null, viewResets = 0;
 const hands = createPlatformHands({
   scene, camera, renderer, controls, objectMode,
   getItems: () => (itemsShown ? items : []),
   button, setStatus: (m, err) => statuses.push({ m, err: !!err }), busy: () => busyFlag,
+  // Section I swaps in a fake ring / lens; null (the default) for everything before it.
+  ring: () => fakeRing, polygon: () => fakeLens, resetView: () => { viewResets++; },
   expose: (window.hologram = {}),
   loadRuntime: () => {
     loads++;
@@ -456,6 +464,120 @@ check('H9 mouse drag still logs one plain move (dx/dz, no dy) and stays undoable
   `edits=${md.map((e) => e.op).join(',')} dx=${md[0]?.dx?.toFixed(3)}`);
 objectMode.undo();
 check('H10 edit log back to the pre-gesture length after the undos (nothing leaked)', edits.length === nD && sameArr(arr(itemA.parts[0].mesh), part0) && sameArr(arr(itemA.root), rootA0), `edits=${edits.length}`);
+
+// ---- I. hands on the page: ring spin, lens follow / resize, push-zoom, clap ------------------
+// Fakes with the exact surface hands.js reads (ring.js isOpen/spinBy/spinEnd/_state; polygon.js
+// active/radius/setPointer/clearPointer/select), so these pin the adapter, not the widgets.
+{
+  const spins = [];
+  let spinEnds = 0;
+  fakeRing = { isOpen: () => true, spinBy: (n) => spins.push(n), spinEnd: () => { spinEnds++; }, _state: () => ({ pxPerCard: 160 }) };
+  rest(700);
+  objectMode.select('item:1');
+  n0 = edits.length;
+  const camR = camSnap();
+  const ring0 = hands.stats.ringSpins;
+  drive(300, () => [synthHand(0.5, 0.6, 'fist')]);
+  drive(300, (k) => [synthHand(lerp(0.5, 0.3, k), 0.6, 'fist')]);
+  drive(700, () => [synthHand(0.3, 0.6, 'open')]);
+  const cards = spins.reduce((a, b) => a + b, 0);
+  metrics.ringSpinCards = +cards.toFixed(2);
+  check('I1 ring open: a fist-drag spins the ring (one spin, ends with spinEnd), moves nothing, no edit, camera still',
+    hands.stats.ringSpins === ring0 + 1 && spins.length > 3 && Math.abs(cards) > 0.3 && spinEnds === 1 && edits.length === n0 &&
+    sameArr(arr(itemA.root), rootA0) && sameArr(camSnap(), camR, 1e-9),
+    `${spins.length} steps, ${cards.toFixed(2)} cards, spinEnd ${spinEnds}`);
+  // Opposite drag spins the other way (the ring follows the hand like a pointer drag).
+  const before = spins.length;
+  drive(300, () => [synthHand(0.3, 0.6, 'fist')]);
+  drive(300, (k) => [synthHand(lerp(0.3, 0.5, k), 0.6, 'fist')]);
+  drive(700, () => [synthHand(0.5, 0.6, 'open')]);
+  const back = spins.slice(before).reduce((a, b) => a + b, 0);
+  check('I2 ... dragging back spins it back by about the same amount (±25%)', Math.sign(back) === -Math.sign(cards) && Math.abs(Math.abs(back) / Math.abs(cards) - 1) < 0.25, `${back.toFixed(2)} vs ${cards.toFixed(2)}`);
+  check('I3 ring open: a hand click reaches nothing in the scene', hands.handleClick({ source: 'hand', via: 'other-pinch', x: 0, y: 0 }) === null && objectMode.selectedId === 'item:1');
+  fakeRing = null;
+  rest(700);
+
+  // Lens: follows the hand cursor; leaves it alone over page UI; pinch-hold + up = bigger.
+  let ptr = null, lensSel = 0;
+  fakeLens = { active: true, radius: 60, setPointer: (x, y) => { ptr = { x, y }; }, clearPointer: () => { ptr = null; }, select: () => { lensSel++; } };
+  const aimState = { source: 'hand', mode: 'aim' };
+  hands.handleAim({ state: aimState, hit: null, px: { x: 140, y: 120 } });
+  const followed = ptr && ptr.x === 140 && ptr.y === 120;
+  hands.handleAim({ state: aimState, hit: null, px: { x: 160, y: 130 }, ui: true });
+  const clearedOverUi = ptr === null;
+  hands.handleAim({ state: aimState, hit: null, px: { x: 200, y: 150 } });
+  hands.handleAim({ state: null, hit: null });
+  check('I4 lens follows the hand cursor, lets go over the page UI and when the hand leaves', followed && clearedOverUi && ptr === null);
+  // Pinch-hold and move up 160 px (= x2), via a stubbed runtime cursor (no camera here).
+  const own = (k) => Object.getOwnPropertyDescriptor(rt, k);
+  const saved = { cursorPx: own('cursorPx'), pinchHeld: own('pinchHeld'), tracking: own('tracking'), update: own('update') };
+  let cur = { x: 200, y: 300 }, held = true;
+  Object.defineProperty(rt, 'cursorPx', { get: () => cur, configurable: true });
+  Object.defineProperty(rt, 'pinchHeld', { get: () => held, configurable: true });
+  Object.defineProperty(rt, 'tracking', { get: () => true, configurable: true });
+  Object.defineProperty(rt, 'update', { value: () => {}, configurable: true, writable: true });
+  try {
+    const rs0 = hands.stats.lensResizes, ls0 = hands.stats.lensSelects;
+    const r = hands.handleClick({ source: 'hand', via: 'other-pinch', x: 0, y: 0, px: { x: 200, y: 300 } });
+    for (let i = 1; i <= 8; i++) { cur = { x: 200, y: 300 - 20 * i }; hands.update(performance.now()); }
+    const grown = fakeLens.radius;
+    held = false;
+    hands.update(performance.now());
+    metrics.lensResizeRatio = +(grown / 60).toFixed(3);
+    check('I5 lens: pinch-hold + 160 px up doubles the radius (±5%); the release selects nothing', r === 'lens' && Math.abs(grown / 60 - 2) < 0.1 &&
+      hands.stats.lensResizes === rs0 + 1 && hands.stats.lensSelects === ls0 && lensSel === 0, `r=${grown.toFixed(1)}`);
+    // A still pinch (inside the 12 px slop) is a click: the lens selects on release.
+    held = true; cur = { x: 200, y: 300 };
+    hands.handleClick({ source: 'hand', via: 'other-pinch', x: 0, y: 0, px: { x: 200, y: 300 } });
+    cur = { x: 203, y: 294 }; hands.update(performance.now());
+    held = false; hands.update(performance.now());
+    check('I6 lens: a still pinch selects the faces on release, radius unchanged', lensSel === 1 && hands.stats.lensSelects === ls0 + 1 && fakeLens.radius === grown, `selects=${lensSel}`);
+  } finally {
+    for (const [k, d] of Object.entries(saved)) { if (d) Object.defineProperty(rt, k, d); else delete rt[k]; }
+  }
+  fakeLens = null;
+
+  // Push-zoom: fist with nothing selected, pushed away from the camera (palm shrinks) = dolly in
+  // toward the orbit centre (hands.js contract: push / pull = zoom; pull = out).
+  rest(700);
+  objectMode.select(null);
+  n0 = edits.length;
+  const camZ = camSnap();
+  const dist0 = camera.position.distanceTo(controls.target);
+  const zooms0 = hands.stats.zooms;
+  drive(300, () => [synthHand(0.5, 0.6, 'fist', { palm: 0.12 })]);
+  drive(400, (k) => [synthHand(0.5, 0.6, 'fist', { palm: lerp(0.12, 0.08, k) })]);
+  drive(700, () => [synthHand(0.5, 0.6, 'open', { palm: 0.08 })]);
+  const dist1 = camera.position.distanceTo(controls.target);
+  metrics.pushZoomRatio = +(dist1 / dist0).toFixed(3);
+  check('I7 push-zoom: fist pushed away from the camera with nothing selected dollies in (target fixed, no edit)',
+    dist1 < dist0 * 0.95 && sameArr(controls.target.toArray(), camZ.slice(3), 1e-9) && edits.length === n0 && hands.stats.zooms === zooms0 + 1,
+    `distance ${dist0.toFixed(3)} -> ${dist1.toFixed(3)}`);
+  drive(300, () => [synthHand(0.5, 0.6, 'fist', { palm: 0.08 })]);
+  drive(400, (k) => [synthHand(0.5, 0.6, 'fist', { palm: lerp(0.08, 0.12, k) })]);
+  drive(700, () => [synthHand(0.5, 0.6, 'open', { palm: 0.12 })]);
+  const dist2 = camera.position.distanceTo(controls.target);
+  check('I8 ... pulling it back toward the camera dollies out again (back within 10% of the start)', dist2 > dist1 && Math.abs(dist2 / dist0 - 1) < 0.1, `${dist2.toFixed(3)}`);
+  camera.position.fromArray(camZ.slice(0, 3)); controls.update();
+
+  // Clap from rest: resetView once, status says so, no edit; not while the ring is open.
+  const clap = () => {
+    rest(800);
+    drive(200, () => [synthHand(0.2, 0.6, 'open', { handedness: 'Left' }), synthHand(0.8, 0.6, 'open')]);
+    drive(230, (k) => [synthHand(lerp(0.2, 0.47, k), 0.6, 'open', { handedness: 'Left' }), synthHand(lerp(0.8, 0.53, k), 0.6, 'open')]);
+    rest(300);
+  };
+  n0 = edits.length;
+  const v0 = viewResets, c0 = hands.stats.claps, st0 = statuses.length;
+  clap();
+  check('I9 clap: resetView() once, no edit, status says the view was reset', viewResets === v0 + 1 && hands.stats.claps === c0 + 1 && edits.length === n0 &&
+    statuses.slice(st0).some((s) => /View reset/.test(s.m)), `resets ${viewResets - v0}`);
+  fakeRing = { isOpen: () => true, spinBy: () => {}, spinEnd: () => {}, _state: () => ({ pxPerCard: 160 }) };
+  clap();
+  check('I10 clap with the ring open: no view reset', viewResets === v0 + 1, `resets ${viewResets - v0}`);
+  fakeRing = null;
+  rest(700);
+}
 
 // ---- F. camera on (opt-in) -------------------------------------------------------------------
 if (params.get('camera') === '1') {

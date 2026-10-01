@@ -169,10 +169,14 @@ export function annotateHand(hand, aspect = 1) {
 // `palm` overrides the live average palm length as the normaliser. Two-hand scale passes a
 // held reference (BUGS #31): the live palm length is the noisiest part of this ratio, and
 // while the hands hold one pinch the normaliser only needs to track real depth change.
-export function handSpan(handA, handB, aspect = 1, { palm: palmOverride = null } = {}) {
+// vWeight stretches the vertical part of the wrist distance (two-hand scale uses it: the
+// frame has ~1/aspect as much vertical room, owner 2026-10-01 "same zoom range"). Default 1.
+export function handSpan(handA, handB, aspect = 1, { palm: palmOverride = null, vWeight = 1 } = {}) {
   const palm = palmOverride ?? (palmLength(handA.landmarks, aspect) + palmLength(handB.landmarks, aspect)) / 2;
   if (palm <= 0) return 0;
-  return distance(handA.landmarks[LANDMARK.WRIST], handB.landmarks[LANDMARK.WRIST], aspect) / palm;
+  const a = handA.landmarks[LANDMARK.WRIST];
+  const b = handB.landmarks[LANDMARK.WRIST];
+  return Math.hypot((a.x - b.x) * aspect, (a.y - b.y) * vWeight) / palm;
 }
 
 // Signed angle of the line between the two hands. No longer used for the primary rotate

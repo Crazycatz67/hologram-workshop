@@ -57,6 +57,9 @@
 //                   (There is no per-version delete: the store soft-deletes projects.)
 //     'close'    the user dismissed the ring (Esc, L, the Library button, the close button).
 //               Programmatic close() and the close after 'choose' don't emit it.
+//   ring.spinBy(cards) / ring.spinEnd()   a hand fist-drag (platform/hands.js): moves the ring
+//                             like a pointer drag (same LEAD slip and speed cap), then on the
+//                             release coasts by the flick and snaps to a card. No-op when closed.
 //   ring.dispose()            removes every listener, mesh, material and texture it made.
 //   Extras (tests, later wiring): setFilter(name), setView('ring'|'grid'), _state().
 //
@@ -228,6 +231,9 @@ export function createRing({
   // The drag / click / wheel surface over the 3D cards.
   const surface = el('div', 'lr-surface');
   surface.setAttribute('aria-hidden', 'true');
+  // handUI.js: the hand's pinch reaches this as raw pointer events at the cursor (aim at a card +
+  // pinch = click it; pinch-hold + move = drag the ring), not as a click at its centre.
+  surface.dataset.hand = 'surface';
   const labels = el('div', 'lr-labels');
   labels.setAttribute('aria-hidden', 'true');
   const sideLabels = [];
@@ -741,6 +747,28 @@ export function createRing({
     if (hit.idx === active) choose();
     else setActive(hit.idx);
   }
+  // A hand fist-drag: the same as a pointer drag, in cards instead of px.
+  let spin = null;   // { samples:[{t, target}] }
+  function spinBy(cards) {
+    if (!open || !shown.length || !Number.isFinite(cards)) return;
+    spin ??= { samples: [{ t: performance.now(), target }] };
+    let t = target + cards;
+    if (Math.abs(t - pos) > LEAD) t = pos + Math.sign(t - pos) * LEAD;
+    target = t;
+    const now = performance.now();
+    spin.samples.push({ t: now, target });
+    while (spin.samples.length > 2 && now - spin.samples[0].t > 120) spin.samples.shift();
+    const i = mod(Math.round(target), shown.length);
+    if (i !== active) { active = i; versionIdx = versionIndexFor(cur()); syncActive(); }
+  }
+  function spinEnd() {
+    const sp = spin;
+    spin = null;
+    if (!sp || !open) return;
+    const a = sp.samples[0], b = sp.samples[sp.samples.length - 1];
+    const v = b.t > a.t ? clamp((b.target - a.target) / ((b.t - a.t) / 1000), -MAX_CARDS_PER_S, MAX_CARDS_PER_S) : 0;
+    setActive(Math.round(target + v * THROW_S));
+  }
   listen(surface, 'pointerup', (e) => endDrag(e, false));
   listen(surface, 'pointercancel', (e) => endDrag(e, true));
   // The dblclick's first click already chose (or brought the card to the centre); only a
@@ -791,7 +819,7 @@ export function createRing({
       let move = d * (1 - Math.exp(-dt / EASE_MS));
       const cap = MAX_CARDS_PER_S * dt / 1000;
       move = clamp(move, -cap, cap);
-      if (Math.abs(d) < 0.002 && !drag) pos = target; else pos += move;
+      if (Math.abs(d) < 0.002 && !drag && !spin) pos = target; else pos += move;
     }
     if (has3D) layout();
     if (!open && presence <= 0 && group) group.visible = false;
@@ -942,7 +970,7 @@ export function createRing({
 
   return {
     setProjects, open: openRing, close: () => closeRing(false), toggle, isOpen: () => open,
-    focus, update,
+    focus, update, spinBy, spinEnd,
     on(event, cb) {
       if (!handlers[event]) throw new TypeError(`ring.on: unknown event '${event}'`);
       handlers[event].add(cb);

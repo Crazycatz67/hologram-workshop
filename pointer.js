@@ -64,6 +64,7 @@
 //     or hits[0]: "hold again on the same spot" picks the next part behind.
 
 import { createHoldGate } from './holdGate.js';
+import { gunFeatures, THUMB_COCKED_MIN, THUMB_DROPPED_MAX } from './gunPose.js';
 
 export const ENGAGE_ENTER_Y = 0.88;
 export const ENGAGE_EXIT_Y = 0.94;
@@ -100,7 +101,20 @@ export const DEFAULT_SMOOTHING = SMOOTHING.responsive;
 // the shifted index tip.
 export const BEAM_LEN = 0.14; // NDC-height units (~63 px on a 900 px canvas)
 
-const CLUTCH_GRACE_MS = 100;  // a pose dropout shorter than this holds the cursor and stays 'aim'
+// Sticky pointer (owner-approved 2026-10-01, HANDS-UX-SPEC §1): pose wobble holds the cursor
+// still and stays 'aim' until a clear release pose (palm, fist, ✌) or STICKY_MS without the
+// pose. A re-entry within REENTRY_KEEP_MS of the last pose frame keeps the filter (no snap).
+export const STICKY_MS = 350;
+export const REENTRY_KEEP_MS = 400;
+const RELEASE_POSES = new Set(['Open_Palm', 'Closed_Fist', 'Victory']);
+// Thumb-tap click (owner-approved TRIAL 2026-10-01, behind a setting, default off; Ricky (b)):
+// the aiming hand's thumb drops from cocked (gunPose THUMB_COCKED_MIN) to on the index
+// (THUMB_DROPPED_MAX) within THUMB_TAP_MAX_MS. The thumb drags the index (Linburg-Comstock), so
+// the click lands where the cursor was when the thumb LEFT cocked (the onset), not at contact.
+// Must have been cocked for THUMB_COCKED_HOLD_MS first, so a resting thumb never clicks.
+export const THUMB_TAP_KEY = 'hands.thumbTap';
+const THUMB_TAP_MAX_MS = 250;  // a tap is ~100-150 ms; provisional until a live probe
+const THUMB_COCKED_HOLD_MS = 120;
 const CLUTCH_SHOW_MS = 1500;  // how long a held cursor stays visible before it hides
 
 // Click = the other hand's pinch. Measured live (gun-lab, 2026-10-01): the aiming palm moves a
@@ -289,7 +303,13 @@ function createPinchEdge() {
   };
 }
 
-export function createPointer({ rewindMs = REWIND_MS, profile = null, sameHandPinch = true } = {}) {
+function readThumbTapSetting() {
+  try { return globalThis.localStorage?.getItem(THUMB_TAP_KEY) === '1'; } catch { return false; }
+}
+
+export function createPointer({ rewindMs = REWIND_MS, profile = null, sameHandPinch = true, thumbTap = readThumbTapSetting() } = {}) {
+  let tapOn = thumbTap === true;
+  let thumb = { cockedSince: null, leftCockedAt: null, armed: false }; // see THUMB_TAP_MAX_MS
   let reach = { ...DEFAULT_REACH };
   const euro = createOneEuro2D(DEFAULT_SMOOTHING);
   let mode = 'off';
@@ -359,6 +379,7 @@ export function createPointer({ rewindMs = REWIND_MS, profile = null, sameHandPi
     otherPinch.reset();
     samePinch.reset();
     frozenAt = null;
+    thumb = { cockedSince: null, leftCockedAt: null, armed: false };
   }
 
   // The engaged hand whose palm is nearest the last aiming palm, within SAME_HAND_MATCH.
@@ -394,17 +415,29 @@ export function createPointer({ rewindMs = REWIND_MS, profile = null, sameHandPi
 
     setProfile,
 
+    // Thumb-tap click trial (default off). persist: also store it for the next page load.
+    get thumbTap() { return tapOn; },
+    setThumbTap(on, { persist = false } = {}) {
+      tapOn = on === true;
+      thumb = { cockedSince: null, leftCockedAt: null, armed: false };
+      if (persist) { try { globalThis.localStorage?.setItem(THUMB_TAP_KEY, tapOn ? '1' : '0'); } catch { /* storage blocked */ } }
+    },
+
     update(hands, aspect = 1, t = performance.now()) {
       const engaged = hands.filter((h) => hasLandmarks(h) && h.engaged !== false);
       const guns = engaged.filter((h) => h.pointer?.gun === true);
 
-      // A same-hand pinch bends the index, which can drop the pointer pose for a few frames:
-      // the hand that was aiming (matched by palm position) still counts as the aiming hand
-      // inside the dropout grace, and for as long as its pinch holds the cursor frozen.
+      // Sticky pointer: without the pose, the hand that was aiming (matched by palm position)
+      // still counts as the aiming hand for STICKY_MS, and for as long as its same-hand pinch
+      // holds the cursor frozen, unless it clearly shows a release pose (palm, fist, ✌). A
+      // pinching hand reads fist-like, so a closed pinch is never a release.
       let former = null;
-      if (!guns.length && sameHandPinch && mode === 'aim' && source === 'hand' && lastPalm) {
+      let released = false;
+      if (!guns.length && mode === 'aim' && source === 'hand' && lastPalm) {
         const f = formerAimHand(engaged);
-        if (f && (frozenAt !== null || t - lastGunT < CLUTCH_GRACE_MS)) former = f;
+        const pinched = f && (f.pinch?.pinching === true || (Number.isFinite(f.pinch?.ratio) && f.pinch.ratio < SAME_PINCH_CLOSE));
+        released = !!f && !pinched && frozenAt === null && RELEASE_POSES.has(f.gesture);
+        if (f && !released && (frozenAt !== null || t - lastGunT < STICKY_MS)) former = f;
       }
 
       if (guns.length) {
@@ -412,11 +445,13 @@ export function createPointer({ rewindMs = REWIND_MS, profile = null, sameHandPi
         const c = palmCentroid(hand.landmarks);
         if (mode !== 'aim' || source !== 'hand') {
           // (Re)entering the pose: the cursor goes straight to where the hand is. Absolute,
-          // so a fresh filter start is right (it would otherwise glide in from the old spot).
+          // so a fresh filter start is right (it would otherwise glide in from the old spot),
+          // except on a quick re-entry after wobble, where a reset would make the cursor snap.
+          const quick = source === 'hand' && t - lastGunT < REENTRY_KEEP_MS;
           mode = 'aim';
           source = 'hand';
           clutchSince = null;
-          euro.reset();
+          if (!quick) euro.reset();
           resetPinch();
         }
         lastGunT = t;
@@ -430,16 +465,17 @@ export function createPointer({ rewindMs = REWIND_MS, profile = null, sameHandPi
         aimHand = hand;
         record(t);
       } else if (former) {
-        // Held cursor (no motion) while the pose is down for the pinch.
+        // Held cursor (no motion) while the pose wobbles or is down for the pinch.
         if (frozenAt !== null) lastGunT = t;
         lastPalm = palmCentroid(former.landmarks);
         aimHand = former;
         record(t);
       } else if (mode === 'aim' && source === 'hand') {
-        // A short dropout holds the cursor still (no motion, no click); a longer one hides it
-        // after CLUTCH_SHOW_MS.
-        if (t - lastGunT >= CLUTCH_GRACE_MS) enterClutch(t);
-        else record(t);
+        // A clear release pose ends aiming at once; otherwise the cursor holds still until
+        // STICKY_MS without the pose (hand out of view, or wandered off), then hides after
+        // CLUTCH_SHOW_MS.
+        if (released || t - lastGunT >= STICKY_MS) enterClutch(t);
+        else { aimHand = null; record(t); }
       }
 
       if (mode !== 'aim' || source !== 'hand') {
@@ -459,6 +495,33 @@ export function createPointer({ rewindMs = REWIND_MS, profile = null, sameHandPi
         if (onset && t - lastClickT >= CLICK_REFRACTORY_MS) {
           click = clickAt(t, 'pinch');
           frozenAt = t;
+        }
+      }
+
+      // 1b. Thumb-tap (trial, behind the setting), only on frames that really see the pose.
+      if (tapOn && !click && aimHand && guns.includes(aimHand) && aimHand.worldLandmarks) {
+        const gap = gunFeatures(aimHand.worldLandmarks)?.thumbGap;
+        if (Number.isFinite(gap)) {
+          if (gap > THUMB_COCKED_MIN) {
+            thumb.cockedSince ??= t;
+            thumb.lastCockedT = t;
+            thumb.leftCockedAt = null;
+            if (t - thumb.cockedSince >= THUMB_COCKED_HOLD_MS) thumb.armed = true;
+          } else {
+            if (thumb.cockedSince !== null) thumb.leftCockedAt = thumb.lastCockedT;  // the onset
+            thumb.cockedSince = null;
+            if (thumb.leftCockedAt !== null && t - thumb.leftCockedAt > THUMB_TAP_MAX_MS) thumb.armed = false;
+            if (gap < THUMB_DROPPED_MAX && thumb.armed && thumb.leftCockedAt !== null && t - lastClickT >= CLICK_REFRACTORY_MS) {
+              thumb.armed = false;
+              const onset = thumb.leftCockedAt;
+              lastClickT = t;
+              const at = cursorAt(onset);
+              x = at.x;
+              y = at.y;
+              record(t);
+              click = { type: 'click', x, y, t, source: 'hand', via: 'thumb-tap' };
+            }
+          }
         }
       }
 

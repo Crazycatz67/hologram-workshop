@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Hand UI test</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="theme.css" />
+<style>
+  /* Fixed positions: the checks aim a synthetic hand cursor at known page px (1280 x 900). */
+  html, body { overflow: hidden; height: 100%; margin: 0; }
+  #fixture > * { position: absolute; }
+  #btn { left: 20px; top: 10px; width: 80px; height: 30px; }
+  #tiny { left: 300px; top: 16px; width: 18px; height: 18px; padding: 0; font-size: 10px; }
+  #pa { left: 420px; top: 10px; width: 40px; height: 30px; }
+  #pb { left: 520px; top: 10px; width: 40px; height: 30px; }
+  #slider { left: 20px; top: 70px; width: 200px; margin: 0; }
+  #sel { left: 300px; top: 66px; }
+  #txt { left: 420px; top: 66px; width: 140px; }
+  #list { left: 20px; top: 110px; width: 220px; height: 120px; overflow: auto; border: 1px solid #234; padding: 0; margin: 0; }
+  #list button { display: block; width: 100%; height: 28px; position: static; }
+  #stage { left: 300px; top: 110px; width: 400px; height: 220px; border: 1px solid #234; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  #ringStage { left: 20px; top: 350px; width: 800px; height: 420px; border: 1px solid #234; }
+  #ringStage canvas { display: block; width: 100%; height: 100%; }
+  #out { position: absolute; left: 840px; top: 10px; width: 430px; height: 880px; overflow: auto; margin: 0; white-space: pre-wrap; font: 11px ui-monospace, monospace; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/" } }
+</script></head>
+<body>
+<div id="fixture">
+  <button id="btn">Button</button>
+  <button id="tiny">t</button>
+  <button id="pa">A</button>
+  <button id="pb">B</button>
+  <input id="slider" type="range" min="0" max="100" step="1" value="20">
+  <select id="sel"><option>one</option><option>two</option><option>three</option></select>
+  <input id="txt" type="text" placeholder="name">
+  <div id="list"></div>
+  <div id="stage"></div>
+  <div id="ringStage"><div id="libraryRing" hidden><div id="libraryList"></div></div></div>
+</div>
+<pre id="out"><b>Hand UI (handUI.js via handsRuntime): synthetic hand cursor + other-hand pinch on buttons, sliders, lists, the Library ring; camera auto-start.</b> Nothing here flashes.
+</pre>
+<script type="module">
+  // Test recorder: saves this run to docs/testing/runs/ on localhost (docs/testing/README.md).
+  const rec = await import('./testrec.js').then((m) => m.startRun({ page: 'handui-test', title: document.title })).catch(() => null);
+  import('./handui-test.js?v=' + Date.now()).then(() => {
+    const r = window.handUIResults;
+    for (const x of r?.results ?? []) rec?.result(x.name, x.detail ?? '', { pass: !!x.ok });
+    for (const [k, v] of Object.entries(r?.metrics ?? {})) rec?.metric(k, v);
+    rec?.end();
+  }).catch((e) => {
+    document.getElementById('out').textContent += '\nERROR ' + (e.stack || e);
+    console.error(e);
+    rec?.end('crashed');
+  });
+</script>
+</body></html>

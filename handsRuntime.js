@@ -41,7 +41,9 @@
 //   runtime.cycleTarget() -> part | null   Tab: the next part behind the cursor, or the next
 //     part in order; selects it on the manipulator (host binds the key).
 //   runtime.injectClick(click)   route a click as if the hands made it ({ x, y, t, source,
-//     via?, part? }); for labs, tests and replays. Ignored while calibrating.
+//     via?, part?, px? }; x, y in canvas NDC); for labs, tests and replays. Ignored while calibrating.
+//   runtime.injectFrame(hands, { aspect?, t? }) -> mode   one camera frame of annotated hands
+//     through the live path (pointer, clicks, handUI, pinchHeld) plus a display frame; no camera.
 //   runtime.on(type, fn) -> unsubscribe
 //   runtime.dispose()            stop, remove canvas listeners, remove the reticle.
 //   Getters: tracking, hands (this camera frame's annotated hands), pointer (pointer.js),
@@ -67,7 +69,24 @@
 //     'reset'       { why }       tracking reset (both hands lowered 1 s), not while calibrating
 //     'hint'        hint | null   only when the hint key changes (pointer.js createTrackingMonitor)
 //     'calibrated'  profile       calibration finished or was skipped
+//     'practice-start' { rounds }  selection practice started (the host's button can say Stop at once)
 //     'starting' / 'stop'         see start() / stop()
+//     'ui-click'    { kind, el, label, x, y (page px), via }  a hand click that went to the page
+//                   (handUI.js) instead of the 3D pick; kind = handUI press() result
+//
+//   HANDS ON THE PAGE (HANDS-UX-SPEC section 2; both options default off = the old behaviour):
+//     handUI: true | handUI.js options   the hand cursor also works the page's buttons, sliders,
+//       lists and scroll areas (handUI.js). While the cursor is over the page UI the 3D reticle
+//       hides, nothing is hover/hold-selected and a hand click goes to the page, never to the
+//       3D pick. body.hands-on is set while the camera runs.
+//     cursorSpace: 'canvas' (default) | 'page'   what the calibrated reach maps onto: the canvas
+//       (old) or the whole window, so the hand can reach a top bar or side panel outside the 3D
+//       view. Calibration and selection practice always use the canvas (their targets are drawn
+//       there). With 'page', 3D clicks and aim still arrive in canvas NDC (values past +-1 =
+//       outside the canvas).
+//     runtime.ui (handUI | null), runtime.pinchHeld (the clicking hand is still pinched; for
+//       pinch-hold drags), runtime.cursorPx ({ x, y } page px of the hand cursor | null),
+//       runtime.overUi. The 'aim' event detail also carries { px, ui } (page px, over the UI).
 //   Not built yet (P1 step 2+): a per-hand 'rest' event and multiple pick roots.
 const V = new URL(import.meta.url).search;
 
@@ -79,8 +98,9 @@ const { MODE } = await import('./manipulator.js' + V);
 const { createHandModel } = await import('./handModel.js' + V);
 const { smoothHandLandmarks, resetLandmarkSmoothing } = await import('./smoothLandmarks.js' + V);
 const { createPointer, createEngagement, createResetGate, createTrackingMonitor, createSelector, nextInStack, BUBBLE_PX } = await import('./pointer.js' + V);
-const { createReticle, probe, createPartHighlight } = await import('./reticle.js' + V);
+const { createReticle, probe, createPartHighlight, SELECTED_OUTLINE } = await import('./reticle.js' + V);
 const { createCalibration, loadProfile, applyProfile, createSelectionPractice } = await import('./calibrate.js' + V);
+const { createHandUI } = await import('./handUI.js' + V);
 
 // A drag is an orbit, not a click (same 5 px rule as the measure panel).
 const CLICK_TOLERANCE_PX = 5;
@@ -88,7 +108,7 @@ const CLICK_TOLERANCE_PX = 5;
 export function createHandsRuntime({
   scene, camera, renderer, canvas = renderer.domElement, overlay, video,
   pickTargets = () => null, ghostAnchor = pickTargets, manipulator = () => null, onAction = null,
-  holdSelect = true, holdOn = () => 'parts'
+  holdSelect = true, holdOn = () => 'parts', handUI = false, cursorSpace = 'canvas'
 }) {
   const overlayCtx = overlay.getContext('2d');
   const listeners = new Map();
@@ -106,6 +126,15 @@ export function createHandsRuntime({
   // The hands drawn in the scene: a rigged hologram hand at a constant size (handModel.js),
   // falling back to ghostHands.js's skeleton if the hand asset can't load.
   const handModel = createHandModel(scene, HAND_CONNECTIONS);
+
+  // Hands on the page (handUI.js): opt-in, so test pages that build a bare runtime are unchanged.
+  const ui = handUI ? createHandUI({
+    canvas, ...(handUI === true ? {} : handUI),
+    onAction: (type, d) => { if (type === 'type') emit('ui-type', d); }
+  }) : null;
+  let pinchHeld = false;     // the non-aiming raised hand is pinched (camera frames)
+  let cursorPx = null;       // page px of the hand cursor this display frame
+  let overUi = false;
   const isFist = (h) => h.fistLike;
 
   // Finger-gun pointer (pointer.js) and its reticle (reticle.js). Aim with one hand in the
@@ -115,6 +144,8 @@ export function createHandsRuntime({
   const pointer = createPointer();
   const reticle = createReticle(scene);
   const highlight = createPartHighlight(scene); // the hovered exploded part's outline
+  // The SELECTED part's outline (Debbie-G #7): steady, brighter, drawn whether or not you aim.
+  const selectedHighlight = createPartHighlight(scene, SELECTED_OUTLINE);
   // Lower both hands for 1 s = tracking reset; hints only while tracking struggles (owner, 2026-10-01).
   const resetGate = createResetGate();
   const trackingMonitor = createTrackingMonitor();
@@ -191,6 +222,28 @@ export function createHandsRuntime({
     return { x: ((st.x + 1) / 2) * vp.width, y: ((1 - st.y) / 2) * vp.height };
   }
 
+  // Page px of a cursor in reach NDC (pointer.state / a pointer click), in the cursor space.
+  const pageSpace = () => cursorSpace === 'page' && !calibration.active && !practice?.active;
+  function pagePxOf(ndc) {
+    if (pageSpace()) {
+      const w = globalThis.innerWidth || 1, h = globalThis.innerHeight || 1;
+      return { x: ((ndc.x + 1) / 2) * w, y: ((1 - ndc.y) / 2) * h };
+    }
+    const rect = canvas.getBoundingClientRect();
+    return { x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
+  }
+  // Canvas NDC of a page px (past +-1 = outside the canvas).
+  function canvasNdcOf(px) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: ((px.x - rect.left) / (rect.width || 1)) * 2 - 1, y: -((px.y - rect.top) / (rect.height || 1)) * 2 + 1 };
+  }
+  // A pointer click (reach NDC) as a canvas-NDC click carrying its page px.
+  function placeClick(click) {
+    if (!click || click.source !== 'hand') return click;
+    const px = pagePxOf(click);
+    return pageSpace() ? { ...click, ...canvasNdcOf(px), px } : { ...click, px };
+  }
+
   // Ranked part candidates at an NDC point, or [] when parts aren't the target right now.
   function partCandidates(ndc) {
     const manip = manipulator();
@@ -221,6 +274,7 @@ export function createHandsRuntime({
       onDone: (r) => { stats.practice = r; emit('practice', r); opts.onDone?.(r); }
     });
     practice.start(performance.now());
+    emit('practice-start', { rounds: opts.rounds ?? null });
     return 'started';
   }
 
@@ -231,6 +285,18 @@ export function createHandsRuntime({
     if (practice?.active && click.source === 'hand') {
       practice.onClick(click);
       return;
+    }
+    // Over the page UI: the click is the page's (a button, slider, list), never a 3D pick.
+    if (ui && click.source === 'hand' && click.via !== 'hold') {
+      // Injected clicks carry canvas NDC (no px): their page px is on the canvas.
+      const rect = canvas.getBoundingClientRect();
+      const px = click.px ?? { x: rect.left + ((click.x + 1) / 2) * rect.width, y: rect.top + ((1 - click.y) / 2) * rect.height };
+      if (ui.overUiAt(px)) {
+        const kind = ui.press({ px, tap: click.via === 'pinch' });
+        stats.uiClicks = (stats.uiClicks ?? 0) + 1;
+        emit('ui-click', { kind, el: ui.target, label: ui.target ? (ui.target.getAttribute('aria-label') || ui.target.textContent || '').trim().slice(0, 60) : '', x: px.x, y: px.y, via: click.via, t: click.t });
+        return;
+      }
     }
     if (click.source === 'hand') {
       stats.clicks++;
@@ -363,11 +429,14 @@ export function createHandsRuntime({
     emit('starting', { phase: 'camera' });
     stream = await startCamera(video);
     tracking = true;
+    ui?.setEnabled(true);
     watchVideoFrames();
   }
 
   function stop() {
     tracking = false;
+    pinchHeld = false;
+    ui?.setEnabled(false);
     stopCamera(stream);
     stream = null;
     video.srcObject = null;
@@ -409,9 +478,18 @@ export function createHandsRuntime({
   // Every display frame (after the drawn hands, whose index tip the beam starts from).
   function updatePointerVisuals(nowMs) {
     pointer.tick(nowMs);
-    const st = pointer.state;
+    let st = pointer.state;
+    // The hand cursor on the page (handUI.js): over the UI, the 3D reticle and hold-select stand down.
+    const handCursor = st.source === 'hand' && st.mode !== 'off';
+    cursorPx = handCursor ? pagePxOf(st) : null;
+    if (handCursor && pageSpace()) st = { ...st, ...canvasNdcOf(cursorPx) };
+    overUi = false;
+    if (ui) {
+      const special = calibration.active || !!practice?.active;
+      overUi = ui.update({ px: special ? null : cursorPx, pinchHeld, nowMs }).overUi;
+    }
     const target = pickTargets();
-    const shown = st.mode !== 'off' && target;
+    const shown = st.mode !== 'off' && target && !overUi;
     const result = reticle.update({
       cursor: shown ? { x: st.x, y: st.y } : null,
       object: target,
@@ -422,9 +500,39 @@ export function createHandsRuntime({
       hold: shown ? holdShown : 0
     });
     snappedVertex = result?.vertex ?? null;
-    updateSelection(st, result, nowMs);
+    updateSelection(overUi ? { ...st, mode: 'off' } : st, result, nowMs);
     highlight.update({ part: target?.part ?? null, nowMs });
-    emit('aim', { state: st, hit: result ?? null });
+    selectedHighlight.update({ part: manipulator()?.activePart ?? null, nowMs });
+    emit('aim', { state: st, hit: overUi ? null : result ?? null, px: cursorPx, ui: overUi });
+  }
+
+  // One camera frame's hands (annotated) through engagement, the manipulator, the pointer and
+  // the click router. Shared by update() and injectFrame() (tests drive it without a camera).
+  function processFrame(frameHands, aspect, now, manip = manipulator()) {
+    hands = frameHands;
+    // Raised hands only (hand.engaged); the manipulator and pointer both ignore lowered ones.
+    engagement.update(hands);
+    const calibrating = calibration.active;
+
+    const mode = calibrating ? MODE.IDLE : manip?.update(hands, aspect, now) ?? MODE.IDLE;
+    const click = pointer.update(hands, aspect, now);
+    // Pinch-hold drags (sliders, scroll, the polygon lens radius): the clicking hand = any
+    // raised hand other than the aiming one, still pinched.
+    const aimHand = pointer.state.aimHand;
+    pinchHeld = hands.some((h) => h !== aimHand && h.engaged !== false && h.pinch?.pinching === true);
+    if (calibrating) {
+      calibration.onClick(click);
+      calibration.onFrame(hands, now);
+      if (click) reticle.pulse();
+    } else {
+      route(placeClick(click));
+    }
+    if (resetGate.update(hands, now) && !calibrating) trackingReset();
+    const hint = trackingMonitor.update(hands, pointer.state, now);
+    stats.hint = hint?.key ?? null;
+    setHint(hint);
+    emit('frame', { mode, hands, calibrating, now });
+    return mode;
   }
 
   function update(tickNow = performance.now()) {
@@ -453,24 +561,7 @@ export function createHandsRuntime({
       // read as a grabbing fist and never blocks a pinch (BUGS #32). hand.pointer is
       // { gun, rejectedBy }; the manipulator also uses it for the post-pointer gap.
       for (const hand of hands) annotateHand(hand, aspect);
-      // Raised hands only (hand.engaged); the manipulator and pointer both ignore lowered ones.
-      engagement.update(hands);
-
-      const calibrating = calibration.active;
-      mode = calibrating ? MODE.IDLE : manip?.update(hands, aspect, now) ?? MODE.IDLE;
-      const click = pointer.update(hands, aspect, now);
-      if (calibrating) {
-        calibration.onClick(click);
-        calibration.onFrame(hands, now);
-        if (click) reticle.pulse();
-      } else {
-        route(click);
-      }
-      if (resetGate.update(hands, now) && !calibrating) trackingReset();
-      const hint = trackingMonitor.update(hands, pointer.state, now);
-      stats.hint = hint?.key ?? null;
-      setHint(hint);
-      emit('frame', { mode, hands, calibrating, now });
+      mode = processFrame(hands, aspect, now, manip);
     }
     // Every display frame, not just camera frames: the model's follow springs glide between
     // camera frames instead of stepping at camera rate (manipulator.js, "FOLLOW").
@@ -499,6 +590,8 @@ export function createHandsRuntime({
     reticle.dispose?.();
     handModel.dispose();
     highlight.dispose();
+    selectedHighlight.dispose();
+    ui?.dispose();
     listeners.clear();
   }
 
@@ -524,6 +617,16 @@ export function createHandsRuntime({
     injectClick(click) {
       if (click && !calibration.active) route({ ...click });
     },
+    // Tests / replays: one camera frame of already-annotated hands (gestures.annotateHand, or
+    // hand.pointer / hand.pinch set by hand) through the same path as update() (engagement,
+    // manipulator, pointer, clicks incl. handUI, pinchHeld), then a display frame. No camera.
+    injectFrame(frameHands, { aspect = 16 / 9, t = performance.now() } = {}) {
+      const manip = manipulator();
+      const mode = processFrame(frameHands, aspect, t, manip);
+      manip?.tick(t);
+      updatePointerVisuals(t);
+      return mode;
+    },
     on(type, fn) {
       if (!listeners.has(type)) listeners.set(type, new Set());
       listeners.get(type).add(fn);
@@ -539,6 +642,10 @@ export function createHandsRuntime({
     get target() { return target; },
     get practice() { return practice; },
     get handModel() { return handModel; },
+    get ui() { return ui; },
+    get pinchHeld() { return pinchHeld; },
+    get cursorPx() { return cursorPx; },
+    get overUi() { return overUi; },
     startPractice,
     get selector() { return selector; }
   };

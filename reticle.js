@@ -277,11 +277,17 @@ export function partLabel(part) {
 const OUTLINE_OPACITY = 0.7;
 const OUTLINE_ANGLE_DEG = 30; // edges sharper than this are drawn (keeps a scan's noise out)
 
-export function createPartHighlight(scene) {
+// The SELECTED part's lasting outline (owner-approved 2026-10-01, Ricky (f)): a second
+// createPartHighlight, brighter than the hover one and drawn over it, with the same eased fades
+// (EASE_MS in and out; nothing flashes, BUGS #14).
+export const SELECTED_OUTLINE = { opacity: 1, color: new THREE.Color(0xdff8ff), renderOrder: 999 };
+
+export function createPartHighlight(scene, { opacity: maxOpacity = OUTLINE_OPACITY, color = COLOR, renderOrder = 998 } = {}) {
+  const base = new THREE.Color(color);
   const edgesOf = new WeakMap();
-  const material = new THREE.LineBasicMaterial({ color: COLOR.clone(), transparent: true, depthTest: false, depthWrite: false, opacity: 0 });
+  const material = new THREE.LineBasicMaterial({ color: base.clone(), transparent: true, depthTest: false, depthWrite: false, opacity: 0 });
   const lines = new THREE.LineSegments(new THREE.BufferGeometry(), material);
-  lines.renderOrder = 998;
+  lines.renderOrder = renderOrder;
   lines.frustumCulled = false;
   lines.visible = false;
   scene.add(lines);
@@ -315,8 +321,8 @@ export function createPartHighlight(scene) {
         lines.matrix.copy(shown.matrixWorld);
         lines.matrixWorld.copy(shown.matrixWorld);
       }
-      material.color.copy(COLOR).lerp(INFERRED_COLOR, amber);
-      material.opacity = OUTLINE_OPACITY * vis;
+      material.color.copy(base).lerp(INFERRED_COLOR, amber);
+      material.opacity = maxOpacity * vis;
       lines.visible = !!shown && material.opacity > 0.002;
       return shown;
     },

@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Hologram Workshop — Gesture Demo</title>
+  <link rel="icon" href="assets/site/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="theme.css" />
   <style>
     /* Layout (2026-10-01 declutter, matching the Platform): a clean top bar, the hologram in
@@ -60,6 +61,7 @@
     #mode.aim { color: var(--accent); border-color: rgba(79,209,255,.35); }
     #status { color: var(--ok); }
     #status.error { color: var(--err); }
+    #credit { margin-left: auto; min-width: 0; color: var(--muted); }
     #recSlot { margin-left: auto; }
 
     /* ---- Tools panel (right): tabs as on the Platform Inspector ---- */
@@ -166,6 +168,7 @@
   <div id="app">
     <header id="topbar" class="topbar">
       <div class="brand wide-only"><a href="platform/index.html" title="Open the full workshop">Hologram <span>Workshop</span></a></div>
+      <span id="site-nav"></span>
       <div class="sep wide-only"></div>
       <button id="start" class="primary" disabled title="Camera on / off: use your hands">▶<span class="btn-word"> Camera</span></button>
       <button id="reset" title="Put the model back where it started (R; U undoes)">↺<span class="btn-word"> Reset</span></button>
@@ -230,6 +233,8 @@
 
     <footer id="statusbar" class="statusbar">
       <span id="status">Loading the model…</span>
+      <!-- Attribution of the loaded stock model (samples.js credit); CC BY models must show it. -->
+      <span id="credit"></span>
       <!-- sessionrec.js may mount its SHADOW badge here (board request, 2026-10-01). -->
       <span id="recSlot"></span>
     </footer>
@@ -252,6 +257,7 @@
       import(`./sessionrec.js?v=${Date.now()}`).then((m) => m.startSession({ name: 'hologram' })).catch(() => {});
     }
   </script>
+  <script type="module" src="site-nav.js"></script>
   <script type="module">
     const stamp = Date.now();
     import(`./hologram.js?v=${stamp}`);

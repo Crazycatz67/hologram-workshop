@@ -16,11 +16,12 @@ const { prepareHologram, enableSingleLayer } = await import('./hologramLook.js' 
 const { createMeasurePanel } = await import('./measurePanel.js' + V);
 const { MODELS } = await import('./models.js' + V);
 const { createCarousel } = await import('./carousel.js' + V);
-const { scoreLine, PRACTICE_ROUNDS } = await import('./calibrate.js' + V);
+const { scoreLine, PRACTICE_ROUNDS, PRACTICE_ROUNDS_THUMB } = await import('./calibrate.js' + V);
 const { partLabel } = await import('./reticle.js' + V);
 // Camera, tracker, smoothing, engagement, pointer, reticle, calibration, reset gate, tracking
 // monitor and ghost hands live in the shared hands runtime (also used by the Platform).
 const { createHandsRuntime } = await import('./handsRuntime.js' + V);
+const { autoStartCamera, mountRememberToggle, setRememberCamera } = await import('./handUI.js' + V);
 const { createOrbitGuard } = await import('./orbitGuard.js' + V);
 
 const video = document.getElementById('cam');
@@ -64,7 +65,7 @@ const the = () => `the ${model.name.toLowerCase()}`;
 // scanlineSize is high on purpose. At the library's default (8) the scanline bands are
 // wide enough to cut clean across a chair leg, and thin parts read as SEVERED -- reported
 // as the model looking "half disconnected". Confirmed it was the shader and not the mesh by
-// rendering the same file with an opaque material (index.html?plain=1), where the chair is
+// rendering the same file with an opaque material (the viewer, viewer.html?plain=1), where the chair is
 // visibly whole. Finer bands read as surface texture instead of breaks.
 const hologramMaterial = new HolographicMaterial({
   hologramColor: '#4fd1ff',
@@ -161,10 +162,16 @@ const runtime = createHandsRuntime({
   manipulator: () => manipulator,
   // What a held cursor or a pointing-hand pinch selects: with the tape or notes on, a point on
   // the surface (the click goes to the measure panel); otherwise an exploded part.
-  holdOn: () => ((currentMeasurePanel?.mode ?? 'off') !== 'off' ? 'surface' : 'parts'),
+  // Tape and notes take the other hand's pinch only (Ricky (b), Debbie-G): no hold-to-place.
+  holdOn: () => ((currentMeasurePanel?.mode ?? 'off') !== 'off' ? null : 'parts'),
+  // Hands on the page (handUI.js): the hand cursor reaches the whole window (top bar, Tools
+  // panel) and works its buttons and sliders; over them, no 3D pick fires.
+  handUI: true,
+  cursorSpace: 'page',
   onAction: (type, detail) => {
     if (type === 'click') act(detail);
     else if (type === 'practice') finishPractice(detail);
+    else if (type === 'practice-start') syncPracticeButton();
     else if (type === 'frame') onCameraFrame(detail.mode);
     else if (type === 'hint') showHint(detail);
     else if (type === 'reset') {
@@ -172,6 +179,7 @@ const runtime = createHandsRuntime({
       showToast('↻ Tracking reset', `${detail.why[0].toUpperCase()}${detail.why.slice(1)}. Raise a hand to carry on. ✓ Success looks like: the ghost hand reappears.`);
     } else if (type === 'calibrated') finishCalibration(detail);
     else if (type === 'starting') setStatus(detail.phase === 'model' ? 'Loading hand tracking…' : 'Asking for the camera…');
+    else if (type === 'ui-type') setStatus('⌨ Type (optional) · or pinch elsewhere to carry on');
   }
 });
 const pointer = runtime.pointer;
@@ -229,8 +237,9 @@ function syncPracticeButton() {
   selPracticeBtn.textContent = on ? '■ Stop selection practice' : '🎯 Selection practice';
   selPracticeBtn.setAttribute('aria-pressed', String(on));
 }
-function startSelectionPractice() {
-  const r = runtime.startPractice();
+// Shift+P: the thumb-tap A/B rounds (calibrate.js PRACTICE_ROUNDS_THUMB).
+function startSelectionPractice({ thumb = false } = {}) {
+  const r = runtime.startPractice(thumb ? { rounds: PRACTICE_ROUNDS_THUMB } : {});
   if (r === 'not-tracking') {
     setStatus('Start the camera first, then Selection practice');
     showToast('▶ Start the camera first', 'Then press 🎯 Selection practice. ✓ Success looks like: a row of rings with one lit.');
@@ -257,6 +266,16 @@ function finishPractice(results) {
 selPracticeBtn.addEventListener('click', () => (stopSelectionPractice() || startSelectionPractice()));
 
 calLineEl.textContent = scoreLine(runtime.profile);
+// Thumb-tap click (trial, Debbie-G #9): default off; saved per browser by pointer.js.
+{
+  const label = document.createElement('label');
+  label.style.cssText = 'display:flex;gap:6px;align-items:center;margin:6px 0';
+  const thumbTapBox = Object.assign(document.createElement('input'), { type: 'checkbox', id: 'thumbTap' });
+  thumbTapBox.checked = !!runtime.pointer.thumbTap;
+  thumbTapBox.addEventListener('change', () => runtime.pointer.setThumbTap?.(thumbTapBox.checked, { persist: true }));
+  label.append(thumbTapBox, document.createTextNode(' 👍 Thumb-tap click (trial) · Shift+P practises it'));
+  calLineEl.after(label);
+}
 document.getElementById('recal').addEventListener('click', () => startCalibration());
 
 function setStatus(text, isError = false) {
@@ -376,6 +395,9 @@ async function loadModelById(id) {
   carousel.setBusy(false);
   swapping = false;
   setStatus(`${entry.name} ready · drag to orbit, or ▶ Camera for hands`);
+  // Stock samples carry a credit line (samples.js); CC BY ones must show it while on screen.
+  const creditEl = document.getElementById('credit');
+  if (creditEl) { creditEl.textContent = entry.credit ? `Model: ${entry.credit}` : ''; creditEl.title = creditEl.textContent; }
   startBtn.disabled = false;
 }
 
@@ -393,6 +415,7 @@ async function startTracking() {
   try {
     // Status lines for each phase come back as 'starting' events (onAction above).
     await runtime.start();
+    setRememberCamera(document.getElementById('rememberCamera')?.checked ?? true);
     setCameraButton(true);
     startBtn.disabled = false;
     setCoach('error', null);
@@ -422,6 +445,12 @@ function setCameraButton(on) {
 }
 
 startBtn.addEventListener('click', () => (runtime.tracking ? stopTracking() : startTracking()));
+// Remember on + permission already granted: start on load; not asked yet: the button pulses.
+// Waits for the first model so startBtn is enabled and the status line isn't overwritten.
+(async () => {
+  for (let i = 0; i < 200 && startBtn.disabled; i++) await new Promise((r) => setTimeout(r, 50));
+  if (!runtime.tracking) autoStartCamera({ start: () => startTracking().then(() => runtime.tracking), button: startBtn, setStatus });
+})();
 resetBtn.addEventListener('click', () => manipulator?.reset());
 
 // Every reset (clap, R, the Reset button) can be undone one step (BUGS #27: a misfired clap
@@ -454,6 +483,7 @@ window.addEventListener('keydown', (e) => {
   }
   // Esc or P leaves practice (P is what the owner reached for, BUGS #52) instead of the tab.
   if ((key === 'escape' || key === 'p') && stopSelectionPractice()) return;
+  if (key === 'p' && e.shiftKey && !e.repeat) { startSelectionPractice({ thumb: true }); return; }
   // Tab: the next part behind the cursor (or the next in order). Only taken while parts can be
   // selected, so Tab keeps moving keyboard focus the rest of the time.
   if (key === 'tab' && !e.shiftKey && manipulator?.partsSelectable) {
@@ -494,6 +524,8 @@ function act(click) {
   const panelMode = currentMeasurePanel?.mode ?? 'off';
   if (panelMode !== 'off') {
     if (click.source !== 'hand') return;
+    // Tape / notes: the other hand's pinch only (a same-hand pinch or a thumb-tap drifts the aim).
+    if (click.via !== 'other-pinch') return;
     runtime.pulse();
     // Re-probe at the rewound cursor so the point lands on the vertex the reticle showed.
     const hit = runtime.probeAt(click.x, click.y);
@@ -522,7 +554,7 @@ function act(click) {
 // 2026-10-01): window.hologram.lastClick and a 'hologram:click' event on window, with
 // outcome 'tape-point' | 'note' | 'miss' | 'part-select' | 'deselect'.
 // via (2026-10-01, one-hand selection): 'hold' | 'pinch' | 'other-pinch' | 'mouse'.
-const VIA_WORDS = { hold: ' by holding still', pinch: ' by pinching', 'other-pinch': '', mouse: '' };
+const VIA_WORDS = { hold: ' by holding still', pinch: ' by pinching', 'thumb-tap': ' by a thumb tap', 'other-pinch': '', mouse: '' };
 function clickOutcome(outcome, click, text) {
   const detail = { outcome, source: click.source, via: click.via ?? (click.source === 'mouse' ? 'mouse' : 'other-pinch'), t: performance.now() };
   window.hologram.lastClick = detail;
@@ -621,8 +653,11 @@ function updateHover(nowMs) {
     const st = runtime.pointer.state;
     const c = renderer.domElement;
     const w = c.clientWidth, h = c.clientHeight;
-    const x = Math.min(Math.max(((st.x + 1) / 2) * w + CHIP_DX, 4), w - partChipEl.offsetWidth - 4);
-    const y = Math.min(Math.max(((1 - st.y) / 2) * h + CHIP_DY, 4), h - 30);
+    // The hand cursor's page px (its reach covers the whole window, handUI); the mouse's NDC.
+    const rect = c.getBoundingClientRect();
+    const at = runtime.cursorPx ? { x: runtime.cursorPx.x - rect.left, y: runtime.cursorPx.y - rect.top } : { x: ((st.x + 1) / 2) * w, y: ((1 - st.y) / 2) * h };
+    const x = Math.min(Math.max(at.x + CHIP_DX, 4), w - partChipEl.offsetWidth - 4);
+    const y = Math.min(Math.max(at.y + CHIP_DY, 4), h - 30);
     partChipEl.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
   }
 }
@@ -831,6 +866,8 @@ function renderHelp() {
     row('D', 'show the camera view'),
     row('?', 'this help')
   );
+  // Spec section 3: the camera starts by itself next time (after the browser's one-time ask).
+  mountRememberToggle(helpEl);
 }
 function toggleHelp(open = helpEl.hidden) {
   helpEl.hidden = !open;

@@ -48,6 +48,10 @@ const TWIST_DEADZONE = 0.05;   // radians of wrist twist (2.9°)
 const TILT_DEADZONE = 0.005;   // normalized frame units of second-hand motion
 const DEPTH_DEADZONE = 0.07;   // ln(palm size): apparent hand size is the noisiest signal
 const SCALE_DEADZONE = 0.12;   // palm lengths of hand span (was 0.05 in ln(span); BUGS #31)
+// Two-hand scale weights the vertical span (owner-approved 2026-10-01, Ricky (d)): a 16:9 frame
+// has ~1/1.78 the vertical room, so the same zoom range needs ~1.75x the gain when the hands
+// are stacked vertically (commandTransform). Still one uniform scale; explode/clap unchanged.
+export const SCALE_V_WEIGHT = 1.75;
 const PALM_REF_DEADZONE = 0.04; // ln(palm size): when the span's palm-length normaliser updates
 const EXPLODE_DEADZONE = 0.3;  // palm lengths of hand span (≈5% of a canonical pull-apart)
 
@@ -103,6 +107,13 @@ const PUSH_GAIN = 0.5;
 // Radians of pitch/roll per normalized frame-unit the second hand moves (unchanged gain).
 const PITCH_SENSITIVITY = Math.PI;
 const ROLL_SENSITIVITY = Math.PI;
+// Hybrid position/rate tilt (owner-approved 2026-10-01, RubberEdge, UIST 2007): within
+// TILT_RATE_ZONE (frame units) of where the second hand appeared, tilt follows its position
+// as before; beyond it, the overshoot also turns the model continuously at TILT_RATE_GAIN rad/s
+// per frame unit, capped at TILT_RATE_MAX, so a hand that runs out of room keeps tilting.
+export const TILT_RATE_ZONE = 0.08;
+const TILT_RATE_GAIN = 10;
+export const TILT_RATE_MAX = 1.5;   // rad/s (~86°/s)
 
 // Coasting after release: real seconds for the release speed to halve.
 const DAMPING_HALFLIFE = 0.42;
@@ -149,6 +160,13 @@ const CLAP_MIN_CLOSING_SPEED = 8.0;
 // smaller: a real pinch-to-scale is held far longer than this, but a single glitched frame
 // during a fast clap is not.
 const PINCH_GLITCH_MS = 100;
+// Approach-then-merge (owner-approved 2026-10-01, Ricky E1): in a fast clap the tracker often
+// loses one hand at contact, so the frame that would read "span < CLAP_CLOSE_SPAN" never
+// arrives. A two-hand frame that is armed, closing faster than CLAP_MIN_CLOSING_SPEED and
+// already within CLAP_MERGE_SPAN palms, followed within CLAP_MERGE_MS by a frame with one
+// open hand, counts as the clap. (A hand leaving the frame moves apart, not closing fast.)
+const CLAP_MERGE_SPAN = 2.5;
+const CLAP_MERGE_MS = 150;
 
 // Neutral gap ("Engage -> Aim -> Act", owner decision 2026-09-30; BUGS #26/#27). After any
 // gesture ends, a DIFFERENT gesture (clap included) can only start once NEUTRAL_GAP_MS has
@@ -171,6 +189,7 @@ const CLAP = 'clap'; // not a MODE (it is instant), but it ends like one for the
 // past the gap is meant). It shares the `allowed` gate in update(). Pointer state comes from
 // hand.pointer (gestures.js annotateHand); hands without it never start this gap.
 const POINTER_GAP_MS = 300;
+const FIST_SURE_SCORE = 0.8;  // Closed_Fist confidence that skips POINTER_GAP_MS (see update)
 
 // Explode: two open hands (neither fisted nor pinching, keeping it out of grab/scale's
 // hand-shape space) pulling apart drives it, continuously, like scale rather than a
@@ -511,6 +530,7 @@ export function createManipulator(object, camera) {
   let lastClapSpan = null;
   let lastClapTime = null;
   let pinchSince = null; // see checkClap -- how long pinching has read true, uninterrupted
+  let clapApproach = null; // { t } of the last armed, fast-closing, near two-hand frame (E1)
 
   // The pending neutral gap, or null when any gesture may start (see NEUTRAL_GAP_MS).
   // { endedMode, since, neutralSince, sawNeutral }
@@ -673,6 +693,7 @@ export function createManipulator(object, camera) {
     // transiently misread as a pinch, and at a low frame rate there are only 3-4 samples).
     const anyPinching = hands.some((h) => h.pinch?.pinching);
     if (anyPinching) {
+      clapApproach = null;
       if (pinchSince === null) pinchSince = timestampMs;
       if (timestampMs - pinchSince >= PINCH_GLITCH_MS) {
         lastClapSpan = null;
@@ -695,8 +716,10 @@ export function createManipulator(object, camera) {
       if (dtSeconds > 0) closingSpeed = (lastClapSpan - span) / dtSeconds;
     }
 
+    // The arm is spent by the caller only when the clap actually fires (E3): a clap that was
+    // blocked (neutral gap, pointer) no longer uses it up.
     const clapped = clapArmed && span < CLAP_CLOSE_SPAN && closingSpeed > CLAP_MIN_CLOSING_SPEED;
-    if (clapped) clapArmed = false;
+    clapApproach = clapArmed && span < CLAP_MERGE_SPAN && closingSpeed > CLAP_MIN_CLOSING_SPEED ? { t: timestampMs } : null;
 
     lastClapSpan = span;
     lastClapTime = timestampMs;
@@ -1054,6 +1077,15 @@ export function createManipulator(object, camera) {
       if (wasPointing && !pointing && mode === MODE.IDLE) pointerGapSince = timestampMs;
       wasPointing = pointing;
       if (pointerGapSince !== null && timestampMs - pointerGapSince >= POINTER_GAP_MS) pointerGapSince = null;
+      // aim -> grab in <=250 ms (owner-approved 2026-10-01, HANDS-UX-SPEC §1): a fist MediaPipe
+      // is sure of (Closed_Fist, score >= FIST_SURE_SCORE) with the thumb clearly off the index
+      // (pinch ratio above the close threshold) is a deliberate grab, not the index curling
+      // back, so it skips the post-pointer gap. A latched same-hand pinch (BUGS #47) still
+      // counts as pointing and never gets here.
+      if (pointerGapSince !== null && hands.some((h) => !latched(h) && h.gesture === 'Closed_Fist' &&
+        h.score >= FIST_SURE_SCORE && !h.pinch?.pinching && Number.isFinite(h.pinch?.ratio) && h.pinch.ratio > SAME_PINCH_CLOSE)) {
+        pointerGapSince = null;
+      }
       // TRANSFORM is exempt from the neutral gap (owner live bug 2026-10-01, BUGS #45): the gap
       // exists to stop the open hands a gesture LEAVES BEHIND from exploding (#26), and a
       // two-hand pinch is never left behind by anything. But "neutral" means no gesture pose,
@@ -1062,21 +1094,33 @@ export function createManipulator(object, camera) {
       // that a held pinch can never give, so scale never started until the hands dropped.
       const allowed = (m) => (!gap || gap.endedMode === m || m === MODE.TRANSFORM) && pointerGapSince === null;
 
-      // Clap is a command, so it only fires from rest (BUGS #27): IDLE, or an explode that
-      // has engaged but not pulled apart (the clap's own ready stance), and never inside a
-      // neutral gap. checkClap still runs on every two-hand frame so its speed tracking stays
-      // continuous, and a blocked clap is used up (it re-arms only once the hands separate).
+      // Clap is a command: it fires from IDLE or during an explode (owner-approved 2026-10-01,
+      // Ricky E2: a clap resets an explode, pulled apart or not; this replaces the BUGS #27
+      // "explodePulled" block), never inside a neutral gap and never from a pointer.
+      // checkClap still runs on every two-hand frame so its speed tracking stays continuous;
+      // a blocked clap keeps its arm (E3).
+      let clapped = false;
       if (hands.length !== 2) {
+        // Approach-then-merge (E1): the hands were closing fast and near, and one vanished at
+        // contact; the hand left must be open (a fist or pointer is a different gesture).
+        const h = hands[0];
+        clapped = hands.length === 1 && on('clap') && clapApproach !== null &&
+          timestampMs - clapApproach.t <= CLAP_MERGE_MS && !fistOf(h, aspect) && !h.pinch?.pinching;
         // Clap speed is only measured across consecutive two-hand frames. Keeping the last
         // sample across a dropout made hands that left the frame apart and came back close
         // together read as a fast close, and reset the model out of nothing.
         lastClapSpan = null;
         lastClapTime = null;
+        clapApproach = null;
       } else if (on('clap')) {
-        const clapped = checkClap(hands, aspect, timestampMs);
-        const atRest = mode === MODE.IDLE || (mode === MODE.EXPLODE && !explodePulled);
+        clapped = checkClap(hands, aspect, timestampMs);
+      }
+      {
+        const atRest = mode === MODE.IDLE || mode === MODE.EXPLODE;
         // A pointer is not an open hand, so it never claps.
         if (clapped && atRest && allowed(CLAP) && !pointing) {
+          clapArmed = false;
+          clapApproach = null;
           performReset();
           lastAdvanceTime = timestampMs;
           // A clap ends like any gesture: the hands it leaves together and open are the
@@ -1095,7 +1139,12 @@ export function createManipulator(object, camera) {
 
       const transforming = transform.update(wantTransform && allowed(MODE.TRANSFORM), timestampMs, enterFor(MODE.TRANSFORM));
       const exploding = explode.update(wantExplode && allowed(MODE.EXPLODE) && !transforming, timestampMs, enterFor(MODE.EXPLODE));
-      const grabbing = grab.update(wantGrab && allowed(MODE.GRAB) && !transforming && !exploding, timestampMs, enterFor(MODE.GRAB));
+      // A pointer that is up blocks a grab from STARTING (HANDS-UX-SPEC §1 "a recent pointer
+      // blocks it"; the Platform's POINTER_GRAB_BLOCK_MS, now here for hologram.html too): the
+      // other hand's click-pinch often reads Closed_Fist, and would otherwise grab mid-aim. The
+      // post-pointer gap covers the moments after. A grab already running is left alone.
+      const pointerBlocksGrab = pointing && mode !== MODE.GRAB;
+      const grabbing = grab.update(wantGrab && allowed(MODE.GRAB) && !pointerBlocksGrab && !transforming && !exploding, timestampMs, enterFor(MODE.GRAB));
 
       if (transforming) {
         mode = MODE.TRANSFORM;
@@ -1211,9 +1260,20 @@ export function createManipulator(object, camera) {
         // The second hand just appeared: take its reference, no motion.
         s.sig.px = newSignal(pw.x);
         s.sig.py = newSignal(pw.y);
+        s.tiltOrigin = { x: pw.x, y: pw.y };
       } else {
-        const tx = takeUpSlack(s.sig.px, pw.x, TILT_DEADZONE, MAX_TILT_PER_SECOND, dt);
-        const ty = takeUpSlack(s.sig.py, pw.y, TILT_DEADZONE, MAX_TILT_PER_SECOND, dt);
+        // A tracking jump moves the rate zone's centre with it, as takeUpSlack does its anchor.
+        if (Math.abs(pw.x - s.sig.px.last) > MAX_TILT_PER_SECOND * dt) s.tiltOrigin.x += pw.x - s.sig.px.last;
+        if (Math.abs(pw.y - s.sig.py.last) > MAX_TILT_PER_SECOND * dt) s.tiltOrigin.y += pw.y - s.sig.py.last;
+        let tx = takeUpSlack(s.sig.px, pw.x, TILT_DEADZONE, MAX_TILT_PER_SECOND, dt);
+        let ty = takeUpSlack(s.sig.py, pw.y, TILT_DEADZONE, MAX_TILT_PER_SECOND, dt);
+        const rate = (off) => {
+          const over = Math.abs(off) - TILT_RATE_ZONE;
+          return over > 0 ? Math.sign(off) * Math.min(over * TILT_RATE_GAIN, TILT_RATE_MAX) * dt : 0;
+        };
+        // In frame units, so the gains below convert it like a position step.
+        tx += rate(pw.x - s.tiltOrigin.x) / ROLL_SENSITIVITY;
+        ty += rate(pw.y - s.tiltOrigin.y) / PITCH_SENSITIVITY;
         if (on('tilt')) {
           // Raising the hand (image y falling) tilts the model UP: its front edge rises on
           // screen and its top tips away from the camera (negative pitch about world X).
@@ -1227,6 +1287,7 @@ export function createManipulator(object, camera) {
     } else {
       delete s.sig.px;
       delete s.sig.py;
+      s.tiltOrigin = null;
       s.lastPitchWrist = null;
     }
 
@@ -1265,7 +1326,10 @@ export function createManipulator(object, camera) {
     const jumped = Math.abs(Math.log(span / s.spanSig.last)) > MAX_SPAN_RATIO_PER_SECOND * dt;
     const d = takeUpSlack(s.spanSig, span, SCALE_DEADZONE, jumped ? 0 : Infinity, dt);
     const from = s.spanSig.anchor - d;
-    if (d && from > 0) s.ch.scale.cmd += Math.log(s.spanSig.anchor / from) * settings.sensitivity;
+    // Direction gain (SCALE_V_WEIGHT): a constant weight cancels out of the span RATIO, so the
+    // vertical share of the separation scales the log-ratio instead: 1 side by side, W stacked.
+    const gain = handSpan(hands[0], hands[1], aspect, { palm: 1, vWeight: SCALE_V_WEIGHT }) / (handSpan(hands[0], hands[1], aspect, { palm: 1 }) || 1);
+    if (d && from > 0) s.ch.scale.cmd += Math.log(s.spanSig.anchor / from) * gain * settings.sensitivity;
   }
 
   // Two open hands pulling apart: on a multi-part object, each mesh slides outward from the

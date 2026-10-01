@@ -327,7 +327,15 @@ async function buildItem(id, group, onProgress, others = readyItems().filter((i)
     onProgress('splitting parts', 0.55);
     await new Promise((r) => setTimeout(r));
     // Split BEFORE placeOnFloor: parts bake the (still identity) root transform.
-    const seg = splitComponents(obj);
+    // A file that already names its parts (stock samples, chair_detail.glb) keeps each named
+    // mesh whole: connected-component splitting cut the tool chest's 7 drawers and frame into
+    // 23 loose bits. An infinite weld makes every triangle of a mesh one component, and
+    // minDiagFrac 0 keeps small named parts (a handle) selectable. Generic exporter names
+    // ("mesh_0", "Object 3") don't count as named, so multi-mesh scans still split.
+    const meshNames = [];
+    obj.traverse((c) => { if (c.isMesh) meshNames.push(c.name ?? ''); });
+    const namedParts = meshNames.length > 1 && meshNames.every((n) => n && !/^(mesh|node|object|geometry|scene)?[\s_-]*\d*$/i.test(n));
+    const seg = splitComponents(obj, namedParts ? { weld: Infinity, minDiagFrac: 0 } : {});
     root = seg.root; parts = seg.parts; ms = seg.ms; components = seg.components;
     if (scan.completion.isCompletion) completion = await describeCompletion(group, scan.completion, separateInferred(root));
   }
@@ -1116,6 +1124,7 @@ async function buildCards() {
       badges: [...(v.dirty ? ['unsaved'] : []), ...(v.stats?.inferred ? ['inferred'] : []), ...(v.edits ? [`${v.edits} edit${v.edits === 1 ? '' : 's'}`] : [])]
     })));
     const st = working?.stats;
+    const credit = versions.find((v) => v.provenance?.credit)?.provenance.credit ?? null;
     const badges = [];
     if (p.sample) badges.push('sample');
     if (p.id === lib.projectId) badges.push('open');
@@ -1126,11 +1135,16 @@ async function buildCards() {
     const card = {
       id: p.id, title: p.title, sample: p.sample, badges, thumbUrl, deleted: !!(p.deletedAt || p.hidden),
       kind: st?.room ? 'room' : 'object',
-      subtitle: [st?.items != null ? `${st.items} item${st.items === 1 ? '' : 's'}` : null, st?.tris ? `${fmtTris(st.tris)} tris` : null, fmtDate(p.updatedAt)].filter(Boolean).join(' · '),
+      // A stock sample's credit leads its subtitle: CC BY models must show their attribution
+      // wherever they are shown (samples.js), and the ring is where people pick them.
+      subtitle: [credit, st?.items != null ? `${st.items} item${st.items === 1 ? '' : 's'}` : null, st?.tris ? `${fmtTris(st.tris)} tris` : null, fmtDate(p.updatedAt)].filter(Boolean).join(' · '),
       versions: vcards, currentVersionId: working?.id ?? null
     };
     (card.deleted ? gone : live).push(card);
   }
+  // The chair leads the ring (it is the reference scan; the stock samples were all seeded after
+  // it, so recency alone would bury it behind them).
+  live.sort((a, b) => (b.id === SAMPLE_ID) - (a.id === SAMPLE_ID));
   return cards.concat(live, gone);
 }
 let ringSeq = 0;
@@ -1245,8 +1259,13 @@ async function offscreenThumb(sources) {
   }
 }
 async function ensureSampleThumbs() {
-  const entry = (await lib.store.listProjects({ includeDeleted: true })).find((x) => x.project.id === SAMPLE_ID);
-  if (!entry) return;
+  // Every seeded sample (the chair first: it is the card people land on), one after another.
+  const all = (await lib.store.listProjects({ includeDeleted: true })).filter((x) => x.project.sample);
+  all.sort((a, b) => (b.project.id === SAMPLE_ID) - (a.project.id === SAMPLE_ID));
+  for (const entry of all) await ensureThumbsOf(entry);
+}
+
+async function ensureThumbsOf(entry) {
   for (const v of entry.versions) {
     if (v.thumbId || v.type === 'working') continue;
     while (lib.opening || pumping) await new Promise((r) => setTimeout(r, 500));
@@ -1329,6 +1348,13 @@ async function initLibrary() {
     return;
   }
   try { await seedSample(); } catch (err) { console.warn('sample seed failed:', err); }
+  // The stock samples (samples.js, shared with the gesture demo's carousel). Seeding is
+  // idempotent; one failure must not stop the library from opening.
+  try {
+    const { sampleSeeds } = await import('../samples.js' + V);
+    // Seeded last-first: the ring lists newest first, so they then show in samples.js order.
+    for (const seed of sampleSeeds('../').reverse()) await lib.store.seedSample(seed);
+  } catch (err) { console.warn('stock sample seed failed:', err); }
   await applyRescues();
   lib.store.purgeExpired(30).then((n) => { if (n.projects || n.blobs) console.info('library purge:', n); }).catch(() => {});
   lib.ring = await setupRing();
@@ -1399,11 +1425,15 @@ lib.ready = initLibrary();
 window.hologram.library.ready = lib.ready;
 
 // ---- Hands (hands.js, P1 step 2) ---------------------------------------------------------------
-// The Camera button; the shared hands runtime loads on first press. Aim = hover, click = select,
-// both through objectMode. Hand clicks wait while the polygon lens or the Library ring is up.
+// The Camera button; the shared hands runtime loads on first press (or on load, when the camera
+// was remembered and is already allowed). Aim = hover, click = select, both through objectMode;
+// the hand cursor also works the page (handUI.js). With the Library ring up, aim + pinch opens a
+// card and a fist spins it; with the polygon lens on, the lens follows the hand (hands.js).
 const { createPlatformHands } = await import('./hands.js' + V);
 window.hologram.hands = createPlatformHands({
   scene, camera, renderer, controls, objectMode, getItems: readyItems, setStatus,
   button: $('handsBtn'), expose: window.hologram,
-  busy: () => !!polygon?.active || !!lib.ring?.isOpen?.()
+  ring: () => lib.ring, polygon: () => polygon, resetView: () => frameAll(), helpEl: $('guide')
 });
+// Not in tests (?db=...): a test page must never turn a real camera on by itself.
+if (!params.get('db')) lib.ready.then(() => window.hologram.hands.autoStart()).catch((err) => console.warn('hands: auto-start', err));

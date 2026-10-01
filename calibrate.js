@@ -249,7 +249,10 @@ export function createCalibration({ pointer, engagement, rect, video = null, par
   const card = document.createElement('div');
   card.style.cssText = 'position:fixed;left:50%;top:calc(var(--bar-h, 48px) + 10px);transform:translateX(-50%);z-index:60;width:min(520px,90vw);' +
     'padding:12px 16px;border-radius:12px;background:rgba(8,20,30,.88);border:1px solid rgba(120,200,230,.35);' +
-    `color:#d6f3ff;font:14px/1.4 system-ui,sans-serif;opacity:0;${ease};pointer-events:auto`;
+    `color:#d6f3ff;font:14px/1.4 system-ui,sans-serif;opacity:0;${ease};pointer-events:none`;
+  // pointer-events stays none until start(): an opacity-0 card still takes clicks, and this one
+  // sat invisibly over the top centre of the page eating mouse drags (owner report 2026-10-01).
+  card.dataset.role = 'calibration-card';
   card.innerHTML = '<div data-k="title" style="font-weight:600;margin-bottom:4px"></div>' +
     '<div data-k="body" style="color:#a9d4e6"></div>' +
     '<div style="height:4px;margin-top:10px;border-radius:2px;background:rgba(120,200,230,.18)">' +
@@ -526,14 +529,25 @@ export const PRACTICE_ROUNDS = [
   { commit: 'other-pinch', targeting: 'point' }, { commit: 'other-pinch', targeting: 'bubble' },
   { commit: 'any', targeting: 'bubble', cluster: true }
 ];
+// Thumb-tap A/B (owner-approved trial 2026-10-01): pass rounds: PRACTICE_ROUNDS_THUMB to
+// startPractice. The practice turns the pointer's thumb-tap on for its own rounds only.
+export const PRACTICE_ROUNDS_THUMB = [
+  ...PRACTICE_ROUNDS.filter((r) => !r.cluster),
+  { commit: 'thumb-tap', targeting: 'point' }, { commit: 'thumb-tap', targeting: 'bubble' },
+  ...PRACTICE_ROUNDS.filter((r) => r.cluster)
+];
 const PRACTICE_TARGETS = 6;
-const PRACTICE_RADIUS_PX = 18;   // smaller than calibration's: the point/bubble difference shows
+// 24 px radius = 48 px across, the hands-mode minimum (HANDS-UX-SPEC §2: webcam thumb drift
+// reaches 48 px). It was 18 (36 px), and the owner's 2026-10-01 run scored hold and same-hand
+// pinch 0/12 on it. Still smaller than calibration's 44 px rings.
+export const PRACTICE_RADIUS_PX = 24;
 const PRACTICE_TIMEOUT_MS = 6000;
 // Short copy (Cody-U owns the wording; keep these short).
 const PRACTICE_COPY = {
   hold: '✋ Hold still on the lit ring · ✓ it fills, then turns',
   pinch: '🤏 Pinch your pointing hand on the lit ring',
   'other-pinch': '🤏 Pinch your other hand on the lit ring',
+  'thumb-tap': '👍 Tap your thumb down on your pointing hand on the lit ring',
   any: '🎯 Close targets · select the lit one, any way'
 };
 
@@ -587,6 +601,9 @@ export function createSelectionPractice({ pointer, rect, parent = document.body,
   let selector = null;
   let lastT = 0;
   const results = { v: 1, at: new Date().toISOString(), rounds: [] };
+  // Thumb-tap rounds switch the pointer's trial click on for themselves only.
+  const tapBefore = pointer.thumbTap;
+  const setTap = (on) => { if (typeof pointer.setThumbTap === 'function' && pointer.thumbTap !== on) pointer.setThumbTap(on); };
 
   const card = document.createElement('div');
   card.style.cssText = 'position:fixed;left:50%;top:calc(var(--bar-h, 48px) + 10px);transform:translateX(-50%);z-index:56;padding:8px 14px;' +
@@ -626,6 +643,7 @@ export function createSelectionPractice({ pointer, rect, parent = document.body,
     ri++;
     if (ri >= rounds.length) return finish();
     spec = rounds[ri];
+    setTap(spec.commit === 'thumb-tap' ? true : tapBefore === true);
     const v = rect();
     targets = spec.cluster
       ? makeClusterTargets(v.width, v.height, PRACTICE_TARGETS, rng)
@@ -682,6 +700,7 @@ export function createSelectionPractice({ pointer, rect, parent = document.body,
 
   function finish() {
     active = false;
+    setTap(tapBefore === true);
     layer.remove();
     card.remove();
     if (globalThis.hologram) globalThis.hologram.selectionPractice = results;
@@ -726,6 +745,7 @@ export function createSelectionPractice({ pointer, rect, parent = document.body,
       finish();
     },
     dispose() {
+      if (active) setTap(tapBefore === true);
       active = false;
       layer.remove();
       card.remove();
