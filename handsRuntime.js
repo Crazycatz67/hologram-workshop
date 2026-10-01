@@ -13,8 +13,9 @@
 //     video: the <video> element the camera stream plays into.
 //     pickTargets(): Object3D | null, the root the reticle and probeAt() raycast (recursive).
 //       Called every display frame, so a model swap is picked up with no rebind.
-//     ghostAnchor(): Object3D | null, what the ghost hands are placed against; defaults to
-//       pickTargets. While it returns null the ghost hands are not updated (as before).
+//     ghostAnchor(): Object3D | null, what the drawn hands are placed against (its distance
+//       sets their depth plane); defaults to pickTargets. While it returns null the hands are
+//       not updated (as before). The hands are handModel.js (ghostHands.js if it can't load).
 //     manipulator(): manipulator | null, read every frame (hosts swap it on model load). Its
 //       update(hands, aspect, tMs) is called as a method on each camera frame, so wrapping
 //       m.update (sessionrec.js does) keeps working; tick(tMs) runs every display frame.
@@ -44,6 +45,7 @@
 //   runtime.on(type, fn) -> unsubscribe
 //   runtime.dispose()            stop, remove canvas listeners, remove the reticle.
 //   Getters: tracking, hands (this camera frame's annotated hands), pointer (pointer.js),
+//     handModel (handModel.js: .mode 'loading' | 'model' | 'ghost', .debug(), .landmarkOf),
 //     engagement, calibration (calibrate.js; .active, .step, .cancel()), profile (the pointer
 //     profile, or null before the first calibration), stats (see below).
 //   target -> { part, hit, distPx, progress } | null  the hovered target this display frame
@@ -74,9 +76,9 @@ const { createHandTracker, HAND_CONNECTIONS } = await import('./handTracker.js' 
 const { annotateHand } = await import('./gestures.js' + V);
 const { drawHands, sizeOverlayTo } = await import('./overlay.js' + V);
 const { MODE } = await import('./manipulator.js' + V);
-const { createGhostHands } = await import('./ghostHands.js' + V);
+const { createHandModel } = await import('./handModel.js' + V);
 const { smoothHandLandmarks, resetLandmarkSmoothing } = await import('./smoothLandmarks.js' + V);
-const { createPointer, createEngagement, createResetGate, createTrackingMonitor, ghostOffset, createSelector, nextInStack, BUBBLE_PX } = await import('./pointer.js' + V);
+const { createPointer, createEngagement, createResetGate, createTrackingMonitor, createSelector, nextInStack, BUBBLE_PX } = await import('./pointer.js' + V);
 const { createReticle, probe, createPartHighlight } = await import('./reticle.js' + V);
 const { createCalibration, loadProfile, applyProfile, createSelectionPractice } = await import('./calibrate.js' + V);
 
@@ -101,12 +103,14 @@ export function createHandsRuntime({
   let hands = [];
   let lastVideoTime = -1;
 
-  const ghostHands = createGhostHands(scene, HAND_CONNECTIONS);
+  // The hands drawn in the scene: a rigged hologram hand at a constant size (handModel.js),
+  // falling back to ghostHands.js's skeleton if the hand asset can't load.
+  const handModel = createHandModel(scene, HAND_CONNECTIONS);
   const isFist = (h) => h.fistLike;
 
   // Finger-gun pointer (pointer.js) and its reticle (reticle.js). Aim with one hand in the
   // pointer pose, click with the other hand's pinch; the mouse drives the same cursor. Hands
-  // count only while raised (createEngagement): lowered = at rest, ghost dimmed.
+  // count only while raised (createEngagement): lowered = at rest, drawn hand dimmed.
   const engagement = createEngagement();
   const pointer = createPointer();
   const reticle = createReticle(scene);
@@ -380,13 +384,29 @@ export function createHandsRuntime({
     setHint(null);
     calibration.abort();
     overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
-    ghostHands.update([], { camera, object: ghostAnchor() ?? scene, aspect: 1 });
+    handModel.clear();
+    overlayShown = null;
     emit('stop');
+  }
+
+  // Whether the debug overlay canvas can be seen, re-read at most every 250 ms (a style read
+  // per frame isn't free). Cleared once when it becomes hidden, so it reappears blank.
+  let overlayShown = null;
+  let overlayCheckedAt = -Infinity;
+  function overlayVisible(nowMs) {
+    if (nowMs - overlayCheckedAt < 250 && overlayShown !== null) return overlayShown;
+    overlayCheckedAt = nowMs;
+    const shown = overlay.isConnected && (overlay.checkVisibility
+      ? overlay.checkVisibility({ visibilityProperty: true, opacityProperty: true })
+      : getComputedStyle(overlay).visibility !== 'hidden');
+    if (!shown && overlayShown !== false) overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+    overlayShown = shown;
+    return shown;
   }
 
   let snappedVertex = null; // the reticle's current snap, for hysteresis when a click re-probes
 
-  // Every display frame (after the ghost hands, whose index tip the beam starts from).
+  // Every display frame (after the drawn hands, whose index tip the beam starts from).
   function updatePointerVisuals(nowMs) {
     pointer.tick(nowMs);
     const st = pointer.state;
@@ -397,7 +417,7 @@ export function createHandsRuntime({
       object: target,
       camera,
       viewport: viewportSize(),
-      beamFrom: st.source === 'hand' && st.aimHand ? ghostHands.landmarkOf(st.aimHand, 8) : null,
+      beamFrom: st.source === 'hand' && st.aimHand ? handModel.landmarkOf(st.aimHand, 8) : null,
       nowMs,
       hold: shown ? holdShown : 0
     });
@@ -457,20 +477,15 @@ export function createHandsRuntime({
     manip?.tick(tickNow);
     calibration.tick(tickNow);
 
-    // Real 3D hands (always on) are the primary visual feedback; the flat 2D skeleton
-    // stays available behind the host's debug toggle for checking raw tracking accuracy.
+    // Real 3D hands (always on) are the primary visual feedback. The aiming hand is drawn
+    // where it really is; the reticle's beam runs from its real index tip to the cursor
+    // (the old ghostOffset shift moved the hand onto the cursor, which read as the hand
+    // jumping away from where it was).
     const anchor = ghostAnchor();
-    if (anchor) {
-      // The aiming hand rides the cursor so its beam lines up with it (pointer.js ghostOffset).
-      const st = pointer.state;
-      const aim = st.mode === 'aim' && st.source === 'hand' ? st.aimHand : null;
-      const viewAspect = camera.aspect;
-      ghostHands.update(hands, {
-        camera, object: anchor, aspect, isFist, nowMs: tickNow,
-        offsetOf: (h) => (h === aim ? ghostOffset(h, st, viewAspect) : null)
-      });
-    }
-    drawHands(overlayCtx, hands, HAND_CONNECTIONS);
+    if (anchor) handModel.update(hands, { camera, object: anchor, aspect, isFist, nowMs: tickNow });
+    // The flat 2D skeleton is a debug view behind the host's toggle and hidden otherwise
+    // (always hidden on the Platform): only draw it while it can be seen.
+    if (overlayVisible(tickNow)) drawHands(overlayCtx, hands, HAND_CONNECTIONS);
     updatePointerVisuals(tickNow);
     return mode;
   }
@@ -482,6 +497,7 @@ export function createHandsRuntime({
     canvas.removeEventListener('pointermove', onMove);
     canvas.removeEventListener('pointerleave', onLeave);
     reticle.dispose?.();
+    handModel.dispose();
     highlight.dispose();
     listeners.clear();
   }
@@ -522,6 +538,7 @@ export function createHandsRuntime({
     get stats() { return stats; },
     get target() { return target; },
     get practice() { return practice; },
+    get handModel() { return handModel; },
     startPractice,
     get selector() { return selector; }
   };

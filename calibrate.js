@@ -41,6 +41,7 @@
 //   createSelectionPractice({ pointer, rect, parent?, rounds?, onDone(results) })
 //     -> { active, round, start(tMs), onFrame(tMs) -> selector state, onClick(click), cancel(),
 //          dispose(), results }
+//     The card has a "✕ Stop (Esc)" button ([data-role="practice-stop"]) that calls cancel().
 //     All targets of a round show at once; one is lit (the cue). Select it with the round's
 //     commit; selecting another one is a false select; 6 s without = a miss. Clicks of
 //     another commit kind are ignored (and counted as `offMode`).
@@ -590,7 +591,20 @@ export function createSelectionPractice({ pointer, rect, parent = document.body,
   const card = document.createElement('div');
   card.style.cssText = 'position:fixed;left:50%;top:calc(var(--bar-h, 48px) + 10px);transform:translateX(-50%);z-index:56;padding:8px 14px;' +
     'border-radius:10px;background:rgba(8,20,30,.88);border:1px solid rgba(120,200,230,.35);color:#cfe9f5;' +
-    'font:13px system-ui,sans-serif;pointer-events:none';
+    'font:13px system-ui,sans-serif;pointer-events:none;display:flex;align-items:center;gap:12px';
+  // A visible way out (BUGS #52: the owner could not leave practice to start the tape; Esc was
+  // the only exit and nothing said so). Only the button takes the mouse; the card stays
+  // click-through so it never blocks the model.
+  const textEl = document.createElement('span');
+  const stopBtn = document.createElement('button');
+  stopBtn.type = 'button';
+  stopBtn.dataset.role = 'practice-stop';
+  stopBtn.textContent = '✕ Stop (Esc)';
+  stopBtn.title = 'Stop selection practice (Esc or P)';
+  stopBtn.style.cssText = 'pointer-events:auto;cursor:pointer;padding:3px 10px;border-radius:7px;' +
+    'border:1px solid rgba(120,200,230,.5);background:rgba(120,200,230,.12);color:inherit;font:inherit';
+  for (const ev of ['pointerdown', 'pointerup']) stopBtn.addEventListener(ev, (e) => e.stopPropagation());
+  card.append(textEl, stopBtn);
   const layer = document.createElement('div');
   layer.style.cssText = 'position:fixed;inset:0;z-index:55;pointer-events:none';
   parent.append(layer, card);
@@ -630,7 +644,7 @@ export function createSelectionPractice({ pointer, rect, parent = document.body,
     cue = 0;
     cueAt = t;
     trial = { ok: false, wrong: 0, errPx: null, ms: null };
-    card.textContent = `${ri + 1} / ${rounds.length} · ${PRACTICE_COPY[spec.commit]}`;
+    textEl.textContent = `${ri + 1} / ${rounds.length} · ${PRACTICE_COPY[spec.commit]}`;
     draw();
   }
 
@@ -674,7 +688,7 @@ export function createSelectionPractice({ pointer, rect, parent = document.body,
     onDone(results);
   }
 
-  return {
+  const api = {
     get active() { return active; },
     get round() { return spec ? { index: ri, ...spec } : null; },
     get results() { return results; },
@@ -717,4 +731,6 @@ export function createSelectionPractice({ pointer, rect, parent = document.body,
       card.remove();
     }
   };
+  stopBtn.addEventListener('click', () => api.cancel());
+  return api;
 }

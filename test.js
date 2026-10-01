@@ -2536,6 +2536,85 @@ async function main() {
     });
   }
 
+  // BUGS #53: the owner's mouse spun the chair. r161 OrbitControls stays mid-drag when one
+  // pointerup is lost, so every plain mouse move rotates; the next click then throws at
+  // OrbitControls.js:1071. These drive real OrbitControls with synthetic pointer events (pointer
+  // capture stubbed: synthetic pointers can't be captured) and never let it reach the throwing
+  // path, so the suite stays at 0 console errors.
+  const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
+  const { createOrbitGuard } = await import(`./orbitGuard.js${V}`);
+  group('Orbit guard — the model only turns while dragging (orbitGuard.js, BUGS #53)', () => {
+    const cv = document.createElement('canvas');
+    Object.assign(cv.style, { position: 'fixed', left: '-4000px', top: '0', width: '400px', height: '300px' });
+    cv.setPointerCapture = cv.releasePointerCapture = () => {};
+    document.body.appendChild(cv);
+    const errors = [];
+    const onErr = (e) => errors.push(String(e.message ?? e));
+    window.addEventListener('error', onErr);
+    const rig = (guarded) => {
+      const cam = new THREE.PerspectiveCamera(45, 4 / 3, 0.01, 100);
+      cam.position.set(0, 0.4, 2);
+      const controls = new OrbitControls(cam, cv);
+      const guard = guarded ? createOrbitGuard({ controls }) : null;
+      const r = cv.getBoundingClientRect();
+      let x = r.left + 200, y = r.top + 150;
+      const ev = (type, buttons, dx = 0) => {
+        x += dx;
+        cv.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, button: type === 'pointermove' ? -1 : 0, buttons, pointerId: 1, pointerType: 'mouse', bubbles: true }));
+        controls.update();
+      };
+      const az = () => controls.getAzimuthalAngle();
+      return { controls, guard, ev, az, dispose: () => { guard?.dispose(); controls.dispose(); } };
+    };
+    try {
+      // The repro, unguarded: a pointerdown whose pointerup never arrives, then plain moves.
+      {
+        const { ev, az, dispose } = rig(false);
+        ev('pointerdown', 1);
+        const a0 = az();
+        ev('pointermove', 0, 120);
+        checkTrue('without the guard, a lost pointerup leaves plain mouse moves spinning the view (the bug)',
+          Math.abs(az() - a0) > 0.1, `azimuth moved ${(az() - a0).toFixed(3)} rad with no button held`);
+        ev('pointercancel', 0); // leave this controls clean before dispose
+        dispose();
+      }
+      const { guard, ev, az, dispose } = rig(true);
+      // A normal drag still orbits.
+      let a0 = az();
+      ev('pointerdown', 1);
+      ev('pointermove', 1, 120);
+      ev('pointerup', 0);
+      checkTrue('a real drag still orbits', Math.abs(az() - a0) > 0.1, `azimuth moved ${(az() - a0).toFixed(3)} rad over 120 px`);
+      check('a normal drag needs no repair', guard.repairs, 0);
+      check('the drag is closed after pointerup', guard.dragging ? 1 : 0, 0);
+      // Lost pointerup, then plain moves: the first button-less move ends the drag, no spin.
+      ev('pointerdown', 1);
+      ev('pointermove', 1, 40);
+      a0 = az();
+      ev('pointermove', 0, 120);
+      ev('pointermove', 0, 120);
+      check('after a lost pointerup, plain mouse moves turn the view by 0 rad', Math.abs(az() - a0), 0);
+      check('the stuck drag was repaired once', guard.repairs, 1);
+      // Lost pointerup, then a new click straight away (no move between): repaired before the
+      // controls see a duplicate pointer, so its pointerup cannot throw.
+      ev('pointerdown', 1);
+      ev('pointerdown', 1);
+      ev('pointerup', 0);
+      check('a click after a lost pointerup is repaired first', guard.repairs, 2);
+      a0 = az();
+      ev('pointermove', 0, 120);
+      check('after that click, plain moves still turn the view by 0 rad', Math.abs(az() - a0), 0);
+      // A scroll is start+end in one go: never left "dragging".
+      cv.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }));
+      check('a wheel step leaves no drag open', guard.dragging ? 1 : 0, 0);
+      check('no errors thrown (OrbitControls.js:1071 path never reached)', errors.length, 0);
+      dispose();
+    } finally {
+      window.removeEventListener('error', onErr);
+      cv.remove();
+    }
+  });
+
   // BUGS #28: part selection was never wired on hologram.html. This drives the REAL page (in
   // a hidden iframe) and its real click handler with synthetic pointer events: explode the
   // 8-part chair past half-way, click a part, click empty space, drag. Needs the page's model
@@ -2597,6 +2676,67 @@ async function main() {
     click(r.left + 4, r.top + 4);
     checkTrue('a click on empty space goes back to the whole model', m.activePart === null);
     m.reset();
+  } catch (err) {
+    currentGroup.cases.push({ name: '(group threw)', pass: false, detail: String(err) });
+    failCount++;
+  }
+
+  // BUGS #52: once Selection practice started there was no visible way out, and it took every
+  // hand click, so the owner could not start the tape. Each exit, on the real page: the card's
+  // Stop button, the 🎯 button again, Esc, P, and starting the tape / notes / calibration / a drill.
+  currentGroup = { name: 'Selection practice always has a way out (hologram.html, BUGS #52)', cases: [] };
+  groups.push(currentGroup);
+  try {
+    const w = frameEl.contentWindow;
+    const h = w.hologram;
+    if (!h?.handsRuntime) throw new Error('hologram.html did not load');
+    const rt = h.handsRuntime;
+    const doc = w.document;
+    const btn = doc.getElementById('selPractice');
+    const key = (k) => doc.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true }));
+    const start = () => {
+      // The page's button refuses without a camera; the runtime's force flag starts it anyway.
+      rt.startPractice({ force: true });
+      return !!rt.practice?.active;
+    };
+    const noteBtn = doc.querySelector('#measure [data-role="note"]');
+    const exits = [
+      ['the card\'s ✕ Stop button', () => doc.querySelector('[data-role="practice-stop"]')?.click()],
+      ['the 🎯 button pressed again', () => btn.click()],
+      ['Esc', () => key('Escape')],
+      ['P', () => key('p')],
+      ['T (tape on)', () => key('t')],
+      ['the Notes button', () => noteBtn?.click()],
+      ['C (calibrate)', () => key('c')],
+      ['a drill button', () => doc.querySelector('#drills button')?.click()]
+    ];
+    checkTrue('the practice card has a visible Stop button', (() => {
+      rt.startPractice({ force: true });
+      const b = doc.querySelector('[data-role="practice-stop"]');
+      const ok = !!b && w.getComputedStyle(b).pointerEvents !== 'none' && /Stop/.test(b.textContent);
+      rt.practice?.cancel();
+      return ok;
+    })(), 'button [data-role="practice-stop"] reads "✕ Stop (Esc)" and takes clicks');
+    for (const [name, act] of exits) {
+      const started = start();
+      act();
+      checkTrue(`practice stops with ${name}`, started && !rt.practice?.active,
+        `started ${started}, active after ${!!rt.practice?.active}`);
+      // Tidy up whatever that exit turned on, so the next exit (and group) starts clean.
+      if (h.calibration?.active) h.calibration.abort();
+      const mode = h.measurePanel?.mode ?? 'off';
+      if (mode !== 'off') h.measurePanel.toggleMode(mode);
+    }
+    // The label is synced by the page's render loop, so wait a couple of frames.
+    const frames = (n) => new Promise((r) => { let k = 0; const f = () => (++k >= n ? r() : w.requestAnimationFrame(f)); w.requestAnimationFrame(f); });
+    const settle = () => Promise.race([frames(3), new Promise((r) => setTimeout(r, 1000))]);
+    rt.startPractice({ force: true });
+    await settle();
+    checkTrue('while practice runs, the 🎯 button reads "Stop"', /Stop/.test(btn.textContent), btn.textContent);
+    rt.practice?.cancel();
+    await settle();
+    checkTrue('after it stops, the 🎯 button reads "Selection practice" again', /Selection practice/.test(btn.textContent) && !/Stop/.test(btn.textContent), btn.textContent);
+    checkTrue('the page runs the orbit guard (BUGS #53)', typeof h.orbitGuard?.repairs === 'number');
   } catch (err) {
     currentGroup.cases.push({ name: '(group threw)', pass: false, detail: String(err) });
     failCount++;

@@ -13,8 +13,9 @@
 //   mapReach({ x, y }, reach) -> { x, y }  image point -> NDC, mirrored like the ghost hands,
 //     reach = { x0, x1, y0, y1 } (image units) maps onto -1..1; clamped to -1..1.
 //   createOneEuro2D({ minCutoff, beta, dCutoff }) -> { filter(x, y, tMs) -> { x, y }, reset() }
-//   ghostOffset(hand, cursor, viewAspect, len) -> { dx, dy } image units: how far to shift the
-//     drawn aim hand so its index tip sits `len` behind the cursor along wrist->tip.
+//   ghostOffset(hand, cursor, viewAspect, len) -> { dx, dy } image units: DEPRECATED, no
+//     longer used (2026-10-01, Phase 2A): the hand is drawn where it really is and the beam
+//     runs from its real index tip. Kept only until test.js drops its two checks of it.
 //   createPointer({ rewindMs, profile }) -> pointer
 //     pointer.update(hands, aspect, tMs) -> click event or null. hands: this camera frame's
 //       hands, already through gestures.annotateHand (hand.pointer, hand.pinch) and
@@ -95,8 +96,8 @@ export const SMOOTHING = {
 };
 export const DEFAULT_SMOOTHING = SMOOTHING.responsive;
 
-// The aiming ghost hand is drawn riding the cursor (ghostOffset): its index tip sits this far
-// behind the cursor along the wrist->tip direction, so the beam continues the finger.
+// Only for the deprecated ghostOffset (see the contract): how far behind the cursor it put
+// the shifted index tip.
 export const BEAM_LEN = 0.14; // NDC-height units (~63 px on a 900 px canvas)
 
 const CLUTCH_GRACE_MS = 100;  // a pose dropout shorter than this holds the cursor and stays 'aim'
@@ -204,6 +205,7 @@ export function createOneEuro2D(params = DEFAULT_SMOOTHING) {
   };
 }
 
+// Deprecated: no caller since handModel.js (the shift moved the drawn hand off the real one).
 export function ghostOffset(hand, cursor, viewAspect = 16 / 9, len = BEAM_LEN) {
   if (!hasLandmarks(hand) || !cursor) return { dx: 0, dy: 0 };
   const w = hand.landmarks[0];

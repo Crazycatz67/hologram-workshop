@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Hand model test</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
+<style>
+  html,body{margin:0;background:#05080c;color:#cfe;font:12px ui-monospace,monospace}
+  #wrap{padding:10px}
+  pre{white-space:pre-wrap;margin:8px 0}
+  #views{display:flex;gap:10px;align-items:flex-start;margin-top:8px}
+  #views canvas{display:block;border:1px solid #234}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/" } }
+</script></head>
+<body><div id="wrap">
+<b>Hand model (handModel.js, Phase 2A): rigged hologram hand</b>
+Synthetic MediaPipe hands built from the hand model's own skeleton: constant size at 0.4 m and
+0.8 m, the same shape at 4:3 and 21:9, bones follow the tracked directions, eased fades,
+ghostHands fallback. The two views below show the demo hand at 4:3 and 21:9 (slow, eased
+curl; nothing flashes). <code>?camera=1</code> also starts the real hands runtime on a camera
+(headless: Chrome's fake camera) to check the hidden debug overlay is no longer drawn.
+<code>?rec=off</code> skips the test recorder.
+<div id="views"></div>
+<pre id="out">running…</pre>
+</div>
+<script type="module">
+  // Test recorder: saves this run to docs/testing/runs/ on localhost (docs/testing/README.md).
+  const off = new URLSearchParams(location.search).get('rec') === 'off';
+  const rec = off ? null : await import('./testrec.js').then((m) => m.startRun({ page: 'hand-model-test' })).catch(() => null);
+  import('./hand-model-test.js?v=' + Date.now()).then(() => {
+    const r = window.handModelResults;
+    for (const x of r?.results ?? []) rec?.result(x.name, x.detail ?? '', { pass: !!x.ok });
+    for (const [k, v] of Object.entries(r?.metrics ?? {})) rec?.metric(k, v);
+    rec?.end();
+  }).catch((e) => {
+    document.getElementById('out').textContent += '\nERROR ' + (e.stack || e);
+    console.error(e);
+    rec?.end('crashed');
+  });
+</script>
+</body></html>

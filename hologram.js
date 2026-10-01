@@ -21,6 +21,7 @@ const { partLabel } = await import('./reticle.js' + V);
 // Camera, tracker, smoothing, engagement, pointer, reticle, calibration, reset gate, tracking
 // monitor and ghost hands live in the shared hands runtime (also used by the Platform).
 const { createHandsRuntime } = await import('./handsRuntime.js' + V);
+const { createOrbitGuard } = await import('./orbitGuard.js' + V);
 
 const video = document.getElementById('cam');
 const overlay = document.getElementById('overlay');
@@ -91,6 +92,13 @@ enableSingleLayer(scene, [hologramMaterial]);
 const MODE_BRIGHTNESS = { idle: 1.25, grab: 1.8, transform: 1.8, explode: 1.8 };
 
 window.hologram = { scene, camera, renderer, controls, model: null, material: hologramMaterial };
+
+// BUGS #53: a lost pointerup left OrbitControls mid-drag, so every plain mouse move spun the
+// model (and every later click threw at OrbitControls.js:1071). The guard ends any drag the
+// moment the mouse moves with no button held, so the model only turns while dragging -- with
+// the tape and notes on too, where a stray spin made mouse points hard to place. A real drag
+// still orbits in every mode (the back of the model has to stay reachable for the tape).
+window.hologram.orbitGuard = createOrbitGuard({ controls });
 
 // ---- the coach: ONE slot for every prompt -------------------------------------------------
 // The owner's live test (2026-10-01) found toasts, hint chips, the drill text and the
@@ -175,6 +183,8 @@ window.hologram.pointerStats = runtime.stats;
 window.hologram.pointerProfile = runtime.profile;
 window.hologram.calibration = calibration;
 window.hologram.handsRuntime = runtime;
+// The current model's measure panel (tests and sessionrec read .mode: 'off'|'tape'|'note').
+Object.defineProperty(window.hologram, 'measurePanel', { get: () => currentMeasurePanel, enumerable: true });
 
 // Calibration (calibrate.js): first camera use with no saved profile, then C / Recalibrate.
 // The score's numbers (error px, hit rate) go in the ⚙ Pointer section, not the status line.
@@ -190,6 +200,7 @@ function finishCalibration(profile) {
   }
 }
 function startCalibration() {
+  stopSelectionPractice();
   if (runtime.calibrate() === 'not-tracking') {
     setStatus('Start the camera first, then press C');
     showToast('▶ Start the camera first', 'Then press C to calibrate the pointer. ✓ Success looks like: a card with three short steps.');
@@ -203,15 +214,32 @@ function startCalibration() {
 // ("leg_·_front_right" -> "leg · front right").
 const partName = (part) => partLabel(part).name.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
 const COMMIT_WORDS = { hold: 'hold', pinch: 'pinch', 'other-pinch': 'other hand', any: 'close targets' };
+// BUGS #52: practice must always have a way out (the card's Stop button, Esc, P, the 🎯 button
+// again), and it ends by itself when another tool starts: while it runs every hand click goes
+// to its targets, so the tape or a note could never get one.
+function stopSelectionPractice() {
+  if (!runtime.practice?.active) return false;
+  runtime.practice.cancel(); // -> 'practice' event -> finishPractice()
+  return true;
+}
+// Also run every frame (onTick), so the label is right however practice started or ended.
+function syncPracticeButton() {
+  const on = !!runtime.practice?.active;
+  if (selPracticeBtn.getAttribute('aria-pressed') === String(on)) return;
+  selPracticeBtn.textContent = on ? '■ Stop selection practice' : '🎯 Selection practice';
+  selPracticeBtn.setAttribute('aria-pressed', String(on));
+}
 function startSelectionPractice() {
   const r = runtime.startPractice();
   if (r === 'not-tracking') {
     setStatus('Start the camera first, then Selection practice');
     showToast('▶ Start the camera first', 'Then press 🎯 Selection practice. ✓ Success looks like: a row of rings with one lit.');
   } else if (r === 'busy') setStatus('Finish the calibration first (Esc skips it)');
-  else setStatus('🎯 Selection practice · Esc stops');
+  else setStatus('🎯 Selection practice · Esc or P stops');
+  syncPracticeButton();
 }
 function finishPractice(results) {
+  syncPracticeButton();
   // Hits per commit kind across its rounds, e.g. "hold 11/12 · pinch 12/12 · other hand 9/12".
   const by = {};
   for (const r of results?.rounds ?? []) {
@@ -226,7 +254,7 @@ function finishPractice(results) {
   showToast(cancelled ? '🎯 Selection practice stopped' : '✓ Selection practice done',
     `${line ? line + ' hit. ' : ''}Pick the way that felt easiest. ✓ Success looks like: parts select on the first try.`, 6000);
 }
-selPracticeBtn.addEventListener('click', () => startSelectionPractice());
+selPracticeBtn.addEventListener('click', () => (stopSelectionPractice() || startSelectionPractice()));
 
 calLineEl.textContent = scoreLine(runtime.profile);
 document.getElementById('recal').addEventListener('click', () => startCalibration());
@@ -332,6 +360,7 @@ async function loadModelById(id) {
     displayName: model.name.toLowerCase(),
     tapeKey: 'T',
     onModeChange: (mode) => {
+      if (mode !== 'off') stopSelectionPractice();
       if (mode === 'tape') {
         setStatus('📏 Tape on · click two points');
         showToast('📏 Click two points on ' + the(), 'Or aim and pinch your other hand. ✓ Success looks like: the distance in the Measure tab.');
@@ -423,10 +452,8 @@ window.addEventListener('keydown', (e) => {
     calibration.cancel();
     return;
   }
-  if (key === 'escape' && runtime.practice?.active) {
-    runtime.practice.cancel();
-    return;
-  }
+  // Esc or P leaves practice (P is what the owner reached for, BUGS #52) instead of the tab.
+  if ((key === 'escape' || key === 'p') && stopSelectionPractice()) return;
   // Tab: the next part behind the cursor (or the next in order). Only taken while parts can be
   // selected, so Tab keeps moving keyboard focus the rest of the time.
   if (key === 'tab' && !e.shiftKey && manipulator?.partsSelectable) {
@@ -523,6 +550,7 @@ startRenderLoop({
     hologramMaterial.update();
     // Calibration and the selection practice draw their own cards: keep the coach quiet.
     setCoach('calibration', calibration.active || runtime.practice?.active ? { silent: true } : null);
+    syncPracticeButton();
     noticeResets();
     // Camera frame (tracker, gestures, manipulator, pointer), follow springs, ghost hands,
     // debug skeleton and reticle: handsRuntime.js, inside this one render loop.
@@ -717,7 +745,10 @@ for (const drill of DRILLS) {
   sub.className = 'sub';
   sub.textContent = drill.sub;
   btn.append(name, sub);
-  btn.addEventListener('click', () => applyDrill(drill));
+  btn.addEventListener('click', () => {
+    stopSelectionPractice();
+    applyDrill(drill);
+  });
   drillsEl.appendChild(btn);
 }
 
@@ -793,7 +824,7 @@ function renderHelp() {
     h('h4', 'Keys'),
     row('R / U', 'reset / undo reset'),
     row('T', 'tape on / off'),
-    row('P / M', 'Practice / Measure tab'),
+    row('P / M', 'Practice / Measure tab (P or Esc also stops selection practice)'),
     row('← →', 'switch model'),
     row('C / Esc', 'calibrate pointer / skip'),
     row('Tab', 'next part (once exploded)'),
