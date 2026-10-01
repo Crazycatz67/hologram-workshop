@@ -6,7 +6,7 @@ const THREE = await import('three');
 const { createScene, startRenderLoop } = await import('../scene.js' + V);
 const { createLook } = await import('./look.js' + V);
 const { createDisplayLod } = await import('./lod.js' + V);
-const { groupFiles, parseGroup, countTriangles, sha256Hex, filesFromDrop, ACCEPT } = await import('./upload.js' + V);
+const { groupFiles, parseGroup, countTriangles, sha256Hex, filesFromDrop, ACCEPT, separateInferred, readSidecar } = await import('./upload.js' + V);
 const { createLibrary } = await import('./library.js' + V);
 const exporter = await import('./export.js' + V);
 const { splitComponents } = await import('./segment.js' + V);
@@ -84,7 +84,7 @@ function applyMaterials() {
   for (const item of items.values()) {
     if (!item.root.userData.lookPrepared) { look.prepare(item.root); item.root.userData.lookPrepared = true; }
     item.root.traverse((c) => {
-      if (c.isMesh) c.material = plain ? plainMaterial : look.materialFor(c, 'base');
+      if (c.isMesh) c.material = plain ? (look.plainFor(c) ?? plainMaterial) : look.materialFor(c, 'base');
       else if (c.isPoints) c.material = pointsMaterial;
     });
   }
@@ -94,7 +94,7 @@ function applyMaterials() {
 plainBtn.addEventListener('click', () => { plain = !plain; applyMaterials(); });
 
 function materialFor(kind, mesh) {
-  if (plain) return kind === 'hover' ? hoverPlain : kind === 'selected' ? selectedPlain : plainMaterial;
+  if (plain) return look.plainFor(mesh) ?? (kind === 'hover' ? hoverPlain : kind === 'selected' ? selectedPlain : plainMaterial);
   return look.materialFor(mesh, kind);
 }
 
@@ -171,6 +171,7 @@ function updateInfo() {
   const ready = readyItems();
   const tris = ready.reduce((n, i) => n + i.tris, 0);
   infoEl.textContent = ready.length ? `${ready.length} item${ready.length === 1 ? '' : 's'}  ·  ${tris.toLocaleString()} tris` : '';
+  syncInferredToggle();
 }
 
 function removeItem(id) {
@@ -198,7 +199,7 @@ const GAP = 0.3; // metres between items when auto-placing / arranging
 
 // Builds the item's root + parts from a parsed scan or a photo mesh, then places it in the scene.
 async function buildItem(id, group, onProgress) {
-  let root, parts, ms = 0, components = 0;
+  let root, parts, ms = 0, components = 0, completion = null;
   if (group.kind === 'photo') {
     let mod;
     try { mod = await import('./photo.js' + V); }
@@ -219,6 +220,7 @@ async function buildItem(id, group, onProgress) {
     // Split BEFORE placeOnFloor: parts bake the (still identity) root transform.
     const seg = splitComponents(obj);
     root = seg.root; parts = seg.parts; ms = seg.ms; components = seg.components;
+    if (scan.completion.isCompletion) completion = await describeCompletion(group, scan.completion, separateInferred(root));
   }
   root.name = group.name;
   // Keep the loaded material (textures, vertex colours) before any hologram material replaces it.
@@ -234,8 +236,47 @@ async function buildItem(id, group, onProgress) {
     root.updateMatrixWorld(true);
   }
   const { tris, points } = countTriangles(root);
-  return { root, parts, tris, points, ms, components };
+  return { root, parts, tris, points, ms, components, completion };
 }
+
+// ---- P5: completed scans (Track B output) ----------------------------------------------------
+// What the item's info shows. The sidecar is the authority for method / licence / share; the
+// share is also measured here from the loaded faces, so a stale or mismatched sidecar shows up.
+async function describeCompletion(group, tagged, split) {
+  let sidecar = null, sidecarError = null;
+  try {
+    if (group.completionFile) sidecar = readSidecar(await group.completionFile.text(), group.completionFile.name);
+    else if (group.main._sidecarUrl) {
+      // Only fetched for files that ARE completion output (materials scanned/inferred), so a
+      // plain scan never triggers a 404 for a sidecar that was never going to exist.
+      const res = await fetch(group.main._sidecarUrl);
+      if (res.ok) sidecar = readSidecar(await res.text(), group.main._sidecarUrl.split('/').pop());
+    }
+  } catch (err) { sidecarError = err.message ?? String(err); console.warn('completion sidecar:', sidecarError); }
+  const measuredShare = tagged.totalArea > 0 ? tagged.inferredArea / tagged.totalArea : 0;
+  return {
+    share: sidecar?.inferredShare ?? measuredShare, measuredShare, fromSidecar: sidecar?.inferredShare != null,
+    inferredTris: tagged.inferredTris, totalTris: tagged.totalTris, wholeInferredParts: split.wholeInferred,
+    method: sidecar?.method ?? null, licence: sidecar?.licence ?? null, mode: sidecar?.mode ?? null,
+    sidecarName: sidecar?.fileName ?? null, sidecarError
+  };
+}
+
+const inferredBtn = $('inferredBtn');
+const hasInferred = () => readyItems().some((i) => i.completion?.inferredTris > 0);
+// The button only exists while something on screen has inferred geometry to hide.
+function syncInferredToggle() {
+  inferredBtn.hidden = !hasInferred();
+  inferredBtn.textContent = look.showInferred ? 'View: Completed' : 'View: As scanned';
+  inferredBtn.setAttribute('aria-pressed', String(!look.showInferred));
+}
+function setShowInferred(v) {
+  look.setShowInferred(v);
+  syncInferredToggle();
+  if (hasInferred()) setStatus(v ? 'completed: inferred surfaces shown hatched' : 'as scanned: inferred surfaces hidden');
+}
+inferredBtn.addEventListener('click', () => setShowInferred(!look.showInferred));
+window.hologram.setShowInferred = setShowInferred;
 
 const queue = [];
 let pumping = null;
@@ -266,7 +307,7 @@ async function pump() {
       const sha256 = await sha256Hex(group.main);
       const item = {
         id, name: group.name, sourceFile: group.main.name, fileSize: group.main.size, sha256, kind: group.kind,
-        status: 'ready', root: built.root, tris: built.tris, points: built.points,
+        status: 'ready', root: built.root, tris: built.tris, points: built.points, completion: built.completion,
         parts: built.parts.map(({ mesh }, i) => ({ id: `${id}.${i + 1}`, local: i + 1, mesh }))
       };
       for (const p of item.parts) { p.mesh.userData.itemId = id; p.mesh.userData.partId = p.id; }
@@ -277,7 +318,8 @@ async function pump() {
       applyMaterials();
       lod.add(item.root);   // after applyMaterials: the LOD shares the smoothed shading normals
       window.hologram.model ??= item.root;
-      library.update(id, { status: 'ready', message: '', tris: built.tris, points: built.points, progress: 1 });
+      if (built.completion) item.root.userData.inferredShare = built.completion.share;
+      library.update(id, { status: 'ready', message: '', tris: built.tris, points: built.points, progress: 1, completion: built.completion });
       frameAll();
       updateInfo();
       measurements.addItem(item);
@@ -311,7 +353,10 @@ async function loadUrl(url) {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
     const blob = await res.blob();
-    await loadFiles([new File([blob], url.split('/').pop())]);
+    const file = new File([blob], url.split('/').pop());
+    // Where a Track B sidecar would sit (<stem>.json); only fetched if the model turns out to be completion output.
+    Object.defineProperty(file, '_sidecarUrl', { value: url.replace(/\.[^./]+(\?.*)?$/, '.json') });
+    await loadFiles([file]);
   } catch (err) {
     setStatus(err.message, true);
   }
@@ -424,8 +469,14 @@ for (const p of [picker, folderPicker]) {
   p.addEventListener('change', () => { if (p.files.length) loadFiles([...p.files]); p.value = ''; });
 }
 $('sample').addEventListener('click', () => loadUrl('../assets/chair/chair_detail.glb'));
+// ?model=<url> loads a model on open (e.g. a completed scan and its sidecar for a live check).
+const startModel = new URLSearchParams(location.search).get('model');
+if (startModel) loadUrl(startModel);
 
 window.addEventListener('keydown', (e) => {
   if (e.target.matches?.('input, textarea')) return;
-  if (e.key.toLowerCase() === 'r') controls.autoRotate = !controls.autoRotate;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 'r') controls.autoRotate = !controls.autoRotate;
+  else if (k === 'i' && hasInferred()) setShowInferred(!look.showInferred);   // I: inferred on/off
 });

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hold Gate Lab</title>
+  <style>
+    html, body { margin: 0; background: #05070a; color: #c9dcec; }
+    body { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 16px; }
+    #status { color: #4fd1ff; margin-bottom: 12px; }
+    #status.fail { color: #ff6b6b; }
+    pre { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="status">running… (scripted frames, no camera)</div>
+  <pre id="out"></pre>
+  <script type="module">
+    import(`./holdgate-lab.js?v=${Date.now()}`).catch((err) => {
+      document.getElementById('status').textContent = 'lab crashed: ' + err;
+      console.error(err);
+    });
+  </script>
+</body>
+</html>

@@ -24,11 +24,11 @@ The index and the isolation rules are in [ROADMAP.md](ROADMAP.md).
 
 No install, no server — every page runs entirely in the browser:
 
-- **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience. Includes a **practice mode** that arms one gesture at a time (move, spin, tilt, push/pull, scale, explode, clap) so each can be learned and tuned without the others firing, plus live sensitivity / trigger-delay / momentum controls. `D` shows the camera and tracking overlay, `P` toggles the panel
+- **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience. Includes a **practice mode** that arms one gesture at a time (move, spin, tilt, push/pull, scale, explode, clap) so each can be learned and tuned without the others firing, plus live sensitivity / trigger-delay / momentum controls. `D` shows the camera and tracking overlay, `P` toggles the panel, `R` resets the model and `U` (or `Ctrl+Z`) undoes a reset. Once the model is exploded, click a part to select it (click empty space to go back to the whole model)
 - **[Model viewer](https://crazycatz67.github.io/hologram-workshop/)** — the hologram alone, drag to orbit, no camera needed. `?model=<path>` loads a different mesh and `?plain=1` swaps in an opaque material, both for judging a `clean_scan.py` result
 - **[Hand tracking](https://crazycatz67.github.io/hologram-workshop/hands.html)** — tracking on its own, with the raw pinch/gesture numbers on screen
 
-The gesture page carries an always-visible **gesture reference** (what each hand shape does) and a live status line naming which gestures are currently locked out by whichever one is active — mode-switching itself needs sustained, deliberate confirmation to interrupt an in-progress gesture, not just a brief flicker, so a misread frame can't hijack an active grab into something else.
+The gesture page carries an always-visible **gesture reference** (what each hand shape does) and a live status line naming which gestures are currently locked out by whichever one is active — mode-switching itself needs sustained, deliberate confirmation to interrupt an in-progress gesture, not just a brief flicker, so a misread frame can't hijack an active grab into something else. The scheme is **Engage → Aim → Act**: after any gesture ends, a *different* gesture can only start after a short neutral gap (400 ms, plus 100 ms of hands making no gesture pose), so one gesture can't chain into the next by accident. Clap-to-reset only fires from rest, never in the middle of another gesture, and is undoable.
 
 Both pages carry a **measurement panel**: real dimensions, detected key heights (seat height and the like, found rather than assumed), an estimated weight and shipping carton, a tape measure between any two points you pick, a will-it-fit check against an opening, and notes you can pin to the object and export as a report. **Calibrate** against one hand measurement to correct the whole scan — LiDAR carries real scale but is typically a few percent out, and the report says whether it was calibrated. The scan carries true real-world scale, so these are measurements rather than decoration — and scaling the hologram never changes them, since resizing a hologram does not resize the real object. `M` hides the panel.
 
@@ -48,7 +48,7 @@ browser, and once in System Settings → Privacy & Security → Camera.
 
 Full breakdown in [plans/object-hologram/ROADMAP.md](plans/object-hologram/ROADMAP.md); working conventions in [CLAUDE.md](CLAUDE.md).
 
-**Regression tests:** open [`test.html`](test.html) locally and read the page — 37 checks covering gesture isolation, tracking-noise robustness, and every measurement figure against the shipped chair scan. No framework, no build step; a run is opening the page.
+**Regression tests:** open [`test.html`](test.html) locally and read the page — 153 checks covering gesture isolation, the neutral gap, tracking-noise robustness, and every measurement figure against the shipped chair scan. No framework, no build step; a run is opening the page.
 
 ## Running locally
 
@@ -77,10 +77,14 @@ Then open <http://localhost:8080>.
 | `HolographicMaterial.js` | The hologram shader (vendored MIT source, not an npm package) |
 | `camera.js` | Webcam setup and teardown |
 | `handTracker.js` | MediaPipe `GestureRecognizer`, two hands |
-| `gestures.js` | Pinch, two-hand span and angle |
+| `gestures.js` | Pinch, fist shape, wrist twist, two-hand span and angle |
 | `overlay.js` | Canvas skeleton and labels |
 | `stabilizer.js` | Hysteresis so a gesture needs a few consistent frames to start or stop |
-| `manipulator.js` | Maps stabilised gestures onto the model. Each channel (move/spin/tilt/push/scale/explode/clap) is individually armable, which is what practice mode drives |
+| `manipulator.js` | Maps stabilised gestures onto the model. Each channel (move/spin/tilt/push/scale/explode/clap) is individually armable, which is what practice mode drives. Enforces the neutral gap between different gestures, fires clap only from rest, and handles per-part selection once exploded |
+| `holdGate.js` | **Built, not wired into the live pages.** Pure hold-to-confirm gate (confirmation ring) for command gestures such as undo or reset, ported from the ASL project's Spell circle lock. Exercised by `docs/lab/gestures/holdgate-lab.html` |
+| `gunPose.js` | **Built, not wired into the live pages.** Finger-gun pose geometry (point, then drop the thumb to click), a probe for a possible pointer gesture. Exercised by `docs/lab/gestures/gun-lab.html` |
+| `docs/lab/gestures/gun-lab.html`, `holdgate-lab.html` | Lab pages for the two probes above; each has a self-test (gun-lab 29 checks, holdgate-lab 19). Not part of the shipped site |
+| `platform/p5-test.html` | Platform P5 checks (inferred-surface contract, look, photosafety), 20 checks. Open the page and read pass/fail |
 | `ghostHands.js` | Renders tracked hands as real 3D geometry in the scene, not a flat overlay |
 | `smoothLandmarks.js` | Exponential smoothing on raw landmark positions, matched frame-to-frame by nearest wrist position |
 | `serve.py` | Static server that sends `no-store` |

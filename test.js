@@ -552,6 +552,9 @@ async function main() {
     const partBPosBefore = partB.position.clone();
 
     m.configure({ channels: ['move'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    // Hands down for 0.5s between the explode and the grab (the neutral gap, BUGS #26; in
+    // real use this is while the mouse picks the part).
+    for (let i = 0; i < 30; i++) { m.update([], 1.78, t); t += 16.7; }
     for (let i = 0; i < 10; i++) { m.update([hand(0.5, 0.5, 0, 'fist')], 1.78, t); t += 16.7; }
     for (let i = 1; i <= 20; i++) { m.update([hand(0.5 + 0.01 * i, 0.5, 0, 'fist')], 1.78, t); t += 16.7; }
 
@@ -647,6 +650,9 @@ async function main() {
     const partBPosBefore = partB.position.clone();
 
     m.configure({ channels: ['move'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+    // Hands down for 0.5s between the explode and the grab (the neutral gap, BUGS #26; in
+    // real use this is while the mouse picks the part).
+    for (let i = 0; i < 30; i++) { m.update([], 1.78, t); t += 16.7; }
     for (let i = 0; i < 10; i++) { m.update([hand(0.5, 0.5, 0, 'fist')], 1.78, t); t += 16.7; }
     for (let i = 1; i <= 20; i++) { m.update([hand(0.5 + 0.01 * i, 0.5, 0, 'fist')], 1.78, t); t += 16.7; }
     checkTrue('grabbing after selecting OBJ-style part A moves ONLY part A',
@@ -887,6 +893,171 @@ async function main() {
     m.reset();
   });
 
+  group('Neutral gap and safe clap (BUGS #26, #27)', () => {
+    // Owner's "Engage -> Aim -> Act" (2026-09-30): after a gesture ends, a DIFFERENT gesture
+    // waits for ~400ms of relaxed hands; clap (a command) only fires from rest. 30fps frames.
+    const FR = 1000 / 30;
+    const drive = (m, n, specs, t, seen) => {
+      for (let i = 0; i < n; i++) {
+        const mode = m.update(specs(i).map(([x, y, kind]) => hand(x, y, 0, kind)), 1.78, t);
+        seen?.add(mode);
+        t += FR;
+      }
+      return t;
+    };
+    const fresh = () => {
+      // createManipulator takes "home" from the object's current pose, and earlier groups
+      // leave the shared box moved and stretched.
+      object.position.set(0, 0, 0);
+      object.quaternion.identity();
+      object.scale.set(1, 1, 1);
+      const m = createManipulator(object, camera);
+      m.reset();
+      m.configure({ channels: ALL_CHANNELS, sensitivity: 1, momentum: false, triggerFrames: 3 });
+      return m;
+    };
+
+    // #26 repro: hold a tilt, open the fist, keep both hands up, then drop the second hand
+    // away. Before the fix explode engaged ~300ms after the fist opened and the drop
+    // stretched the model.
+    let m = fresh();
+    let t = 1000;
+    t = drive(m, 15, () => [[0.35, 0.5, 'fist'], [0.65, 0.5, 'open']], t);
+    t = drive(m, 15, (i) => [[0.35, 0.5, 'fist'], [0.65, 0.5 - 0.01 * i, 'open']], t);
+    checkTrue('tilt is active before the release', m.mode === MODE.GRAB, `mode=${m.mode}`);
+    let seen = new Set();
+    const scaleAtRelease = object.scale.clone();
+    t = drive(m, 30, () => [[0.35, 0.5, 'open'], [0.65, 0.36, 'open']], t, seen);
+    t = drive(m, 15, (i) => [[0.35, 0.5, 'open'], [0.65 + 0.015 * i, 0.36 + 0.01 * i, 'open']], t, seen);
+    checkTrue('#26: opening the fist after a tilt does not chain into explode', !seen.has(MODE.EXPLODE), [...seen].join(','));
+    check('#26: dropping the second hand afterwards does not stretch the model', object.scale.distanceTo(scaleAtRelease), 0, 0);
+
+    // Same chain from a two-hand pinch: releasing both pinches leaves two open hands.
+    m = fresh();
+    t = 1000;
+    t = drive(m, 20, () => [[0.4, 0.5, 'pinch'], [0.6, 0.5, 'pinch']], t);
+    checkTrue('two-hand pinch is active before the release', m.mode === MODE.TRANSFORM, `mode=${m.mode}`);
+    seen = new Set();
+    const scaleAtPinchRelease = object.scale.clone();
+    t = drive(m, 30, () => [[0.4, 0.5, 'open'], [0.6, 0.5, 'open']], t, seen);
+    t = drive(m, 15, (i) => [[0.4 - 0.01 * i, 0.5, 'open'], [0.6 + 0.01 * i, 0.5, 'open']], t, seen);
+    checkTrue('#26: releasing a two-hand pinch does not chain into explode', !seen.has(MODE.EXPLODE), [...seen].join(','));
+    check('#26: pulling the released hands apart does not stretch the model', object.scale.distanceTo(scaleAtPinchRelease), 0, 0);
+
+    // The gap is a pause, not a lock: relax (no gesture pose) past it and explode works.
+    t = drive(m, 15, () => [], t); // hands down 0.5s
+    seen = new Set();
+    const scaleBefore = object.scale.x;
+    t = drive(m, 5, () => [[0.45, 0.5, 'open'], [0.55, 0.5, 'open']], t, seen);
+    t = drive(m, 15, (i) => [[0.45 - 0.015 * i, 0.5, 'open'], [0.55 + 0.015 * i, 0.5, 'open']], t, seen);
+    checkTrue('after relaxing past the gap, explode still engages and stretches', seen.has(MODE.EXPLODE) && object.scale.x > scaleBefore + 0.1,
+      `modes ${[...seen].join(',')}, scale.x ${scaleBefore.toFixed(2)} -> ${object.scale.x.toFixed(2)}`);
+
+    // Resuming the SAME gesture is never held back: let go of a fist, re-close it at once.
+    m = fresh();
+    t = 1000;
+    t = drive(m, 10, () => [[0.5, 0.5, 'fist']], t);
+    t = drive(m, 9, () => [[0.5, 0.5, 'open']], t); // 300ms open: grab has ended
+    checkTrue('grab ended after the fist opened', m.mode === MODE.IDLE, `mode=${m.mode}`);
+    t = drive(m, 3, () => [[0.5, 0.5, 'fist']], t);
+    checkTrue('re-closing the fist inside the gap grabs again straight away', m.mode === MODE.GRAB, `mode=${m.mode}`);
+
+    // #27 repro: explode (pull apart), hold, then bring the hands together FAST.
+    m = fresh();
+    t = 1000;
+    object.position.set(0.3, 0, 0); // a reset would snap this to 0
+    t = drive(m, 8, () => [[0.45, 0.5, 'open'], [0.55, 0.5, 'open']], t);
+    t = drive(m, 18, (i) => [[0.45 - 0.017 * i, 0.5, 'open'], [0.55 + 0.017 * i, 0.5, 'open']], t);
+    t = drive(m, 10, () => [[0.14, 0.5, 'open'], [0.86, 0.5, 'open']], t);
+    const resets0 = m.resetCount;
+    t = drive(m, 6, (i) => { const s = 0.72 - 0.68 * (i + 1) / 6; return [[0.5 - s / 2, 0.5, 'open'], [0.5 + s / 2, 0.5, 'open']]; }, t);
+    check('#27: a fast reverse of an explode does not fire the clap', m.resetCount - resets0, 0);
+    check('#27: ... so the model keeps its position', object.position.x, 0.3, 1e-9);
+
+    // A clap straight after letting go of another gesture (inside the gap) is also blocked.
+    m = fresh();
+    t = 1000;
+    object.position.set(0.3, 0, 0);
+    t = drive(m, 15, () => [[0.2, 0.5, 'fist'], [0.8, 0.5, 'open']], t);
+    t = drive(m, 8, () => [[0.2, 0.5, 'open'], [0.8, 0.5, 'open']], t); // grab ends ~220ms in
+    const resets1 = m.resetCount;
+    t = drive(m, 6, (i) => { const s = 0.6 - 0.56 * (i + 1) / 6; return [[0.5 - s / 2, 0.5, 'open'], [0.5 + s / 2, 0.5, 'open']]; }, t);
+    check('a clap inside the neutral gap after a tilt does not reset', m.resetCount - resets1, 0);
+
+    // From rest, with everything armed, a clap still resets (the pose is also explode's, so
+    // explode engages first but has not pulled apart).
+    m = fresh();
+    t = 1000;
+    object.position.set(0.3, 0, 0);
+    t = drive(m, 5, () => [[0.2, 0.5, 'open'], [0.8, 0.5, 'open']], t);
+    t = drive(m, 6, (i) => { const s = 0.6 - 0.56 * (i + 1) / 6; return [[0.5 - s / 2, 0.5, 'open'], [0.5 + s / 2, 0.5, 'open']]; }, t);
+    check('a clap from rest (everything armed, 30fps) still resets', object.position.x, 0, 0);
+
+    // After the clap the hands are together and open -- explode's pose. Separating them must
+    // not explode the model that was just reset.
+    seen = new Set();
+    t = drive(m, 15, (i) => [[0.48 - 0.02 * i, 0.5, 'open'], [0.52 + 0.02 * i, 0.5, 'open']], t, seen);
+    checkTrue('separating the hands after a clap does not explode the fresh reset', !seen.has(MODE.EXPLODE) && object.scale.x === 1,
+      `modes ${[...seen].join(',')}, scale.x ${object.scale.x.toFixed(3)}`);
+
+    // Found while fixing #27: hands that leave the frame apart and come back close together
+    // 0.5s later used to read as a fast close (the last two-hand sample was kept across the
+    // dropout) and reset the model. Clap only armed, so nothing else is involved.
+    m = fresh();
+    m.configure({ channels: ['clap'] });
+    t = 1000;
+    const resets2 = m.resetCount;
+    t = drive(m, 5, () => [[0.26, 0.5, 'open'], [0.74, 0.5, 'open']], t);
+    t = drive(m, 15, () => [], t);
+    t = drive(m, 5, () => [[0.45, 0.5, 'open'], [0.55, 0.5, 'open']], t);
+    check('hands re-entering close together after a dropout are not a clap', m.resetCount - resets2, 0);
+    m.reset();
+  });
+
+  group('Reset is undoable, one step (BUGS #27)', () => {
+    const g = new THREE.Group();
+    const a = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.05)); a.position.set(0.1, 0, 0);
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.05)); b.position.set(-0.1, 0, 0);
+    g.add(a, b);
+    const m = createManipulator(g, camera);
+    m.configure({ channels: ALL_CHANNELS, sensitivity: 1, momentum: false, triggerFrames: 3 });
+    checkTrue('nothing to undo before any reset', !m.canUndo && m.undo() === false);
+    // Explode it, then move it and turn a part by hand, the kind of work a misfired clap wiped.
+    let t = 1000;
+    for (let i = 0; i < 8; i++) { m.update([hand(0.45, 0.5, 0, 'open'), hand(0.55, 0.5, 0, 'open')], 1.78, t); t += 33.3; }
+    for (let i = 1; i <= 20; i++) { m.update([hand(0.45 - 0.015 * i, 0.5, 0, 'open'), hand(0.55 + 0.015 * i, 0.5, 0, 'open')], 1.78, t); t += 33.3; }
+    for (let i = 0; i < 20; i++) { m.update([], 1.78, t); t += 33.3; }
+    g.position.set(0.2, -0.1, 0);
+    g.scale.setScalar(1.5);
+    b.rotation.set(0, 0.7, 0);
+    const want = { g: g.position.clone(), s: g.scale.x, a: a.position.clone(), b: b.position.clone(), bq: b.quaternion.clone() };
+    checkTrue('the group is exploded before the reset', a.position.x > 0.15, `a.x=${a.position.x.toFixed(3)}`);
+
+    m.reset();
+    checkTrue('reset puts everything home', g.position.length() === 0 && a.position.x === 0.1 && m.canUndo);
+    checkTrue('undo returns true', m.undo() === true);
+    check('undo restores the group position', g.position.distanceTo(want.g), 0, 0);
+    check('undo restores the group scale', g.scale.x, want.s, 0);
+    check('undo restores each exploded part', a.position.distanceTo(want.a) + b.position.distanceTo(want.b), 0, 0);
+    check("undo restores a part's own rotation", b.quaternion.angleTo(want.bq), 0, 0);
+    checkTrue('undo is one step: a second undo does nothing', !m.canUndo && m.undo() === false && g.position.distanceTo(want.g) === 0);
+
+    // The explode keeps working from the restored amount (no jump back to 0 on the next pull).
+    const aBefore = a.position.x;
+    for (let i = 0; i < 8; i++) { m.update([hand(0.3, 0.5, 0, 'open'), hand(0.7, 0.5, 0, 'open')], 1.78, t); t += 33.3; }
+    checkTrue('two still open hands after an undo do not snap the parts', Math.abs(a.position.x - aBefore) < 1e-9, `a.x ${aBefore.toFixed(3)} -> ${a.position.x.toFixed(3)}`);
+
+    // A clap reset is undoable the same way.
+    g.position.set(0.25, 0, 0);
+    m.reset(); m.undo(); // clear state; g stays at 0.25
+    for (let i = 0; i < 20; i++) { m.update([], 1.78, t); t += 33.3; }
+    for (let i = 0; i < 5; i++) { m.update([hand(0.2, 0.5, 0, 'open'), hand(0.8, 0.5, 0, 'open')], 1.78, t); t += 33.3; }
+    for (let i = 1; i <= 6; i++) { const s = 0.6 - 0.56 * i / 6; m.update([hand(0.5 - s / 2, 0.5, 0, 'open'), hand(0.5 + s / 2, 0.5, 0, 'open')], 1.78, t); t += 33.3; }
+    checkTrue('the clap fired', g.position.x === 0, `x=${g.position.x}`);
+    m.undo();
+    check('undo after a clap restores the pose', g.position.x, 0.25, 0);
+  });
+
   const om = await import(`./platform/objectmode.js${V}`);
   group('Platform object mode — wheel steps, eased drag, exact history', () => {
     const W = { deltaMode: 0, deltaX: 0 };
@@ -1081,6 +1252,73 @@ async function main() {
         tight.best ? tight.best.label : 'no orientation fit');
     });
   }
+
+  // BUGS #28: part selection was never wired on hologram.html. This drives the REAL page (in
+  // a hidden iframe) and its real click handler with synthetic pointer events: explode the
+  // 8-part chair past half-way, click a part, click empty space, drag. Needs the page's model
+  // and CDN imports, so it waits up to 30s and reports a failure rather than hanging.
+  currentGroup = { name: 'Part selection by mouse on hologram.html (BUGS #28)', cases: [] };
+  groups.push(currentGroup);
+  const frameEl = document.createElement('iframe');
+  frameEl.style.cssText = 'position:fixed;left:0;top:0;width:1100px;height:720px;opacity:0;pointer-events:none;border:0';
+  frameEl.src = 'hologram.html';
+  document.body.appendChild(frameEl);
+  try {
+    const w = frameEl.contentWindow;
+    const deadline = performance.now() + 30000;
+    while (!(w.hologram?.manipulator && w.hologram.model) && performance.now() < deadline) await new Promise((r) => setTimeout(r, 200));
+    const h = w.hologram;
+    if (!h?.manipulator) throw new Error('hologram.html did not finish loading in 30s');
+    const m = h.manipulator;
+    checkTrue('the page loads a multi-part (literal explode) model', m.explodeIsLiteral);
+    h.controls.enabled = false; // synthetic pointers can't be captured by OrbitControls
+    const canvas = h.renderer.domElement;
+    const parts = [];
+    h.model.traverse((c) => { if (c.isMesh) parts.push(c); });
+    const click = (x, y, dx = 0) => {
+      const opts = { clientX: x, clientY: y, button: 0, pointerId: 1, bubbles: true };
+      canvas.dispatchEvent(new w.PointerEvent('pointerdown', opts));
+      canvas.dispatchEvent(new w.PointerEvent('pointerup', { ...opts, clientX: x + dx }));
+    };
+    const screenOf = (part) => {
+      h.model.updateMatrixWorld(true);
+      h.camera.updateMatrixWorld(true);
+      const v = part.getWorldPosition(new part.position.constructor()).project(h.camera);
+      const r = canvas.getBoundingClientRect();
+      return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+    };
+    const clickAnyPart = () => {
+      for (const p of parts) { const s = screenOf(p); click(s.x, s.y); if (m.activePart) return s; }
+      return null;
+    };
+
+    m.reset();
+    clickAnyPart();
+    checkTrue('before exploding, a click on the chair selects nothing', m.activePart === null);
+
+    // Explode with synthetic open hands (the page's own clock, so its render-loop tick agrees).
+    const oh = (x) => hand(x, 0.5, 0, 'open');
+    let t = w.performance.now();
+    for (let i = 0; i < 8; i++) { m.update([oh(0.45), oh(0.55)], 1.78, t); t += 33.3; }
+    for (let i = 1; i <= 25; i++) { m.update([oh(0.45 - 0.016 * i), oh(0.55 + 0.016 * i)], 1.78, t); t += 33.3; }
+    for (let i = 0; i < 20; i++) { m.update([], 1.78, t); t += 33.3; }
+    const off = Math.max(...parts.map((p) => p.position.distanceTo(p.userData.explodeHome)));
+    checkTrue('the chair is exploded past half-way', off > 0.3, `max offset ${off.toFixed(3)} (full = 0.6)`);
+
+    const at = clickAnyPart();
+    checkTrue('a click on a part selects it', !!m.activePart && parts.includes(m.activePart), m.activePart ? `selected "${m.activePart.name}"` : 'nothing selected');
+    const chosen = m.activePart;
+    if (at) click(at.x, at.y, 40); // a 40px drag from the same spot is an orbit, not a click
+    checkTrue('a drag does not change the selection', m.activePart === chosen);
+    const r = canvas.getBoundingClientRect();
+    click(r.left + 4, r.top + 4);
+    checkTrue('a click on empty space goes back to the whole model', m.activePart === null);
+    m.reset();
+  } catch (err) {
+    currentGroup.cases.push({ name: '(group threw)', pass: false, detail: String(err) });
+    failCount++;
+  }
+  frameEl.remove();
 
   render();
   rawEl.textContent = `${groups.reduce((n, g) => n + g.cases.length, 0)} checks · ${new Date().toISOString()}`;

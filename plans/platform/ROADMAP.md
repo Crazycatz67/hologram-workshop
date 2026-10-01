@@ -19,6 +19,24 @@ Nobody offers free, in-browser, gesture-controlled interaction with *your own se
 
 ## Revision History
 
+- **2026-09-30 (2):** **P5 built, and v1 gesture bugs #26–#29 fixed.**
+  - **P5 "Show What Was Filled In":** a Track B completed scan (OBJ + `.json` sidecar, dropped together or `?model=`) shows its inferred faces as ghosted, still, low-contrast hatched meshes. **View: Completed / As scanned** button + **I** key; the library row shows % inferred (cross-checked against the faces), method and licence; Measure shows "(includes inferred)". Scanned faces are unchanged (count, area, position checksum). 0 flashes/s. `platform/p5-test.html` 20/0. Needs the owner's look check. Caveats: disconnected Poisson patches become their own parts; measurements include inferred geometry even in "As scanned" (tagged); BUGS #30 means overlapping layers add up until the depth pre-pass is fixed.
+  - **Built, not wired yet:** `holdGate.js` (the confirmation ring, lab 19/0) and `gunPose.js` + `docs/lab/gestures/gun-lab.html` (the 2-minute finger-gun probe that decides the click).
+- **2026-09-30:** **Interaction design decided by the owner** (from Ricky's research and Debbie's gesture audit, reports in `docs/team-log/reports/`).
+  - **Gesture scheme "Engage → Aim → Act":**
+    - Hands count only when raised (lower them = rest, nothing fires).
+    - What you point at decides the target: a fist over an object grabs it, over empty space orbits.
+    - A ~400 ms neutral gap after any gesture before a different one can start; commands only from idle.
+    - Three confirmation tiers: **instant** (grab, spin, tilt, scale, aim, drag), **short** 150–250 ms (select, click, explode start), **ring** ~650 ms for commands (undo, tool wheel, reset, hide). The ring is ported from the ASL project, stays invisible for the first 200 ms, pauses while the hand moves, and repeats within 2 s drop to the short tier.
+    - Six poses or fewer. Either hand can do anything.
+  - **Pointer = "finger gun":** index out + thumb up switches aim mode on. A remote-style cursor moves with the palm (slows down for precision), with a beam from the ghost hand to a snapping crosshair. **The click (thumb drop vs the other hand's pinch) is decided by a live probe** (`docs/lab/gestures/gun-lab.html`).
+  - **One-hand pinch is retired for selecting.** Pinch now means two-hand scale only.
+  - **✌ held ~0.65 s opens a tool wheel** (Measure, Polygon, pin, hide, redo, units, exit); keys and buttons also work. **Thumbs-down held = undo.**
+  - **Clap reset kept**, but only from idle, outside the neutral gap, and undoable.
+  - **Pins act against edits only:** a pinned item or part never moves; the item and camera hold still while one part is edited.
+  - **Measuring keeps its tapes** (a new click starts the next; thumbs-down undoes). The crosshair turns amber over inferred surface.
+  - **Polygon mode = a "polygon lens":** see and select the scan's real triangles. **Non-destructive only** (hide, select, relabel, mark as inferred); hand edits never move measured geometry.
+  - **Open:** a carousel/selector for choosing holograms and saved versions (research running).
 - **2026-09-29 (5):** **Rendering performance: display LOD + a cheaper single-layer pass (`platform/lod.js`, `platform/perf-test.html`).**
   - **Measured first:** `perf-test.html` times `render()` directly with a readPixels sync (rAF-throttled fps counters lie in background tabs). On this Mac the 304k-tri chair costs ~0.74 ms/frame pipelined at pr 1 (0.94 at pr 2), so it's not a bottleneck here; the work is headroom for weaker laptops and room scans.
   - **Display LOD:** meshoptimizer simplifies dense scenes to ≤120k displayed tris (chair_detail 304k → 120k at 0.02–0.06 mm error; chess 233k → 120k at 0.05 mm). The LOD shares the scan's vertex buffers (only a new index) and is swapped in only inside `render()`, so measurements, exports, raycasts and splitting always read the full scan (Measure tab verified identical). Full detail returns when zoomed so close the error would exceed ~1.5 px, when Realism > 0.5, and always in Plain mode.
@@ -82,11 +100,11 @@ Drag-drop or file picker for GLB / OBJ(+MTL) / PLY, parsed locally. Then:
 ### P1 — Universal Controls
 Two modes, following Quest/visionOS practice:
 - **Scene mode:** gestures and mouse move the *camera* (dollhouse orbit, zoom, optional walk-through).
-- **Object mode:** a ray (hand pointer or mouse) **highlights before committing**, and a pinch or click selects. Then v1's gesture set applies to the selection: move, spin, tilt, scale. Floor/wall snapping, with a transform gizmo for mouse users.
+- **Object mode:** a ray (the finger-gun pointer or mouse) **highlights before committing**, and a pointer click selects (one-hand pinch is retired for selecting, 2026-09-30). Then v1's gesture set applies to the selection: move, spin, tilt, scale, under the Engage → Aim → Act rules above. Floor/wall snapping, with a transform gizmo for mouse users.
 
 Reuse `manipulator.js`, `gestures.js`, `stabilizer.js`, `smoothLandmarks.js` and `handTracker.js` **per selected segment** instead of per `o` group. The v1 practice mode and gesture-isolation lessons apply directly: room-level and object-level gestures must not bleed into each other.
 
-**Done looks like:** on a real webcam, switch to object mode, grab one item in a room, move it and set it down, without the camera or other objects moving.
+**Done looks like:** on a real webcam, switch to object mode, aim at one item in a room, grab it, move it and set it down, without the camera or other objects moving.
 
 ### P2 — Automatic Segmentation (no parts needed)
 Runs in a Web Worker on upload:

@@ -24,15 +24,16 @@ export function createLibrary(panel, { onToggle, onFocus, onRemove }) {
     const top = el('div', 'libName', name);
     top.title = name;
     const meta = el('div', 'libMeta');
+    const info = el('div', 'libInfo');   // completed scans only (P5)
     const bar = el('div', 'libBar'); const fill = el('div'); bar.append(fill);
     const btns = el('div', 'libBtns');
     const mk = (label, fn) => { const b = el('button', null, label); b.addEventListener('click', () => fn(id)); btns.append(b); return b; };
     const toggle = mk('Hide', () => onToggle(id));
     const focus = mk('Focus', onFocus);
     mk('Remove', onRemove);
-    row.append(top, meta, bar, btns);
+    row.append(top, meta, info, bar, btns);
     list.append(row);
-    rows.set(id, { row, meta, bar, fill, toggle, focus, data: { name, kind, status: 'queued', message: '', tris: null, visible: true } });
+    rows.set(id, { row, meta, info, bar, fill, toggle, focus, data: { name, kind, status: 'queued', message: '', tris: null, visible: true } });
     update(id, {});
     refreshCount();
   }
@@ -50,8 +51,26 @@ export function createLibrary(panel, { onToggle, onFocus, onRemove }) {
     r.bar.style.display = d.status === 'loading' ? '' : 'none';
     r.fill.style.width = `${Math.round((d.progress ?? 0) * 100)}%`;
     r.toggle.textContent = d.visible ? 'Hide' : 'Show';
+    renderCompletion(r.info, d.completion);
     const ready = d.status === 'ready';
     r.toggle.disabled = r.focus.disabled = !ready;
+  }
+
+  // `c` is main.js's describeCompletion() result: share (0..1), measuredShare, fromSidecar,
+  // method, licence, mode, sidecarName, sidecarError. Text only (sidecar text is user data).
+  function renderCompletion(box, c) {
+    box.replaceChildren();
+    box.style.display = c ? '' : 'none';
+    if (!c) return;
+    const pct = (x) => `${(x * 100).toFixed(1)}%`;
+    const line = (label, value) => { const p = el('div'); p.append(el('b', null, label + ' '), value); box.append(p); };
+    const head = el('div');
+    head.append(el('span', 'inf', `${pct(c.share)} inferred`),
+      c.fromSidecar ? `(sidecar${Math.abs(c.share - c.measuredShare) > 0.01 ? `; measured here ${pct(c.measuredShare)}` : ''})` : '(measured here; no sidecar)');
+    box.append(head);
+    if (c.method) line('Method', c.method + (c.mode ? ` [${c.mode}]` : ''));
+    if (c.licence) line('Licence', c.licence);
+    if (c.sidecarError) line('Sidecar', `not read: ${c.sidecarError}`);
   }
 
   function remove(id) {

@@ -4,6 +4,7 @@ This file is the **index**, not a plan. Each track has its own roadmap, Next Con
 
 ## Revision History
 
+- **2026-09-30 (2):** **Gesture scheme decided; P5 built.** The owner chose the Engage → Aim → Act scheme (neutral gap between different gestures, clap only from rest and undoable, click a part to select once exploded); BUGS #26-#29 fixed. Platform P5 (show what was filled in) is built. A hold-to-confirm gate and a finger-gun probe exist as lab pages but are not wired into the live gestures. Live webcam confirmation of the new scheme is still pending. Details in `plans/platform/ROADMAP.md`.
 - **2026-09-30:** **Track B moved from research to built.** B0 (benchmark) is done; B1 (classical completion) ships for objects and, via `plane_extend`, for room planes; the B3 TripoSR spike is done. `complete.py --mode auto` picks the room or object pipeline. Free ground truths are in `assets/benchmark/` (git-ignored). Limits: thin shells and big thick furniture still fail, and the room numbers come from a perfectly planar synthetic room. Details and numbers in `plans/scan-completion/ROADMAP.md` (revision 2026-09-30 (5)).
 - **2026-09-29 (2):** **Re-focused around an architectural hologram platform.** The owner clarified that the project was always meant for interacting with objects in general, and the chair was only a test asset. Two main-focus tracks:
   - **Hologram Platform:** upload any room or object scan → hologram, universal controls with no hand-made parts, per-object colours, room decor.
@@ -54,7 +55,7 @@ B produces files, A displays and interacts with them. Their only coupling is the
 2. A-P1/P2 (controls, segmentation) alongside the B1 follow-ups (thin shells, big furniture, real-scan room test).
 3. A-P5 shows B's output.
 
-v1 maintenance (chess captures, live gesture confirmations) continues when convenient. C is parked until its basics are answered.
+v1 maintenance (chess captures, live confirmations of the new Engage → Aim → Act gesture scheme on a real webcam) continues when convenient. C is parked until its basics are answered.
 
 ## Cross-track Notes
 

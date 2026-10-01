@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Finger-gun Lab</title>
+  <style>
+    html, body { margin: 0; background: #05070a; color: #c9dcec; }
+    body { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 16px; }
+    h1 { font-size: 14px; color: #4fd1ff; margin: 0 0 6px; font-weight: normal; }
+    h2 { font-size: 12px; color: #9db4d0; margin: 18px 0 6px; font-weight: normal; text-transform: uppercase; letter-spacing: 0.08em; }
+    p { margin: 4px 0; max-width: 900px; line-height: 1.5; }
+    #status { color: #4fd1ff; margin: 8px 0 12px; }
+    #status.error { color: #ff8a80; }
+    pre { white-space: pre-wrap; margin: 0; }
+    button {
+      font: inherit; color: #dff6ff; background: rgba(30, 90, 130, 0.75);
+      border: 1px solid rgba(120, 220, 255, 0.35); padding: 5px 12px; border-radius: 4px; cursor: pointer;
+    }
+    button:disabled { opacity: 0.45; cursor: default; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .cols { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+    #stage { position: relative; width: min(640px, 100%); aspect-ratio: 16 / 9; background: #0b0d10; border: 1px solid #1a2633; }
+    #cam, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+    /* Mirrored like hands.html; the overlay flips x itself so its text stays readable. */
+    #cam { transform: scaleX(-1); }
+    #live { flex: 1 1 360px; min-width: 0; }
+    #readout { color: #9db4d0; background: rgba(0, 0, 0, 0.45); border: 1px solid #1a2633; padding: 8px 10px; min-height: 9em; }
+    /* State badges change colour only when the state changes, with a short fade, and use
+       low-contrast fills: this page must never flash (photosafety, BUGS #14). */
+    .badge { display: inline-block; padding: 3px 9px; border-radius: 4px; border: 1px solid #243444;
+      background: #0e151d; color: #6b7d94; transition: background-color 180ms, color 180ms, border-color 180ms; }
+    .badge.on { background: #10261c; color: #9fe0b8; border-color: #2c5a44; }
+    .badge.warn { background: #2a2112; color: #e6c48a; border-color: #5a4a2c; }
+    #script { background: rgba(0, 0, 0, 0.45); border: 1px solid #1a2633; padding: 10px 12px; margin-top: 12px; max-width: 900px; }
+    #step { font-size: 15px; color: #dff6ff; line-height: 1.5; min-height: 2.8em; }
+    #progress { height: 4px; background: #13202c; margin-top: 8px; border-radius: 2px; overflow: hidden; }
+    #bar { height: 100%; width: 0; background: #3f7f9f; transition: width 200ms linear; }
+    table { border-collapse: collapse; margin-top: 6px; }
+    th, td { border: 1px solid #1a2633; padding: 4px 8px; text-align: left; vertical-align: top; }
+    th { color: #9db4d0; font-weight: normal; }
+    #verdict { margin-top: 10px; padding: 8px 10px; border: 1px solid #243444; max-width: 900px; line-height: 1.5; }
+    #json { max-height: 240px; overflow: auto; background: rgba(0, 0, 0, 0.45); border: 1px solid #1a2633; padding: 8px; margin-top: 8px; }
+    .pass { color: #9fe0b8; } .fail { color: #ff8a80; } .info { color: #e6c48a; }
+    .scroll { max-width: 100%; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <h1>Finger-gun lab: is a thumb drop steady enough to be a click?</h1>
+  <p>Measures how far the hand moves when the thumb drops (the proposed "click"), compared with a
+    one-hand pinch and with the hand's resting jitter. The decision rule is printed with the results.
+    One hand in view. About 2 minutes. Nothing here changes the hologram pages.</p>
+  <div id="status">loading…</div>
+
+  <div class="row">
+    <button id="start">start camera</button>
+    <button id="run" disabled>run guided probe</button>
+    <button id="skip" disabled>skip step</button>
+    <button id="copy" disabled>copy results JSON</button>
+    <span id="fps">— fps</span>
+  </div>
+
+  <div id="script">
+    <div id="step">Start the camera, then run the guided probe.</div>
+    <div id="progress"><div id="bar"></div></div>
+  </div>
+
+  <h2>Live</h2>
+  <div class="cols">
+    <div id="stage">
+      <video id="cam" playsinline muted></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div id="live">
+      <div class="row" style="margin-bottom: 8px">
+        <span class="badge" id="gunBadge">gun: —</span>
+        <span class="badge" id="thumbBadge">thumb: —</span>
+        <span class="badge" id="fistBadge">grab (isFistLike): —</span>
+      </div>
+      <pre id="readout">camera off</pre>
+    </div>
+  </div>
+
+  <h2>Results</h2>
+  <div id="results"><p>No probe run yet.</p></div>
+  <pre id="json" hidden></pre>
+
+  <h2>Synthetic self-test (no camera)</h2>
+  <p>Constructed 3D hands fed through gunPose.js. These checks should move into test.js once it is free.</p>
+  <pre id="selftest">running…</pre>
+
+  <script type="module">
+    import(`./gun-lab.js?v=${Date.now()}`).catch((err) => {
+      const s = document.getElementById('status');
+      s.textContent = 'lab crashed: ' + err;
+      s.classList.add('error');
+      console.error(err);
+    });
+  </script>
+</body>
+</html>

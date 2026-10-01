@@ -414,33 +414,64 @@ design weakness rather than a crash, logged so the numbers aren't lost.
 
 ## 26. [A-v1] Releasing a tilt or two-hand pinch chains straight into explode
 
-**Status: OPEN** (2026-09-30, found by Debbie's gesture audit, reproduced offline with synthetic hands).
-- **Symptom:** hold a tilt (fist + second hand), open the fist: the mode becomes `explode` ~267 ms
-  later, and lowering both hands casually then flies the parts out to the full 0.6 offset.
-- **Cause:** "two open hands" is exactly the pose a tilt leaves behind. `manipulator.js:738-741`
-  (`enterFor` / `explode.update`) only raises the entry bar to `SWITCH_AWAY_MS` (300 ms), and that
-  timer is already running during the old gesture's 220 ms release.
-- **Fix direction (owner decision):** require a short neutral gap after any release before a
-  two-hand gesture can start, or let explode start only from IDLE with no gesture in the last ~400 ms.
-- **Repro:** paste the scratch script (`gesture-chain-repro.js`, session scratchpad) into DevTools on hologram.html.
-  Live check: the owner's 5-minute webcam checklist, step 3.
+**Status: FIXED (verified offline)** (2026-09-30, found by Debbie's gesture audit; fixed by Debbie).
+- **Symptom:** hold a tilt (fist + second hand), open the fist: the mode became `explode` ~300 ms
+  later, and lowering both hands casually then flew the parts out to the full 0.6 offset.
+- **Root cause:** "two open hands" is exactly the pose a tilt or two-hand pinch leaves behind, and
+  explode's entry timer was already running during the old gesture's 220 ms release
+  (`manipulator.js` `enterFor` / `explode.update`); nothing required a pause between gestures.
+- **Fix (owner's "Engage → Aim → Act"):** `manipulator.js` neutral gap. After any gesture ends
+  (clap included), a *different* gesture can start only once 400 ms have passed and the hands have
+  made no gesture's pose for 100 ms (`NEUTRAL_GAP_MS`, `NEUTRAL_HOLD_MS`, `updateGap`). Re-closing
+  the same fist is never blocked. Direct interrupts of an active gesture (`SWITCH_AWAY_MS`) are unchanged.
+- **Regression check:** `test.html` group "Neutral gap and safe clap (BUGS #26, #27)". Live page
+  repro: explode never engages, offset stays 0 (was 300 ms / 0.6).
+- **Still to confirm:** webcam checklist step 3 (tilt, release: no explode). Also check that
+  relaxing before a new gesture feels natural and not sticky.
 
 ## 27. [A-v1] A fast reverse of explode fires a clap and resets everything, with no undo
 
-**Status: OPEN** (2026-09-30, Debbie). Explode the chair, then bring the open hands together fast:
-the clap check (`manipulator.js:715-719`) sees two hands closing fast and resets pose, scale,
-explode and part selection. Slowly bringing them together just reverses the explode (0.6 → 0.108).
-Live check: webcam checklist step 4.
+**Status: FIXED (verified offline)** (2026-09-30, Debbie). Explode the chair, then bring the open
+hands together fast: the clap check (`manipulator.js` `update`) ran in every mode and reset pose,
+scale, explode and part selection.
+- **Fix:** clap only fires from rest, meaning IDLE or an explode that has engaged but not pulled
+  apart (two open hands are also the clap's ready stance), and never inside the neutral gap (#26).
+  A clap also starts the gap, so separating the hands afterwards can't explode the fresh reset.
+  Every reset (clap, R, Reset button) is now undoable, one step: `manipulator.undo()` /
+  `canUndo` / `resetCount`, with the U key or Ctrl/Cmd+Z in `hologram.js`, and a status hint after a reset.
+- **Also found and fixed:** hands that left the frame apart and came back close together read as a
+  fast close (the last two-hand sample was kept across the dropout) and fired a phantom reset.
+  Clap speed is now measured only across consecutive two-hand frames.
+- **Regression check:** `test.html` groups "Neutral gap and safe clap" and "Reset is undoable,
+  one step". Gesture lab and smoothing lab unchanged (clap recall 22/24 at 8 fps, 24/24 at 12-60 fps).
+- **Still to confirm:** webcam checklist step 4 (fast explode reverse: no reset) and step 6
+  (5 claps from rest still register). Known, not changed: after a big pull-apart a fast close
+  un-explodes only after ~0.7-1 s, because explode's amount is deliberately unclamped (BUGS #11).
 
 ## 28. [A-v1] Part selection is never wired on hologram.html
 
-**Status: OPEN** (2026-09-30, Debbie; verified by grep). `manipulator.selectPartAtScreenPoint`
-(`manipulator.js:670`) is only called from `test.js`: no pointer handler or pinch calls it, so the
-chair's 8 parts can't be picked on the live page and #2's live confirm can't be tried.
+**Status: FIXED (verified offline)** (2026-09-30, Debbie). `manipulator.selectPartAtScreenPoint`
+was only called from `test.js`.
+- **Fix:** `hologram.js` mouse click (the one-hand pinch is being retired for a finger-gun pointer
+  later). Once exploded past half-way, clicking a part selects it and clicking empty space goes
+  back to the whole model. A drag of more than 5 px is an orbit, and clicks are left alone while the
+  measure panel's point or note mode is on. The status line names the selected part.
+- **Regression check:** `test.html` group "Part selection by mouse on hologram.html (BUGS #28)"
+  drives the real page in an iframe with synthetic pointer events (selected `seat_cushion`).
+- **Still to confirm:** with a real mouse, explode, click a leg, then fist-grab: only that leg moves (#2's live confirm).
 
 ## 29. [A-v1] hands.html leaks a whole GestureRecognizer on every camera stop/start
 
-**Status: OPEN** (2026-09-30, Debbie; verified by reading). Same bug as #16, fixed only in
-hologram.js (`if (!tracker)` at hologram.js:207). `hands.js:34` creates a new tracker on every
-start and `stop()` (hands.js:51-60) never closes it. Fix: copy hologram.js's pattern. Live check:
-stop/start 5× on hands.html and watch memory in Activity Monitor.
+**Status: FIXED (needs live confirm)** (2026-09-30, Debbie). Same bug as #16. `hands.js` created a
+new tracker on every start and `stop()` never closed it.
+- **Fix:** `hands.js` reuses the tracker (`if (!tracker)`, copied from hologram.js).
+- **Regression check:** none automated (needs a camera). The page loads with no console errors.
+- **Still to confirm:** stop/start 5× on hands.html while watching memory in Activity Monitor.
+
+## 30. [A] The single-layer depth pre-pass is wiped by the background clear, so surfaces add up (photosafety #14 guard inactive)
+
+**Status: OPEN** (2026-09-30, found by Cody-2 building P5; the mechanism was confirmed by the overseer reading the code).
+- **Symptom:** two stacked scanned planes add their brightness, 16,129,203 alone → 32,255,255 stacked (Cody-2's measurement). #14's "draw only the front layer" guard isn't taking effect.
+- **Cause:** `scene.js:9` sets a `THREE.Color` `scene.background`. In three r161 a Color background makes WebGLBackground **force-clear** colour and depth at the start of every `renderer.render()`, even with `autoClear = false`. `hologramLook.renderSingleLayer` (hologramLook.js ~:59-69) and `platform/lod.js` (~:176-189) render a depth pre-pass and then a colour pass, and the second render's forced clear erases the pre-pass depth.
+- **Likely fix:** keep `autoClearDepth` false (or null the background and clear to the colour manually) for the colour pass. Re-run `safety-test.html` and the P5 photosafety check afterwards. `platform/p5-test.js` section B works around this with a null background.
+- **Risk until fixed:** inferred and scanned layers glow additively where they overlap. It was still measured at 0 flashes/s on the P5 check, so this is brightness stacking, not flashing.

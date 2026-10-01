@@ -129,6 +129,17 @@ const CLAP_MIN_CLOSING_SPEED = 8.0;
 // during a fast clap is not.
 const PINCH_GLITCH_MS = 100;
 
+// Neutral gap ("Engage -> Aim -> Act", owner decision 2026-09-30; BUGS #26/#27). After any
+// gesture ends, a DIFFERENT gesture (clap included) can only start once NEUTRAL_GAP_MS has
+// passed AND the hands have spent NEUTRAL_HOLD_MS making no gesture's pose. The second half is
+// what actually breaks the chain: "two open hands" is exactly the pose a tilt or a two-hand
+// pinch leaves behind, so a timer alone would only delay the accidental explode, not stop it.
+// Resuming the SAME gesture (re-closing the fist) is never blocked. NEUTRAL_HOLD_MS is long
+// enough that a one- or two-frame tracking dropout doesn't count as "neutral".
+const NEUTRAL_GAP_MS = 400;
+const NEUTRAL_HOLD_MS = 100;
+const CLAP = 'clap'; // not a MODE (it is instant), but it ends like one for the neutral gap
+
 // Explode: two open hands (neither fisted nor pinching, keeping it out of grab/scale's
 // hand-shape space) pulling apart drives it, continuously, like scale rather than a
 // one-shot trigger like clap. Untuned guess for the span-to-amount conversion, same as
@@ -430,6 +441,18 @@ export function createManipulator(object, camera) {
   let lastClapTime = null;
   let pinchSince = null; // see checkClap -- how long pinching has read true, uninterrupted
 
+  // The pending neutral gap, or null when any gesture may start (see NEUTRAL_GAP_MS).
+  // { endedMode, since, neutralSince, sawNeutral }
+  let gap = null;
+  // Whether the current explode session has actually pulled the hands apart. Two open hands
+  // are both the explode pose AND the clap's ready stance, so explode engages the moment the
+  // hands come up; until they have pulled apart it is still "at rest" for the clap. Once
+  // they have, a fast close is un-exploding, never a clap (BUGS #27).
+  let explodePulled = false;
+  // One-step undo of the last reset (clap, R key or Reset button): the pose from just before.
+  let undoSnapshot = null;
+  let resetCount = 0;
+
   const GRAB_CHANNELS = ['x', 'y', 'spin', 'pitch', 'roll', 'depth'];
 
   // Letting go. The deadzone references are dropped (re-closing the fist measures from where
@@ -465,26 +488,47 @@ export function createManipulator(object, camera) {
   // leaves the object wherever it was moved to, rather than snapping back.
   function clearExplode() {
     explodeSig = null;
+    explodePulled = false;
   }
 
-  function performReset() {
-    object.position.copy(home.position);
-    object.quaternion.copy(home.quaternion);
-    object.scale.copy(home.scale);
+  // Drops every gesture's tracking and follow state -- object AND every part -- so nothing
+  // keeps coasting or resumes mid-gesture after a reset or an undo.
+  function clearMotionState() {
     grab.reset();
     transform.reset();
     explode.reset();
-    // Wipes tracking and follow state for every target at once -- object AND every part --
-    // so nothing keeps coasting or resumes mid-gesture after a reset.
     targetStates.clear();
     clearExplode();
     explodeCh = newChannel();
-    explodeAmount = 0;
     explodeV = { x: 0, y: 0 };
+    lastAdvanceTime = null;
+    gap = null;
+    mode = MODE.IDLE;
+  }
+
+  // Everything a reset changes, so undo can put it back exactly.
+  function takeSnapshot() {
+    return {
+      position: object.position.clone(),
+      quaternion: object.quaternion.clone(),
+      scale: object.scale.clone(),
+      explodeAmount,
+      activePart,
+      parts: literalMode ? explodeParts.map((p) => [p.position.clone(), p.quaternion.clone(), p.scale.clone()]) : null
+    };
+  }
+
+  function performReset() {
+    undoSnapshot = takeSnapshot();
+    resetCount++;
+    clearMotionState();
+    object.position.copy(home.position);
+    object.quaternion.copy(home.quaternion);
+    object.scale.copy(home.scale);
+    explodeAmount = 0;
     explodeScale0 = { x: home.scale.x, y: home.scale.y };
     explodeLiteralV = 0;
     activePart = null;
-    lastAdvanceTime = null;
     if (literalMode) {
       for (const part of explodeParts) {
         part.position.copy(part.userData.explodeHome);
@@ -492,7 +536,47 @@ export function createManipulator(object, camera) {
         part.scale.copy(part.userData.explodeHomeScale);
       }
     }
-    mode = MODE.IDLE;
+  }
+
+  // Puts back the pose from just before the last reset. One step: a second undo does nothing
+  // until another reset happens. Returns whether anything was restored.
+  function performUndo() {
+    if (!undoSnapshot) return false;
+    const s = undoSnapshot;
+    undoSnapshot = null;
+    clearMotionState();
+    object.position.copy(s.position);
+    object.quaternion.copy(s.quaternion);
+    object.scale.copy(s.scale);
+    // Explode's per-session values re-sync from these at the next explode (commandExplode).
+    explodeAmount = s.explodeAmount;
+    explodeLiteralV = s.explodeAmount;
+    explodeScale0 = { x: object.scale.x, y: object.scale.y };
+    activePart = s.activePart;
+    if (s.parts) {
+      explodeParts.forEach((part, i) => {
+        part.position.copy(s.parts[i][0]);
+        part.quaternion.copy(s.parts[i][1]);
+        part.scale.copy(s.parts[i][2]);
+      });
+    }
+    return true;
+  }
+
+  function startGap(endedMode, timestampMs) {
+    gap = { endedMode, since: timestampMs, neutralSince: null, sawNeutral: false };
+  }
+
+  // Advances the pending neutral gap by one camera frame; clears it once satisfied.
+  function updateGap(neutral, timestampMs) {
+    if (!gap) return;
+    if (neutral) {
+      if (gap.neutralSince === null) gap.neutralSince = timestampMs;
+      if (timestampMs - gap.neutralSince >= NEUTRAL_HOLD_MS) gap.sawNeutral = true;
+    } else {
+      gap.neutralSince = null;
+    }
+    if (gap.sawNeutral && timestampMs - gap.since >= NEUTRAL_GAP_MS) gap = null;
   }
 
   // A clap requires open hands, not pinching ones — both because that's what a real clap
@@ -658,6 +742,20 @@ export function createManipulator(object, camera) {
 
     reset: performReset,
 
+    // One-step undo of the last reset (a misfired clap, the R key, the Reset button). Kept
+    // on the API so a future gesture (e.g. a held thumbs-down) can call it too.
+    undo: performUndo,
+
+    get canUndo() {
+      return undoSnapshot !== null;
+    },
+
+    // Counts every reset, whatever triggered it, so the UI can notice a clap reset and offer
+    // the undo.
+    get resetCount() {
+      return resetCount;
+    },
+
     // Which part grab/spin/tilt/scale currently act on, or null when nothing is selected
     // (whole-object mode). Read by the UI to name the active part on the coach HUD.
     get activePart() {
@@ -712,12 +810,6 @@ export function createManipulator(object, camera) {
       dt = Math.min(dt, 0.25);
       lastUpdateTime = timestampMs;
 
-      if (on('clap') && hands.length === 2 && checkClap(hands, aspect, timestampMs)) {
-        performReset();
-        lastAdvanceTime = timestampMs;
-        return mode;
-      }
-
       const twoHanded = hands.length === 2 && hands.every((h) => h.pinch?.pinching);
       // isFistLike trusts MediaPipe's own classifier when it has a confident opinion
       // either way, and only falls back to geometric curl detection when it doesn't.
@@ -730,16 +822,49 @@ export function createManipulator(object, camera) {
       // Each mode is gated on its channel being armed, so practice mode can silence a
       // gesture completely rather than merely ignoring its effect.
       const grabArmed = on('move') || on('spin') || on('tilt') || on('push');
+      const wantTransform = twoHanded && on('scale');
+      const wantExplode = openHanded && on('explode');
+      const wantGrab = fisted && grabArmed;
+
+      // Neutral gap (BUGS #26): after a gesture ends, a different one waits until the hands
+      // have been neutral. `allowed` only ever bites in IDLE -- the gap is cleared the
+      // moment any gesture is active.
+      updateGap(!wantTransform && !wantExplode && !wantGrab, timestampMs);
+      const allowed = (m) => !gap || gap.endedMode === m;
+
+      // Clap is a command, so it only fires from rest (BUGS #27): IDLE, or an explode that
+      // has engaged but not pulled apart (the clap's own ready stance), and never inside a
+      // neutral gap. checkClap still runs on every two-hand frame so its speed tracking stays
+      // continuous, and a blocked clap is used up (it re-arms only once the hands separate).
+      if (hands.length !== 2) {
+        // Clap speed is only measured across consecutive two-hand frames. Keeping the last
+        // sample across a dropout made hands that left the frame apart and came back close
+        // together read as a fast close, and reset the model out of nothing.
+        lastClapSpan = null;
+        lastClapTime = null;
+      } else if (on('clap')) {
+        const clapped = checkClap(hands, aspect, timestampMs);
+        const atRest = mode === MODE.IDLE || (mode === MODE.EXPLODE && !explodePulled);
+        if (clapped && atRest && allowed(CLAP)) {
+          performReset();
+          lastAdvanceTime = timestampMs;
+          // A clap ends like any gesture: the hands it leaves together and open are the
+          // explode pose, so separating them afterwards must not explode the fresh reset.
+          startGap(CLAP, timestampMs);
+          return mode;
+        }
+      }
 
       // Starting a gesture from IDLE and INTERRUPTING a different, already-active gesture
       // are not the same decision: SWITCH_AWAY_MS raises the bar for the interrupt case so a
       // single misread frame can't hijack an active gesture.
       const startingFromIdle = mode === MODE.IDLE;
       const enterFor = (targetMode) => (startingFromIdle || mode === targetMode ? undefined : SWITCH_AWAY_MS);
+      const prevMode = mode;
 
-      const transforming = transform.update(twoHanded && on('scale'), timestampMs, enterFor(MODE.TRANSFORM));
-      const exploding = explode.update(openHanded && on('explode') && !transforming, timestampMs, enterFor(MODE.EXPLODE));
-      const grabbing = grab.update(fisted && grabArmed && !transforming && !exploding, timestampMs, enterFor(MODE.GRAB));
+      const transforming = transform.update(wantTransform && allowed(MODE.TRANSFORM), timestampMs, enterFor(MODE.TRANSFORM));
+      const exploding = explode.update(wantExplode && allowed(MODE.EXPLODE) && !transforming, timestampMs, enterFor(MODE.EXPLODE));
+      const grabbing = grab.update(wantGrab && allowed(MODE.GRAB) && !transforming && !exploding, timestampMs, enterFor(MODE.GRAB));
 
       if (transforming) {
         mode = MODE.TRANSFORM;
@@ -768,6 +893,9 @@ export function createManipulator(object, camera) {
         clearTransform();
         clearExplode();
       }
+
+      if (mode !== MODE.IDLE) gap = null;
+      else if (prevMode !== MODE.IDLE) startGap(prevMode, timestampMs);
 
       advance(timestampMs);
       return mode;
@@ -917,6 +1045,7 @@ export function createManipulator(object, camera) {
       return;
     }
     const d = takeUpSlack(explodeSig, span, EXPLODE_DEADZONE, MAX_EXPLODE_SPAN_RATE_PER_SECOND, dt);
+    if (d > 0) explodePulled = true;
     explodeCh.cmd += d * EXPLODE_SENSITIVITY * settings.sensitivity;
   }
 }

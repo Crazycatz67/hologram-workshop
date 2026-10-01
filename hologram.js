@@ -52,6 +52,7 @@ let lastVideoTime = -1;
 let currentMeasurePanel = null;
 let currentModelId = null;
 let swapping = false;
+let seenResets = 0; // manipulator.resetCount already announced (see noticeResets)
 
 // scanlineSize is high on purpose. At the library's default (8) the scanline bands are
 // wide enough to cut clean across a chair leg, and thin parts read as SEVERED -- reported
@@ -159,14 +160,15 @@ async function loadModelById(id) {
   frameObject(object, camera, controls);
   manipulator = createManipulator(object, camera);
   window.hologram.manipulator = manipulator;
+  seenResets = manipulator.resetCount;
 
   // Re-apply whatever practice drill/tuning was active -- otherwise a mid-session drill
   // selection would silently reset to "everything on" with default tuning on the new model.
   applyDrill(activeDrill);
   applyTuning();
 
-  // Decided once per model from its own mesh count — see manipulator.js. No manual override
-  // control exists yet since only single-mesh scans exist to test against.
+  // Decided once per model from its own mesh count — see manipulator.js: the detailed chair
+  // (8 parts) explodes literally, the single-mesh scans stretch. No manual override exists.
   document.getElementById('explodeMode').textContent = manipulator.explodeIsLiteral
     ? 'explode: literal'
     : 'explode: stretch';
@@ -245,13 +247,32 @@ function stopTracking() {
 
 startBtn.addEventListener('click', () => (tracking ? stopTracking() : startTracking()));
 resetBtn.addEventListener('click', () => manipulator?.reset());
+
+// Every reset (clap, R, the Reset button) can be undone one step (BUGS #27: a misfired clap
+// used to wipe the pose with no way back). Checked every frame so a clap reset, which happens
+// inside manipulator.update(), gets the same hint as a button press.
+function noticeResets() {
+  if (!manipulator || manipulator.resetCount === seenResets) return;
+  seenResets = manipulator.resetCount;
+  setStatus('reset · press U (or Ctrl+Z) to undo');
+}
+function undoReset() {
+  if (manipulator?.undo()) setStatus('reset undone');
+}
+
 window.addEventListener('keydown', (e) => {
   // Typing in a field (the measure panel's calibration and fit-check inputs, a note) must not
   // reset the model, hide panels, or swap models on every arrow key (BUGS #17).
   if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
   const key = e.key.toLowerCase();
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && key === 'z') {
+    e.preventDefault();
+    undoReset();
+    return;
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (key === 'r') manipulator?.reset();
+  if (key === 'u') undoReset();
   if (key === 'd') document.body.classList.toggle('debug-camera');
   if (key === 'p') togglePanel();
   if (key === 'm') document.getElementById('measure').classList.toggle('hidden');
@@ -261,6 +282,31 @@ window.addEventListener('keydown', (e) => {
     const next = MODELS[(idx + dir + MODELS.length) % MODELS.length];
     loadModelById(next.id);
   }
+});
+
+// Part selection by mouse (BUGS #28; the one-hand pinch that was meant to select is being
+// retired for a finger-gun pointer later). Once the model is exploded past half-way, a click
+// on a part makes grab/spin/tilt/scale act on that part alone; a click on empty space goes
+// back to the whole model. A drag is an orbit, not a click (same 5px rule as the measure
+// panel), and while the measure panel's point-picking or note mode is on, clicks belong to it.
+const CLICK_TOLERANCE_PX = 5;
+let clickDownAt = null;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  clickDownAt = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  const down = clickDownAt;
+  clickDownAt = null;
+  if (!down || !manipulator?.explodeIsLiteral) return;
+  if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > CLICK_TOLERANCE_PX) return;
+  if (document.querySelector('#measure button.active')) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  const before = manipulator.activePart;
+  const part = manipulator.selectPartAtScreenPoint(ndcX, ndcY);
+  if (part) setStatus(`selected: ${part.name || 'part'} · gestures now move just this part`);
+  else if (before && !manipulator.activePart) setStatus('whole model selected');
 });
 
 // Camera frame timing. requestVideoFrameCallback reports each new camera frame once, with
@@ -319,6 +365,7 @@ startRenderLoop({
   },
   onTick: (tickNow = performance.now()) => {
     hologramMaterial.update();
+    noticeResets();
 
     if (!tracking || !sizeOverlayTo(overlay, video)) {
       // Still advance the model's follow springs, so a release that was coasting when the
@@ -377,7 +424,7 @@ const DRILLS = [
     sub: 'normal use',
     channels: CHANNELS,
     title: 'All gestures active',
-    body: 'Fist — move, twist to spin, hand nearer/farther to push-pull · second hand up/down tips it, left/right rolls it · two-hand pinch — scale · two open hands apart — explode · clap — reset'
+    body: 'Fist — move, twist to spin, hand nearer/farther to push-pull · second hand up/down tips it, left/right rolls it · two-hand pinch — scale · two open hands apart — explode (past half-way, click a part to move just that part) · clap from rest — reset (U undoes) · after letting go of any gesture, relax your hands for a moment before starting a different one'
   },
   {
     id: 'move',
@@ -425,7 +472,7 @@ const DRILLS = [
     sub: 'two open hands apart',
     channels: ['explode'],
     title: 'Explode / stretch',
-    body: 'Hold both hands open — not fisted, not pinching — and pull them apart. On a single-mesh scan like this chair it stretches rather than separating into parts.'
+    body: 'Hold both hands open — not fisted, not pinching — and pull them apart. The chair separates into its 8 parts (a single-mesh scan stretches instead). Once it is more than half-way apart, click a part to make the other gestures move just that part; click empty space to go back to the whole chair.'
   },
   {
     id: 'reset',
@@ -433,7 +480,7 @@ const DRILLS = [
     sub: 'clap open hands',
     channels: ['clap'],
     title: 'Clap to reset',
-    body: 'Open both hands wide apart, then bring them together quickly. It has to be genuinely quick — drifting them together slowly deliberately will not count.'
+    body: 'From rest, open both hands wide apart, then bring them together quickly. It has to be genuinely quick — drifting them together slowly will not count — and it will not fire in the middle of another gesture (bringing exploded parts back together fast just un-explodes them). Press U or Ctrl+Z to undo a reset.'
   }
 ];
 

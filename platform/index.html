@@ -66,6 +66,9 @@
     .libMeta { color: var(--muted); font-size: 12px; margin: 2px 0 8px; word-break: break-word; font-family: var(--mono); }
     .libRow[data-status="error"] .libMeta { color: var(--err); }
     .libRow[data-status="ready"] .libMeta { color: var(--ok); }
+    .libInfo { color: var(--muted); font-size: 12px; margin: -4px 0 8px; word-break: break-word; }
+    .libInfo b { color: var(--text); font-weight: 600; }
+    .libInfo .inf { display: inline-block; padding: 0 5px; margin-right: 4px; border: 1px dashed var(--line-2); border-radius: 4px; }
     .libBar { height: 3px; background: var(--line); border-radius: 2px; margin-bottom: 8px; }
     .libBar div { height: 100%; background: var(--accent); border-radius: 2px; }
     .libBtns { display: flex; gap: 6px; }
@@ -223,6 +226,7 @@
       <button id="mode" title="Tab: switch between moving the camera and editing objects">Scene mode</button>
       <button id="undo" disabled title="Undo (Ctrl/Cmd+Z)">Undo</button>
       <button id="showall" disabled>Show all</button>
+      <button id="inferredBtn" hidden aria-pressed="false" title="I: switch between the completed scan (filled-in surfaces shown ghosted and hatched) and the scan as captured">View: Completed</button>
       <div class="sep"></div>
       <button id="help" class="ghost" title="Controls and tips (?)" aria-controls="guide">?</button>
       <button id="toggleRight" class="ghost" title="Show / hide the inspector" aria-controls="right">Inspector ☰</button>
@@ -275,6 +279,7 @@
     <h3>Controls</h3>
     <p><b>Scene mode</b>: drag to orbit, scroll to zoom, right-drag to pan, <kbd>R</kbd> auto-rotate.</p>
     <p><b>Object mode</b> (<kbd>Tab</kbd>): hover highlights, click selects, drag moves along the floor, <kbd>Shift</kbd>+scroll rotates, <kbd>Alt/⌥</kbd>+scroll resizes (a redesign), <kbd>Del</kbd> hides, <kbd>H</kbd> shows all, <kbd>Esc</kbd> deselects, <kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd> undoes.</p>
+    <p><b>Completed scans</b> (Track B output, with its <code>.json</code> sidecar dropped alongside): filled-in surfaces are drawn ghosted with a hatch, never as measured. <kbd>I</kbd> or <b>View</b> switches between completed and as scanned.</p>
     <p><b>Capturing</b>: Scaniverse <b>Object</b> mode for single items, <b>Area</b> mode for rooms; export GLB or OBJ.</p>
     <p>Files are read in your browser and never uploaded.</p>
   </div>

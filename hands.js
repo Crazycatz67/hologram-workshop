@@ -30,8 +30,13 @@ function setStatus(text, isError = false) {
 async function start() {
   startBtn.disabled = true;
   try {
-    setStatus('loading gesture model (~8 MB)…');
-    tracker = await createHandTracker({ numHands: 2 });
+    // Reused across stop/start, same as hologram.js (BUGS #16/#29): the recognizer holds the
+    // WASM runtime, the model and a GPU context, and stop() never closes it, so building a
+    // new one on every start leaked a whole recognizer per restart.
+    if (!tracker) {
+      setStatus('loading gesture model (~8 MB)…');
+      tracker = await createHandTracker({ numHands: 2 });
+    }
 
     setStatus('requesting camera…');
     stream = await startCamera(video);
