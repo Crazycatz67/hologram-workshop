@@ -26,18 +26,18 @@ Electron-as-node (see the bottom of this file).
 
 | Suite | How to run | Needs | Last result | Date / commit |
 | --- | --- | --- | --- | --- |
-| `test.html` (v1 regression, imports test.js) | open `/test.html`, wait ~5 s, read `#summary` and every `.case.fail` | srv, tab | 304 passed / 0 failed (Timmy, 2026-10-01 pass 2, c90d3e2+dirty; was 217) | 2026-10-01 commit gate, f439528 + dirty |
-| `platform/ring-test.html` (Library ring) | open `/platform/ring-test.html`, read pass/fail | srv, tab | 74 / 0 (Timmy pass 2; was 73, +1 check, none lost) | 2026-10-01 commit gate |
-| `platform/library-test.html` (store + app wiring) | open `/platform/library-test.html`; uses its own IndexedDB names `hologram-library-test-unit` and `hologram-library-test-app` (the app runs in an iframe with `?db=…&ring=stub`) | srv, tab | 69 / 0 (Timmy; ~100 s, hidden tab) | 2026-10-01 commit gate |
-| `platform/polygon-test.html` (polygon lens, whole-model view #46) | open, read pass/fail (recorded run) | srv, tab | 42 / 0 (Timmy pass 2) | 2026-10-01, c90d3e2+dirty |
-| `platform/hands-test.html` (Platform hands step 2, synthetic; `?camera=1` = fake cam, owner/agents) | open, read recorded run | srv, tab | 24 / 0 (Timmy pass 2) | 2026-10-01, c90d3e2+dirty |
-| `platform/p5-test.html` (P5 inferred display, look, photosafety) | open, read pass/fail | srv, tab | 24 / 0 (Timmy pass 2, unchanged) | 2026-10-01 commit gate |
-| `docs/lab/gestures/holdgate-lab.html` (hold-to-confirm ring timing) | page, or node: import `holdgate-lab.js`, call `runScenarios()` | node or srv+tab | 19 / 19 PASS (Timmy, browser) | 2026-10-01 commit gate |
-| `docs/lab/gestures/gun-lab.html` self-test (finger-gun pose maths) | page (self-test runs on load, no camera), or node: import `gun-lab.js`, call `runSelfTest()` | node or srv+tab | 48 / 0 (Timmy pass 2; was 45) | 2026-10-01 commit gate |
+| `test.html` (v1 regression, imports test.js) | open `/test.html`, wait ~5 s, read `#summary` and every `.case.fail` | srv, tab | 326 / 0 (Timmy pass 3, headless visible tab; was 304). NOTE: in a HIDDEN tab 1 check fails (`🎯 button reads Stop`, label synced by rAF): needs visible tab | 2026-10-01 commit gate, f439528 + dirty |
+| `platform/ring-test.html` (Library ring) | open `/platform/ring-test.html`, read pass/fail | srv, tab | 74 / 0 (Timmy pass 3, visible; a hidden tab shows 73/0: one rAF check skipped) | 2026-10-01 commit gate |
+| `platform/library-test.html` (store + app wiring) | open `/platform/library-test.html`; uses its own IndexedDB names `hologram-library-test-unit` and `hologram-library-test-app` (the app runs in an iframe with `?db=…&ring=stub`) | srv, tab | 72 / 0 (Timmy pass 3, headless real time, ~40 s; was 69, +B33/B34/B35) | 2026-10-01 commit gate |
+| `platform/polygon-test.html` (polygon lens, whole-model view #46) | open, read pass/fail (recorded run) | srv, tab | 43 / 0 (Timmy pass 3, virtual-time headless; was 42, +#54) | 2026-10-01, c90d3e2+dirty |
+| `platform/hands-test.html` (Platform hands step 2, synthetic; `?camera=1` = fake cam, owner/agents) | open, read recorded run | srv, tab | 45 / 0 (Timmy pass 3, visible headless; was 24, +grab/pin H-checks; `?camera=1` not run) | 2026-10-01, c90d3e2+dirty |
+| `platform/p5-test.html` (P5 inferred display, look, photosafety) | open, read pass/fail | srv, tab | 24 / 0 (Timmy pass 3, unchanged) | 2026-10-01 commit gate |
+| `docs/lab/gestures/holdgate-lab.html` (hold-to-confirm ring timing) | page, or node: import `holdgate-lab.js`, call `runScenarios()` | node or srv+tab | 19 / 19 PASS (Timmy pass 3) | 2026-10-01 commit gate |
+| `docs/lab/gestures/gun-lab.html` self-test (finger-gun pose maths) | page (self-test runs on load, no camera), or node: import `gun-lab.js`, call `runSelfTest()` | node or srv+tab | 45 / 0 + 3 info rows = 48 rows (Timmy pass 3, same as pass 2) | 2026-10-01 commit gate |
 | `docs/lab/gestures/gun-lab.html` live probe (decides the click) | owner, webcam, ~2 min guided | cam | Owner ran it 2026-10-01 at 49 fps: click = **other hand's pinch** (8 px median palm shift vs 13–25 px thumb drop); gun pose recognised on **0%** of real frames | 2026-10-01 (owner) |
-| `docs/lab/gestures/gesture-lab.html` (per-gesture sweeps; `?only=spin,clap`) | open, read `window.__gestureReport` / the `<pre>` | srv, tab | 17 / 0 (Timmy; recorded run) | 2026-10-01 commit gate |
+| `docs/lab/gestures/gesture-lab.html` (per-gesture sweeps; `?only=spin,clap`) | open, read `window.__gestureReport` / the `<pre>` | srv, tab | 7 / 7 gestures fire, no bleed (Timmy pass 3; page reports 'done', no pass/fail count) | 2026-10-01 commit gate |
 | `docs/lab/gestures/smoothing-lab.html` (One Euro filter, clap recall by fps) | open, wait for "done" | srv, tab | done; clap recall 22/24 at 8 fps, 24/24 at 12-60 fps, slow bring-together 0 (unchanged) | 2026-10-01 commit gate |
-| `safety-test.html` (photosafety, WCAG ≤ 3 flashes/s) | open, wait for `ALL PASS` / `SOME FAIL`; shows the look on screen | srv, tab | ALL PASS 5/5, 0-1 flashes/s; blown pixels: chess+comfort 0.60% (was 0.81), v1+comfort 3.25% (was 3.85) (Debbie #30 numbers, confirmed by Timmy) | 2026-10-01 commit gate |
+| `safety-test.html` (photosafety, WCAG ≤ 3 flashes/s) | open, wait for `ALL PASS` / `SOME FAIL`; shows the look on screen | srv, tab | ALL PASS 5/5, 0-1 flashes/s (Timmy pass 3: v1 3.79%, v1+comfort 3.25%); blown pixels: chess+comfort 0.60% (was 0.81), v1+comfort 3.25% (was 3.85) (Debbie #30 numbers, confirmed by Timmy) | 2026-10-01 commit gate |
 | `platform/perf-test.html` (render cost, readPixels-synced) | open, read the table | srv, tab, **vis** (uses rAF) | done, GPU timer; platform mode pr1 1.1 ms median on chair_detail (608k tri, LOD 240k); pr2 legacy 6.1 ms vs 3.5 before (tolerance flag; hidden tab, legacy path, not shipped) | 2026-10-01 commit gate |
 | `platform/parts-test.html` (parts.js splitter) | open, read pass/fail | srv, tab | runs: chair_clean.obj -> 8 parts, 8 rows all ok (table, no pass/fail line) | 2026-10-01 commit gate |
 | `platform/photo-test.html` (photo.js, photo → hologram) | open, read pass/fail | srv, tab | loads clean, waits for "pick a photo" (needs a human photo; not exercised) | 2026-10-01 commit gate |
@@ -220,3 +220,62 @@ Send back: pass/fail per step.
 ### I. Library ring look — ~2 min — READY
 1. Back to the ring, spin it with mouse or hands. Expected: no flashing, easing is comfortable.
 Send back: pass/fail, one line on comfort.
+
+## Console sweep, 2026-10-01 (Timmy), working tree (no git; :8099 own server, camera never started)
+Fresh load + ~5 s wait, console read from load. Window would not go past 1280 px viewport, so layout was measured in a 1400 px-wide iframe (same-origin); screenshot taken at 1280 px.
+| Page | Console errors/warnings | Top bar at 1400 px |
+| --- | --- | --- |
+| hologram.html | 0 | fits, one row, no overflow |
+| hands.html | 0 | no top bar |
+| platform/index.html?db=timmy-sweep | 0 (1 INFO: sample thumbnail timing) | OVERFLOWS: bar content 1441 px in 1400 px (about 41 px), single row (nowrap, no wrapping); "Inspector" button (right edge 1429) is clipped. Unlogged bug. |
+| index.html | 0 (1 INFO thumbnail timing) | fits, no overflow |
+Not verified: a true 1400 px window (browser stayed 1280 px); iframe results are the same layout width but not a real window.
+
+## Commit-gate pass 3, 2026-10-01 (Timmy), working tree (no git), own :8099 + headless Chrome via CDP (the Chrome extension disconnected mid-pass)
+
+Tree includes: P1 step 3 (grab/pin), #50 top bar, #51 autosave, #52/#53 practice exit + orbitGuard, handModel.js hand,
+guide.html/testguide.js, clip-lab, serve.py /__clip, Track B #48/#49. Completion benchmarks NOT run (Debbie on #24 CPU).
+
+| Check | Before (pass 2) | Now | Status |
+| --- | --- | --- | --- |
+| test.html | 304/0 | 326/0 (visible). Hidden tab: 325/1, `🎯 button reads Stop` (rAF-synced label; needs visible tab) | GREEN |
+| ring-test | 74/0 | 74/0 (hidden tab 73/0) | GREEN |
+| library-test | 69/0 | 72/0 | GREEN |
+| p5-test | 24/0 | 24/0 | GREEN |
+| polygon-test | 42/0 | 43/0 | GREEN |
+| platform hands-test | 24/0 | 45/0 | GREEN |
+| hand-model-test (new) | n/a | 24/0 (`?camera=1` 25 not run) | GREEN |
+| holdgate-lab | 19/19 | 19/19 | GREEN |
+| gun-lab self-test | 45 + 3 info | 45 + 3 info | GREEN |
+| gesture-lab | 17/0 (old format) | 7/7 gestures fire, no bleed | GREEN |
+| safety-test | 5/5 | ALL PASS 5/5 | GREEN |
+| guide pure checks | n/a | my structural checks on testguide-steps.js (Electron-as-node): 37 steps, unique ids, HA3-HA7, GD5b, PL1/PL2, UP2, LR1, GD11, MT2 present: 88/0 (no committed script exists; Cody-G's 340 not reproduced) | GREEN (limited) |
+| Console sweep: hologram, hands, platform/index, index, guide, clip-lab | 0 | 0 errors on all 6 (camera never started) | GREEN |
+| Platform top bar 800/1200/1400/1600 px | overflow 41 px at 1400 | bar 48 px high, no horizontal overflow, nothing past the right edge at all four widths (screenshots 800, 1400: icons only) | GREEN (#50 fixed) |
+| serve.py | n/a | py_compile OK; POST /__clip NOT exercised (would write assets); :8099 GET /__clip 404 as expected | partial |
+| completion #48/#49 | n/a | NOT RUN (CPU claimed by Debbie, #24); Debbie's numbers are unverified by me | not-run |
+
+Not verified: gesture/hand feel, real camera, MediaPipe, clip-lab record/Keep, :8080 server (old, needs restart for /__clip), polygon-test in real time (virtual time only).
+
+### Features (pass 3)
+| Feature | Offline | Live |
+| --- | --- | --- |
+| Hologram hand (handModel.js) | verified-offline 24/0 | needs-live |
+| Platform grab/pin (P1 step 3) | verified-offline (hands-test 45) | needs-live |
+| #51 autosave (camera/mode/selection/polygon) | verified-offline (library 72) | needs-live (PL2) |
+| #52/#53 practice Stop + mouse no-spin | verified-offline (test.html 22 new) | needs-live |
+| #50 top bar | verified-offline (4 widths) | none needed |
+
+### Owner live checklist for pass 3 (~6 min). Server: restart :8080 first (`python3 serve.py`), hard refresh (Cmd+Shift+R).
+**A. New hand, http://localhost:8080/hologram.html (1.5 min)**
+1. Press Start camera, raise one open hand. Expected: a glowing rigged hand (not the old ghost outline) follows yours.
+2. Make a fist, then a pointer (index out), then pinch. Expected: finger shapes match yours; no flashing.
+**B. Practice Stop + mouse no-spin, same page (1.5 min)**
+3. Press the 🎯 button. Expected: button reads Stop; card shows "Stop (Esc)". Click it, then repeat and press Esc, then P. Expected: practice ends each time.
+4. Click and hold on the page background without moving, then release. Expected: model does not spin; drag does rotate.
+**C. PL2 reload, http://localhost:8080/platform/index.html (1.5 min)**
+5. Load the sample, rotate the view, switch to Object mode, select a part, enter polygon lens and hide a patch (Delete).
+6. Reload (Cmd+R). Expected: same camera, mode, selection and the hidden patch are back; no "unsaved" marker from view changes alone.
+**D. Grab/pin HA3-HA7 (1.5 min, camera on in Platform)**
+7. Follow guide steps HA3 to HA7 at http://localhost:8080/guide.html (one at a time): fist to grab a part, move it, pin with K, try to grab the pinned part, K again to unpin. Expected per step as written in the guide.
+Send back: pass/fail per step number (1-7), plus a note if the hand lags.

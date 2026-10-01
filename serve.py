@@ -13,6 +13,8 @@ docs/testing/README.md):
     POST /__testrun  -> saves one run record to docs/testing/runs/<page>/, recomputes its
                         flags against the previous run, prepends them to
                         docs/testing/runs/FLAGS.md, answers {ok, path, flags}
+    POST /__clip     -> saves one gesture clip to assets/gesture-clips/<name>.json and
+                        rewrites assets/gesture-clips/index.json (docs/lab/gestures/clip-lab.js)
 
 Both refuse anything that is not from this machine (403): the server only binds
 127.0.0.1, but a web page the owner visits could still POST to localhost from their
@@ -34,6 +36,9 @@ PORT = 8080
 ROOT = os.path.dirname(os.path.abspath(__file__))
 RUNS_DIR = os.path.join(ROOT, "docs", "testing", "runs")
 FLAGS_FILE = os.path.join(RUNS_DIR, "FLAGS.md")
+CLIPS_DIR = os.path.join(ROOT, "assets", "gesture-clips")
+# Clip names are fixed lowercase slugs (HANDS-UX-SPEC section 6); "index" is the listing itself.
+CLIP_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 FLAGS_HEADER = (
     "# Test run flags (newest first)\n\n"
     "Written by serve.py on every recorded run; machine-local and git-ignored. "
@@ -194,6 +199,34 @@ def save_run(rec):
     return os.path.relpath(os.path.join(page_dir, name), ROOT), rec["flags"]
 
 
+def save_clip(clip):
+    """Writes assets/gesture-clips/<name>.json and refreshes index.json. Returns the relative path."""
+    name = clip.get("name")
+    if not isinstance(name, str) or not CLIP_RE.match(name) or name == "index":
+        raise ValueError("bad clip name")
+    if not isinstance(clip.get("frames"), list) or not clip["frames"]:
+        raise ValueError("clip has no frames")
+    os.makedirs(CLIPS_DIR, exist_ok=True)
+    path = os.path.join(CLIPS_DIR, name + ".json")
+    with _runs_lock:
+        _write_json(path, clip)
+        # index.json lets a static host (no endpoint) discover which clips exist.
+        entries = []
+        for fn in sorted(os.listdir(CLIPS_DIR)):
+            if not fn.endswith(".json") or fn == "index.json":
+                continue
+            try:
+                with open(os.path.join(CLIPS_DIR, fn), encoding="utf-8") as f:
+                    c = json.load(f)
+                entries.append({"name": c.get("name"), "frames": len(c.get("frames") or []),
+                                "durationMs": c.get("durationMs"), "recordedAt": c.get("recordedAt"),
+                                "mirrored": bool(c.get("mirrored"))})
+            except (OSError, ValueError):
+                continue
+        _write_json(os.path.join(CLIPS_DIR, "index.json"), {"schema": "gesture-clip-index/1", "clips": entries})
+    return os.path.relpath(path, ROOT)
+
+
 def prepend_flags(now, rec):
     if not rec["flags"]:
         return
@@ -251,8 +284,9 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
         self._send_json(200, git_commit())
 
     def do_POST(self):
-        if urlsplit(self.path).path != "/__testrun":
-            return self._send_json(405, {"ok": False, "error": "POST only to /__testrun"})
+        route = urlsplit(self.path).path
+        if route not in ("/__testrun", "/__clip"):
+            return self._send_json(405, {"ok": False, "error": "POST only to /__testrun or /__clip"})
         if not self._local_only():
             return self._send_json(403, {"ok": False, "error": "local only"})
         try:
@@ -269,6 +303,14 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
             return self._send_json(400, {"ok": False, "error": "body is not JSON"})
         if not isinstance(rec, dict):
             return self._send_json(400, {"ok": False, "error": "record must be a JSON object"})
+        if route == "/__clip":
+            try:
+                path = save_clip(rec)
+            except ValueError as e:
+                return self._send_json(400, {"ok": False, "error": str(e)})
+            except OSError as e:
+                return self._send_json(500, {"ok": False, "error": f"could not save: {e}"})
+            return self._send_json(200, {"ok": True, "path": path})
         if not isinstance(rec.get("page"), str) or not PAGE_RE.match(rec["page"]):
             return self._send_json(400, {"ok": False, "error": "bad page id"})
         try:
@@ -278,7 +320,6 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
         except OSError as e:
             return self._send_json(500, {"ok": False, "error": f"could not save: {e}"})
         self._send_json(200, {"ok": True, "path": path, "flags": flags})
-
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else PORT

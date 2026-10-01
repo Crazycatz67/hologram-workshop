@@ -102,6 +102,31 @@ use `?rec=off` when a session record would only be noise.
 - **Extra flags:** `possible accidental explode` (3 explodes under 1.5 s within 10 s) and
   "mostly in background" when the tab was hidden over half the session.
 
+## Guided test mode (owner, shadow site only)
+
+Open `http://localhost:8080/guide.html`. It lists every function to check, grouped by page
+(gesture demo, measure/tape, hands, Platform, polygon, Library ring, upload, plus open Python
+issues as info only), each marked **needs live**, **known issue** or **regression check**.
+"Start guided run" (or "Go" on a step) opens that step's page with a small guide box at the
+bottom left: what to do, what correct looks like, what the bug looks like, how to tell them
+apart, Pass / Fail / Unsure, a note, Previous / Next, and "–" to make it small.
+
+- Files: `guide.html` (hub), `testguide.js` (the box), `testguide-steps.js` (the step list and
+  saved progress; edit steps there when a bug closes or a feature is live-confirmed).
+- The box is loaded by `sessionrec.js` only while a run is on (localStorage `testguide:v1`), so
+  the pages are not edited and normal sessions load nothing extra. It also shows with `?rec=off`.
+  Off localhost nothing loads: `guide.html` shows a one-line notice and imports no module.
+- Recording: each Pass / Fail / Unsure goes into that page's session as a `guide` event (step id
+  and verdict only, never the note), and a step left on Fail raises a `guide-fail` flag in
+  FLAGS.md when the session is saved. "Save results to the test log" on the hub writes one run
+  to `runs/guide/` through `testrec.js` (every step as a row, notes included; Fails are checks
+  with pass false, so serve.py flags each one; the rest are info rows, so a half-done run does
+  not read as "checks disappeared").
+- The hub's End summary (fails first, with notes) is plain text to copy into chat.
+- Pure checks (step list, state, summary):
+  `ELECTRON_RUN_AS_NODE=1 '/Applications/Visual Studio Code.app/Contents/MacOS/Code' <script>.mjs`
+  importing `testguide-steps.js` (no DOM needed).
+
 ## Reading FLAGS.md
 
 `docs/testing/runs/FLAGS.md`, newest first, one line per flag:

@@ -23,6 +23,10 @@
 //   session.snapshot()  the record as it would be saved now (for the badge / debugging).
 //   session.end()       ends and sends now (normally automatic on pagehide). Idempotent.
 //   window.__sessionrec = { current, lastSent }
+//   Guided test (2026-10-01): when guide.html has a run active (localStorage 'testguide:v1'),
+//   startSession also mounts the testguide.js dock (even with ?rec=off). The session records
+//   'guide' events { id, verdict } and metric guideVerdicts, and raises a 'guide-fail' flag
+//   per step left marked Fail (never the note text).
 //
 //   Ends on pagehide: the record is sent with navigator.sendBeacon to POST /__testrun
 //   (serve.py; same schema 1 record as testrec.js, status 'done'). sendBeacon has a ~64 KB
@@ -1012,6 +1016,18 @@ function mountBadge(session, page) {
   };
 }
 
+// ---- guided test dock -------------------------------------------------------------------
+// testguide.js shows the owner's current guided-test step on this page. It is only fetched
+// when guide.html has started a run (a localStorage flag), so normal sessions load nothing.
+function maybeMountGuide(name) {
+  let active = false;
+  try { active = !!JSON.parse(localStorage.getItem('testguide:v1') || 'null')?.active; } catch { /* no guide */ }
+  if (!active) return;
+  const go = () => import(new URL(`./testguide.js?v=${Date.now()}`, import.meta.url).href)
+    .then((m) => m.mountGuide({ page: name })).catch(() => {});
+  if (document.body) go(); else addEventListener('DOMContentLoaded', go, { once: true });
+}
+
 // ---- the session ------------------------------------------------------------------------
 
 function textOf(args) {
@@ -1024,10 +1040,13 @@ function textOf(args) {
 
 export function startSession({ name } = {}) {
   if (!hasWindow || !LOCAL_HOSTS.includes(location.hostname)) return null;
-  if (new URLSearchParams(location.search).get('rec') === 'off') return null;
   // Framed copies are test harnesses (ring-test / library-test load platform/index.html in an
   // iframe): not the owner's session, and a badge there could catch the harness's clicks.
   if (window.top !== window) return null;
+  // Guided test dock (testguide.js): shown only while the owner runs the guide from
+  // guide.html. Loaded from here so no page needs its own guard; it also shows with ?rec=off.
+  maybeMountGuide(name);
+  if (new URLSearchParams(location.search).get('rec') === 'off') return null;
   if (window.__sessionrec?.current && !window.__sessionrec.current.ended) return null;
 
   const page = 'session-' + (String(name || 'page').replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 60) || 'page');
@@ -1046,6 +1065,7 @@ export function startSession({ name } = {}) {
   const clicks = {}, keys = {};
   const hidden = { periods: 0, ms: 0, since: document.hidden ? 0 : null };
   let cameraOnMs = 0, cameraSince = null;
+  const guideFails = new Map();   // guided-test step id -> kind, for steps marked Fail
   let ended = false;
 
   const ctx = {
@@ -1143,6 +1163,7 @@ export function startSession({ name } = {}) {
 
   function flagsOf(rec, closing) {
     const f = [];
+    for (const [id, kind] of guideFails) f.push({ kind: 'guide-fail', message: `owner marked guided step ${id} as Fail (${kind || 'step'}; see guide.html for the note)` });
     const s = rec.attachments.session;
     if (s.fps.lowEpisodes) {
       const e = s.fps.episodes[0];
@@ -1258,6 +1279,17 @@ export function startSession({ name } = {}) {
     }
   };
 
+  // Guided test verdicts: the step id and verdict only (never the owner's note text), and a
+  // page flag per step marked Fail, so a Fail reaches FLAGS.md with this session even if the
+  // owner never saves the run from guide.html.
+  on(window, 'testguide:verdict', (e) => {
+    const d = e.detail || {};
+    if (typeof d.id !== 'string' || !/^[A-Z]{1,4}\d{1,3}$/.test(d.id)) return;
+    const verdict = ['pass', 'fail', 'unsure'].includes(d.verdict) ? d.verdict : 'cleared';
+    ctx.event(rel(), 'guide', { id: d.id, verdict });
+    ctx.count('guideVerdicts');
+    if (verdict === 'fail') guideFails.set(d.id, String(d.kind || '').slice(0, 20)); else guideFails.delete(d.id);
+  });
   on(window, 'pagehide', () => session.end());
   window.__sessionrec ??= { current: null, lastSent: null };
   window.__sessionrec.current = session;

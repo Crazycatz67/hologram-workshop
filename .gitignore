@@ -27,3 +27,6 @@ docs/testing/runs/
 
 # Local crash-safe backups of uncommitted work (Stop hook, .claude/hooks/backup.sh)
 .backups/
+
+# Agent worktrees (Claude Code isolation)
+.claude/worktrees/
