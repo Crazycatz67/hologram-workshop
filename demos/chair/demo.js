@@ -39,8 +39,8 @@ function mulberry32(a) {
 }
 
 const AXIS_Y = new THREE.Vector3(0, 1, 0);
-function scramble() {
-  rand = SEED ? mulberry32(SEED) : Math.random;
+function scramble(seed = SEED) {
+  rand = seed ? mulberry32(seed) : Math.random;
   const n = parts.length;
   parts.forEach((p, i) => {
     // Spread on a ring around the chair, in order of the part's own angle, so nothing stacks.
@@ -251,6 +251,10 @@ export default {
   },
 
   reset() { scramble(); },
+
+  // Two players: each rebuilds the same scramble (the match seed); fastest time wins.
+  turnMode: 'timeTrial',
+  onTurnStart(player, info) { scramble(SEED || info.seed); },
 
   isWon() { return parts.length > 0 && parts.every((p) => p.placed); },
 

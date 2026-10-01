@@ -36,6 +36,68 @@ let colour = 0;
 let sparks = [];              // { mesh, ring, colour, lit, glow }
 let buttons = [];
 const resolution = new THREE.Vector2(1, 1);
+let half = 1;                 // chair half-size on the paint plane (world units)
+
+// Two players: 30 s each, in their own colour, chasing ONE spark at a time from a sequence both
+// players share (the match seed), so the count is fair and keeps going (six fixed sparks would
+// let the first player take them all). Earlier strokes stay on screen but light nothing.
+let multi = false;
+let pen = null;               // { hex } the current player's colour in 2-player mode
+let turnNo = -1;
+let chase = null;             // { list: [{x, y}], i, lit: [{ mesh, glow }], target: { mesh, ring, glow } }
+function mulberry32(a) {
+  return () => {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function chaseList(seed, n = 60) {
+  const r = mulberry32(seed);
+  const out = [];
+  while (out.length < n) {
+    const p = { x: (r() * 2 - 1) * 1.2 * half, y: (r() * 2 - 1) * 1.05 * half };
+    const last = out[out.length - 1];
+    if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 0.7 * half) out.push(p);
+  }
+  return out;
+}
+function sparkMesh(hex, at) {
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.022, 16, 12), new THREE.MeshBasicMaterial({ color: hex, transparent: true, opacity: 0 }));
+  mesh.position.set(at.x, at.y, planePoint.z);
+  ctx.root.add(mesh);
+  return mesh;
+}
+function dropMesh(m) { ctx.root.remove(m); m.geometry.dispose(); m.material.dispose(); }
+function clearChase() {
+  if (!chase) return;
+  for (const l of chase.lit) dropMesh(l.mesh);
+  dropMesh(chase.target.mesh);
+  dropMesh(chase.target.ring);
+  chase = null;
+}
+function nextTarget() {
+  const at = chase.list[chase.i % chase.list.length];
+  const mesh = sparkMesh(pen.hex, at);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.04, 0.048, 32), new THREE.MeshBasicMaterial({ color: pen.hex, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+  ring.position.copy(mesh.position);
+  ctx.root.add(ring);
+  chase.target = { mesh, ring, glow: 0 };
+}
+function chaseHit(px) {
+  const t = chase?.target;
+  if (!t) return;
+  const c = ctx.toScreen(t.mesh.position);
+  if (Math.hypot(c.x - px.x, c.y - px.y) > SPARK_HIT_PX) return;
+  // The target becomes a steady lit dot (its glow keeps easing up), the next one fades in.
+  dropMesh(t.ring);
+  chase.lit.push({ mesh: t.mesh, glow: 0 });
+  chase.i++;
+  ctx.sfx('spark');
+  nextTarget();
+  ctx.setStatus(`${chase.lit.length} spark${chase.lit.length === 1 ? '' : 's'}`);
+}
 
 function lineMaterials(hex) {
   const core = new LineMaterial({ color: hex, linewidth: 4, transparent: true, opacity: 0.95, depthWrite: false });
@@ -44,9 +106,9 @@ function lineMaterials(hex) {
 }
 
 function newStroke() {
-  const hex = PALETTE[colour].hex;
+  const hex = multi ? pen.hex : PALETTE[colour].hex;
   const [cm, hm] = lineMaterials(hex);
-  const s = { colour, pts: [], px: [], core: new Line2(new LineGeometry(), cm), halo: new Line2(new LineGeometry(), hm), lit: new Set() };
+  const s = { turn: turnNo, colour, pts: [], px: [], core: new Line2(new LineGeometry(), cm), halo: new Line2(new LineGeometry(), hm), lit: new Set() };
   s.core.renderOrder = 3;
   s.halo.renderOrder = 2;
   s.core.visible = s.halo.visible = false;   // until it has two points
@@ -73,6 +135,7 @@ function addPoint(s, ndc) {
       line.visible = true;
     }
   }
+  if (multi) { if (s.turn === turnNo) chaseHit(px); return; }
   for (const sp of sparks) {
     if (sp.colour !== s.colour || s.lit.has(sp)) continue;
     const c = ctx.toScreen(sp.mesh.position);
@@ -120,16 +183,18 @@ function endStroke() {
 
 function undo() {
   if (active) { removeStroke(active); active = null; }
-  const s = strokes.pop();
+  // 2 players: only your own strokes from this turn can be undone.
+  const s = multi && strokes.at(-1)?.turn !== turnNo ? null : strokes.pop();
   if (s) { removeStroke(s); ctx.sfx('undo'); }
   relight();
   ctx.setStatus(s ? 'Stroke undone' : 'Nothing to undo');
 }
 
-function clearAll() {
+function clearAll(onlyTurn = null) {
   if (active) { removeStroke(active); active = null; }
-  for (const s of strokes) removeStroke(s);
-  strokes = [];
+  const keep = onlyTurn === null ? [] : strokes.filter((s) => s.turn !== onlyTurn);
+  for (const s of strokes) if (!keep.includes(s)) removeStroke(s);
+  strokes = keep;
   relight();
   ctx.setStatus('Cleared');
 }
@@ -155,7 +220,7 @@ export default {
     chair.position.sub(box.getCenter(new THREE.Vector3()));
     ctx.root.add(chair);
     const size = box.getSize(new THREE.Vector3());
-    const half = Math.max(size.x, size.y) / 2;
+    half = Math.max(size.x, size.y) / 2;
     ctx.frameView(new THREE.Box3(new THREE.Vector3(-half * 1.5, -half * 1.4, -half), new THREE.Vector3(half * 1.5, half * 1.4, half)));
     planePoint = new THREE.Vector3(0, 0, size.z / 2 + 0.08);
 
@@ -186,14 +251,41 @@ export default {
     this._onKey = (e) => { const n = Number(e.key); if (n >= 1 && n <= PALETTE.length && !e.ctrlKey && !e.metaKey) setColour(n - 1); };
     window.addEventListener('keydown', this._onKey);
     setColour(0);
+    if (ctx.players === 2) {
+      // 2 players: no palette and no fixed sparks; each player paints in their own colour.
+      multi = true;
+      ctx.panel.hidden = true;
+      for (const sp of sparks) { sp.mesh.visible = false; sp.ring.visible = false; }
+    }
   },
+
+  // ---- two players (see playground CONTRACT, TWO PLAYERS) ----
+  turnMode: 'alternate',
+  turnSecs: 30,
+  turnHint: 'Draw through each spark in your colour. Most sparks in 30 s wins.',
+  onTurnStart(player, info) {
+    if (active) endStroke();
+    if (info.first) clearAll();
+    turnNo = info.turn;
+    pen = { hex: player.color };
+    clearChase();
+    chase = { list: chaseList(info.seed), i: 0, lit: [], target: null };
+    nextTarget();
+    ctx.setStatus(`${player.name}: draw through each spark · 30 s`);
+  },
+  turnResult({ timeUp }) {
+    if (!timeUp) return null;
+    endStroke();
+    return { score: chase?.lit.length ?? 0 };
+  },
+  scoreText(total) { return `${total} ✦`; },
 
   onGesture(evt) {
     if (evt.type === 'drag') {
       if (evt.phase === 'start') { endStroke(); active = newStroke(); addPoint(active, evt.ndc); } else if (evt.phase === 'move' && active) addPoint(active, evt.ndc);
       else if (evt.phase === 'end') { if (active && evt.ndc) addPoint(active, evt.ndc); endStroke(); }
     } else if (evt.type === 'undo') undo();
-    else if (evt.type === 'clap') clearAll();
+    else if (evt.type === 'clap') clearAll(multi ? turnNo : null);
   },
 
   tick(dt) {
@@ -208,6 +300,14 @@ export default {
       sp.mesh.material.opacity = 0.25 + 0.75 * sp.glow;
       sp.mesh.scale.setScalar(1 + 0.6 * sp.glow);
       sp.ring.material.opacity = 0.45 * (1 - sp.glow);
+    }
+    if (chase) {
+      // Target fades in over ~0.4 s to a steady half glow; lit dots ease to full. No blinking.
+      const t = chase.target;
+      t.glow = easeTo(t.glow, 1, dt, 0.13);
+      t.mesh.material.opacity = 0.45 * t.glow;
+      t.ring.material.opacity = 0.6 * t.glow;
+      for (const l of chase.lit) { l.glow = easeTo(l.glow, 1, dt, 0.13); l.mesh.material.opacity = 0.45 + 0.5 * l.glow; l.mesh.scale.setScalar(1 + 0.6 * l.glow); }
     }
   },
 
@@ -230,7 +330,8 @@ export default {
   // Test hook: spark screen positions (canvas px) + colours, stroke count, current colour.
   debug() {
     return {
-      colour, strokes: strokes.length,
+      colour, strokes: strokes.length, multi,
+      chase: chase && { lit: chase.lit.length, target: ctx.toScreen(chase.target.mesh.position) },
       sparks: sparks.map((s) => ({ ...ctx.toScreen(s.mesh.position), colour: s.colour, lit: s.lit }))
     };
   }

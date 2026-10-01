@@ -40,7 +40,32 @@
 //   as grab/tilt/scale/explode deltas (same deadzones and springs as hologram.html), its
 //   resetCount as clap; undo/wheel go through holdGate.js.
 //   Test hook: window.playground = { ready, game, runtime, emit(evt), counts, won, lastTimeMs,
-//     best(), frames }. emit() routes a synthetic event exactly like a real one.
+//     best(), frames, match, startTurn() }. emit() routes a synthetic event exactly like a real one.
+//
+// TWO PLAYERS, one camera, taking turns (opt-in per game; 1-player never calls these hooks).
+//   Mode comes from the URL: play.html?game=<id>&players=2&p1=<name>&p2=<name> (the hub and the
+//   bar's 👥 menu write it). Without players=2, or for a game with no turnMode, nothing changes.
+//   game.turnMode: 'alternate' | 'timeTrial'
+//   game.onTurnStart?(player, info): the next player's turn begins (after their turn card).
+//     player = { index: 0|1, name, color (hex number), css ('#rrggbb') }
+//     info = { turn (0-based across the match), round (0-based), first (turn 0 of a match),
+//              seed (int, same for every turn of one match: fair scrambles), players: 2 }
+//     Must leave the game ready for that player. timeTrial default when omitted: game.reset().
+//   timeTrial: each player plays once; a turn ends at the first isWon(); its score is the turn
+//     time (first non-aim gesture -> win, ms) + game.penaltyMs?() (ms). Lowest wins.
+//   alternate: game.turnResult?({ elapsedMs, timeUp }) is polled every frame of a turn:
+//     null = keep playing; { score } = turn over, score added to the player's total;
+//     { lost: true } = this player loses the match now. game.turnSecs?: a per-turn countdown
+//     (at 0 the poll gets timeUp: true; a null reply then counts as score 0).
+//     game.turnRounds?: turns per player (default 1 with turnSecs, else unlimited: the match
+//     ends only on a loss). Highest total wins; equal totals = a draw. isWon() is not used.
+//   game.turnHint?: one line for the turn card (default by mode, e.g. 'Fastest time wins.').
+//   game.scoreText?(total, player) -> scoreboard text for an alternate total (default: number).
+//   game.lostText?(name) -> banner line for a loss (default `${name} lost`).
+//   In 2-player mode best times are not saved (penalties make them a different number), and
+//   ctx.restart (clap / level buttons) restarts the CURRENT turn: timeTrial keeps the clock
+//   running; alternate ignores it. The banner's button becomes Rematch (R).
+//   ctx.players = 1 | 2 (read it in load() to hide 1-player-only UI).
 //   Photosafety (BUGS #14): the banner fades in over 700 ms with a fixed glow; games must
 //   ease every brightness change (glowPulse below) and never cycle colours.
 import * as THREE from 'three';
@@ -94,6 +119,24 @@ export function easeTo(current, target, dt, tauS = 0.15) {
 }
 
 const YAW_STEP = THREE.MathUtils.degToRad(15);
+
+// Player colours: cyan and amber read apart for colour-blind players and stay mid-luminance.
+export const PLAYER_COLORS = [0x4fd1ff, 0xffb040];
+export const DEFAULT_NAMES = ['Player 1', 'Player 2'];
+// Reads ?players=2&p1=&p2= into { count, names }. Names are trimmed and capped (they go into
+// textContent only, never innerHTML).
+export function readPlayers(search = globalThis.location?.search ?? '') {
+  const q = new URLSearchParams(search);
+  const count = q.get('players') === '2' ? 2 : 1;
+  const names = DEFAULT_NAMES.map((d, i) => (q.get(`p${i + 1}`) ?? '').trim().slice(0, 20) || d);
+  return { count, names };
+}
+export function playersQuery({ count, names }) {
+  if (count !== 2) return '';
+  const q = new URLSearchParams({ players: '2' });
+  names.forEach((n, i) => { if (n && n !== DEFAULT_NAMES[i]) q.set(`p${i + 1}`, n); });
+  return '&' + q.toString();
+}
 
 export async function startPlayground({ gameId, el }) {
   const meta = GAMES.find((g) => g.id === gameId && g.ready);
@@ -270,6 +313,7 @@ export async function startPlayground({ gameId, el }) {
     else if (k === 'arrowup' || k === 'arrowdown') route({ type: 'tilt', source: 'key', dQuat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), (k === 'arrowup' ? -1 : 1) * YAW_STEP) });
     else if (k === 'arrowleft' || k === 'arrowright') route({ type: 'tilt', source: 'key', dQuat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), (k === 'arrowleft' ? 1 : -1) * YAW_STEP) });
     else if (k === 'r') playAgain();
+    else if (k === 'enter' && match?.phase === 'card') startTurn();
     else if (k === 'h' || k === '?') toggleHowto();
     else if (k === 'escape') hideBanner();
     else return;
@@ -331,7 +375,15 @@ export async function startPlayground({ gameId, el }) {
   }
   function setStatus(text) { el.status.textContent = text; }
 
-  const ctx = { THREE, scene, camera, renderer, controls, canvas, root, panel: el.panel, runtime, loadGLB, ndcToPlane, raycast, toScreen, setStatus, sfx, frameView, restart: () => playAgain() };
+  const ctx = { THREE, scene, camera, renderer, controls, canvas, root, panel: el.panel, runtime, loadGLB, ndcToPlane, raycast, toScreen, setStatus, sfx, frameView, players: 1, restart: () => restartTurnOrGame() };
+  // 2-player: a clap / level button restarts only the current turn (see CONTRACT).
+  function restartTurnOrGame() {
+    if (!match) { playAgain(); return; }
+    if (match.phase !== 'play' || match.mode !== 'timeTrial') return;
+    const info = { turn: match.turn, round: Math.floor(match.turn / 2), first: match.turn === 0, seed: match.seed, players: 2, restart: true };
+    if (pg.game.onTurnStart) pg.game.onTurnStart(match.players[match.current], info);
+    else pg.game.reset();
+  }
 
   // ---- timer, best, banner, how-to --------------------------------------------------------
   let startedAt = null;
@@ -354,6 +406,7 @@ export async function startPlayground({ gameId, el }) {
     setTimeout(() => { if (!el.banner.classList.contains('show')) el.banner.hidden = true; }, 750);
   }
   function playAgain() {
+    if (match) { rematch(); return; }
     hideBanner();
     pg.game?.reset();
     startedAt = null;
@@ -369,10 +422,166 @@ export async function startPlayground({ gameId, el }) {
   el.howtoBtn.addEventListener('click', () => toggleHowto());
   el.howtoClose.addEventListener('click', () => toggleHowto(false));
 
+  // ---- two players: the turn manager (see CONTRACT, TWO PLAYERS) ---------------------------
+  // phase: 'card' (turn card up, input only starts the turn) -> 'play' -> 'between' (1.2 s to
+  // read the result, input dropped) -> 'card' ... -> 'over' (win banner, Rematch).
+  const setup = readPlayers();
+  let match = null;
+  function newMatch() {
+    match = {
+      mode: pg.game.turnMode, phase: 'card', turn: 0, current: 0, winner: null, loser: null, draw: false,
+      seed: (Math.random() * 2 ** 31) | 0, turnStartAt: null, betweenUntil: 0, lastText: '',
+      players: setup.names.map((name, index) => ({ index, name, color: PLAYER_COLORS[index], css: '#' + PLAYER_COLORS[index].toString(16).padStart(6, '0'), total: 0, timeMs: null, penaltyMs: 0, turns: 0 }))
+    };
+    pg.match = match;
+    return match;
+  }
+  const turnsPerPlayer = () => match.mode === 'timeTrial' ? 1 : (pg.game.turnRounds ?? (pg.game.turnSecs ? 1 : Infinity));
+  function playerText(p) {
+    if (match.mode === 'timeTrial') return p.timeMs === null ? '–' : formatTime(p.timeMs) + (p.penaltyMs ? ` (+${Math.round(p.penaltyMs / 1000)} s)` : '');
+    return pg.game.scoreText?.(p.total, p) ?? String(p.total);
+  }
+  function renderScore() {
+    if (!el.score) return;
+    el.score.hidden = false;
+    el.score.replaceChildren(...match.players.map((p) => {
+      const s = document.createElement('span');
+      s.className = 'chip' + (p.index === match.current && match.phase !== 'over' ? ' now' : '');
+      s.style.setProperty('--pc', p.css);
+      s.textContent = `${p.name} ${playerText(p)}`;
+      return s;
+    }));
+  }
+  function showCard() {
+    const p = match.players[match.current];
+    match.phase = 'card';
+    el.cardTitle.textContent = `${p.name} — your turn`;
+    el.cardTitle.style.color = p.css;
+    el.card.style.setProperty('--pc', p.css);
+    const goal = pg.game.turnHint ?? (match.mode === 'timeTrial' ? 'Fastest time wins.' : pg.game.turnSecs ? `${pg.game.turnSecs} seconds.` : 'Your move.');
+    el.cardSub.textContent = [match.lastText, goal].filter(Boolean).join(' · ');
+    el.card.hidden = false;
+    requestAnimationFrame(() => el.card.classList.add('show'));
+    renderScore();
+    setStatus(`${p.name}: pinch with your other hand, press Enter or click to start`);
+  }
+  function hideCard() {
+    el.card.classList.remove('show');
+    setTimeout(() => { if (!el.card.classList.contains('show')) el.card.hidden = true; }, 650);
+  }
+  function startTurn() {
+    if (!match || match.phase !== 'card') return false;
+    const p = match.players[match.current];
+    hideCard();
+    match.phase = 'play';
+    const info = { turn: match.turn, round: Math.floor(match.turn / 2), first: match.turn === 0, seed: match.seed, players: 2 };
+    if (pg.game.onTurnStart) pg.game.onTurnStart(p, info);
+    else if (match.mode === 'timeTrial' && !info.first) pg.game.reset();
+    // timeTrial: the clock starts at the first move (as in 1-player); a countdown starts now.
+    startedAt = match.mode === 'alternate' ? performance.now() : null;
+    wonAt = null;
+    renderScore();
+    return true;
+  }
+  pg.startTurn = startTurn;
+  function endTurn(now, text) {
+    const p = match.players[match.current];
+    p.turns++;
+    match.turn++;
+    match.lastText = text;
+    setStatus(text);
+    const done = match.loser !== null || match.players.every((x) => x.turns >= turnsPerPlayer());
+    if (done) { finishMatch(); return; }
+    match.current = (match.current + 1) % match.players.length;
+    match.phase = 'between';
+    match.betweenUntil = now + 1200;
+    renderScore();
+  }
+  function finishMatch() {
+    const ps = match.players;
+    if (match.loser !== null) match.winner = ps.find((p) => p !== match.loser) ?? null;
+    else if (match.mode === 'timeTrial') {
+      // Compared at the 0.1 s the scoreboard shows: two equal-looking times are a draw.
+      const [a, b] = ps.map((p) => Math.round(p.timeMs / 100));
+      match.winner = a === b ? null : (a < b ? ps[0] : ps[1]);
+    } else {
+      const [a, b] = ps;
+      match.winner = a.total === b.total ? null : (a.total > b.total ? a : b);
+    }
+    match.draw = !match.winner;
+    match.phase = 'over';
+    pg.won = true;
+    renderScore();
+    el.again.textContent = '↻ Rematch';
+    el.bannerText.textContent = match.winner ? `🏆 ${match.winner.name} wins!` : 'It\'s a draw!';
+    el.bannerText.style.color = match.winner?.css ?? '';
+    el.bannerSub.textContent = match.loser !== null
+      ? (pg.game.lostText?.(match.loser.name) ?? `${match.loser.name} lost`)
+      : ps.map((p) => `${p.name} ${playerText(p)}`).join(' · ');
+    el.banner.hidden = false;
+    requestAnimationFrame(() => el.banner.classList.add('show'));
+    setStatus(match.winner ? `${match.winner.name} wins · R or Rematch to play again` : 'Draw · R or Rematch to play again');
+    sfx('win');
+  }
+  function rematch() {
+    hideBanner();
+    el.bannerText.style.color = '';
+    newMatch();
+    pg.won = false;
+    pg.lastTimeMs = null;
+    startedAt = null;
+    wonAt = null;
+    el.timer.textContent = formatTime(0);
+    showCard();
+  }
+  // Called every frame from the render loop while a match runs.
+  function matchTick(now) {
+    const m = match;
+    if (m.phase === 'between' && now >= m.betweenUntil) showCard();
+    if (m.phase !== 'play') return;
+    const p = m.players[m.current];
+    const game = pg.game;
+    if (m.mode === 'timeTrial') {
+      if (!game.isWon()) return;
+      const ms = startedAt === null ? 0 : now - startedAt;
+      const pen = Math.max(0, game.penaltyMs?.() ?? 0);
+      p.timeMs = ms + pen;
+      p.penaltyMs = pen;
+      pg.lastTimeMs = p.timeMs;
+      wonAt = now;
+      sfx('win');
+      endTurn(now, `${p.name}: ${playerText(p)}`);
+      return;
+    }
+    const elapsedMs = startedAt === null ? 0 : now - startedAt;
+    const timeUp = !!game.turnSecs && elapsedMs >= game.turnSecs * 1000;
+    let r = null;
+    try { r = game.turnResult?.({ elapsedMs, timeUp }) ?? null; } catch (err) { console.error('game.turnResult threw:', err); }
+    if (!r && timeUp) r = { score: 0 };
+    if (!r) return;
+    wonAt = now;
+    if (r.lost) { m.loser = p; endTurn(now, pg.game.lostText?.(p.name) ?? `${p.name} lost`); return; }
+    p.total += Number(r.score) || 0;
+    endTurn(now, `${p.name}: ${playerText(p)}`);
+  }
+  // A turn's clock for the bar: a countdown when the game has turnSecs, else elapsed time.
+  function matchClock(now) {
+    if (match.phase !== 'play' && wonAt === null) return 0;
+    const el2 = startedAt === null ? 0 : (match.phase === 'play' ? now : wonAt) - startedAt;
+    return match.mode === 'alternate' && pg.game.turnSecs ? Math.max(0, pg.game.turnSecs * 1000 - el2) : el2;
+  }
+  el.card?.addEventListener('click', () => startTurn());
+
   // ---- routing ----------------------------------------------------------------------------
   function route(evt) {
     if (!pg.ready || !pg.game) return;
     pg.counts[evt.type] = (pg.counts[evt.type] ?? 0) + 1;
+    // 2-player: between turns the game hears nothing; the turn card waits for a click
+    // (other-hand pinch, mouse) so a stray gesture can't start someone's clock.
+    if (match && match.phase !== 'play') {
+      if (match.phase === 'card' && evt.type === 'click') startTurn();
+      return;
+    }
     if (evt.type === 'clap') {
       // Clap always also puts the view back (games may do more: clear, reset parts).
       camera.position.copy(homeView.pos);
@@ -399,9 +608,16 @@ export async function startPlayground({ gameId, el }) {
     li.querySelector('kbd').textContent = t.keys ?? '';
     return li;
   }));
+  const twoPlayer = setup.count === 2 && (game.turnMode === 'alternate' || game.turnMode === 'timeTrial');
+  ctx.players = twoPlayer ? 2 : 1;
   await game.load(ctx);
   pg.ready = true;
   setStatus('Ready · mouse works now; 📷 adds your hands');
+  if (twoPlayer) {
+    el.best.hidden = true;   // 2-player times carry penalties: not comparable with 1-player bests
+    newMatch();
+    showCard();
+  }
 
   let lastT = null;
   startRenderLoop({
@@ -414,6 +630,11 @@ export async function startPlayground({ gameId, el }) {
       readProbe();
       handPointerFrame();
       game.tick(dt);
+      if (match) {
+        matchTick(now);
+        el.timer.textContent = formatTime(matchClock(now));
+        return;
+      }
       if (!pg.won && game.isWon()) {
         pg.won = true;
         wonAt = now;

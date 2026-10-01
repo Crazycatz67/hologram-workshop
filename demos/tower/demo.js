@@ -49,6 +49,12 @@ let settleMs = 0;
 let topY0 = 0;
 let won = false;
 let floorMesh = null;
+// Two players (real Jenga turns): each turn = pull ONE block from below the top row and set it
+// on top; whoever topples the tower loses. turn = { block, rest: [{x,y}], topY, settleMs, done }.
+let multi = false;
+let turn = null;
+const TURN_SETTLE_MS = 900;    // the placed block (and so the turn) must rest this long
+const towerTop = () => Math.max(...blocks.map((b) => b.body.position.y + BLOCK_H / 2));
 
 const matStd = (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.05, emissive: 0x4fd1ff, emissiveIntensity: 0 });
 
@@ -130,6 +136,12 @@ function nearest(ndc) {
 
 function grab(b, grabPoint) {
   if (!b || collapsed) return;
+  if (multi && turn) {
+    if (turn.done) return;
+    if (turn.block && turn.block !== b) { ctx.setStatus('One block per turn · set yours on top'); return; }
+    if (!turn.block && turn.rest[b.idx].y + BLOCK_H / 2 > turn.topY - BLOCK_H * 0.5) { ctx.setStatus('Top-row blocks stay put · pull one from lower down'); return; }
+    turn.block = b;
+  }
   held = { b, target: new THREE.Vector3().copy(b.body.position), offset: grabPoint ? new THREE.Vector3().copy(b.body.position).sub(grabPoint) : new THREE.Vector3(), vel: new THREE.Vector3() };
   held.target.z = 0;
   held.offset.z = 0;
@@ -174,6 +186,17 @@ function release() {
 }
 
 function fallen() {
+  if (multi && turn) {
+    // 2 players: every block except this turn's must stay where the turn found it.
+    for (const b of blocks) {
+      if (b === turn.block) continue;
+      const r = turn.rest[b.idx];
+      const dropped = r.y - b.body.position.y > BLOCK_H * 0.75;
+      const t = tiltDeg(b);
+      if (dropped || (t > FALL_TILT_DEG && t < 180 - FALL_TILT_DEG)) { collapseWhy = { block: b.idx, dropped, tilt: Math.round(t) }; return true; }
+    }
+    return false;
+  }
   for (const b of blocks) {
     if (b.touched || (held && held.b === b)) continue;
     const dropped = b.startPos.y - b.body.position.y > BLOCK_H * 0.75;
@@ -186,6 +209,35 @@ function fallen() {
 // Blocks that count: from below the top row, touched, resting above the original top.
 function onTop() {
   return blocks.filter((b) => b.touched && b.layer < LAYERS - 1 && (!held || held.b !== b) && b.body.position.y > topY0 && b.body.velocity.length() < 0.15);
+}
+
+function tickGlow(dt) {
+  for (const b of blocks) {
+    let glow = 0;
+    if (b.glowT !== null) { b.glowT += dt * 1000; glow = glowPulse(b.glowT, 900) * 0.5; if (b.glowT >= 900) b.glowT = null; }
+    b.sel = easeTo(b.sel, (held?.b === b) ? 0.1 : selected === b ? 0.05 : 0, dt);
+    b.mesh.material.emissiveIntensity = Math.max(glow, b.sel);
+  }
+}
+
+// 2 players: the turn is done once this turn's block rests in the top row or above (a block
+// may only be taken from lower down, so reaching that height means it was moved up).
+function tickTurn(dt) {
+  if (!turn || turn.done || collapsed) return;
+  const b = turn.block;
+  const onTopNow = b && (!held || held.b !== b) && b.body.position.y - BLOCK_H / 2 >= turn.topY - BLOCK_H - 0.08;
+  // "At rest" = stayed within 0.05 of where it settled: a woken stack's contacts jitter the
+  // instantaneous velocity above any small threshold now and then (seen in headless runs).
+  const p = b?.body.position;
+  if (!onTopNow || !turn.anchor || Math.hypot(p.x - turn.anchor.x, p.y - turn.anchor.y) > 0.05) {
+    turn.anchor = onTopNow ? { x: p.x, y: p.y } : null;
+    turn.settleMs = 0;
+  } else turn.settleMs += dt * 1000;
+  if (turn.settleMs >= TURN_SETTLE_MS) {
+    turn.done = true;
+    b.glowT = 0;
+    ctx.sfx('snap');
+  }
 }
 
 let blockMat = null;
@@ -277,8 +329,9 @@ export default {
       collapsed = true;
       collapseT = 0;
       release();
-      ctx.setStatus('The tower fell · clap or press C to rebuild');
+      ctx.setStatus(multi ? 'The tower fell' : 'The tower fell · clap or press C to rebuild');
     }
+    if (multi) { tickTurn(dt); tickGlow(dt); return; }
     const top = collapsed ? [] : onTop();
     settleMs = top.length >= GOAL ? settleMs + dt * 1000 : 0;
     if (!won && settleMs >= SETTLE_MS) {
@@ -286,13 +339,24 @@ export default {
       for (const b of top) b.glowT = 0;
       ctx.setStatus('Tower stands!');
     } else if (!won && !collapsed && !held && top.length && top.length < GOAL) ctx.setStatus(`${top.length} of ${GOAL} on top`);
-    for (const b of blocks) {
-      let glow = 0;
-      if (b.glowT !== null) { b.glowT += dt * 1000; glow = glowPulse(b.glowT, 900) * 0.5; if (b.glowT >= 900) b.glowT = null; }
-      b.sel = easeTo(b.sel, (held?.b === b) ? 0.1 : selected === b ? 0.05 : 0, dt);
-      b.mesh.material.emissiveIntensity = Math.max(glow, b.sel);
-    }
+    tickGlow(dt);
   },
+
+  // ---- two players (see playground CONTRACT, TWO PLAYERS) ----
+  turnMode: 'alternate',
+  turnHint: 'Pull one block from below the top row and set it on top. Topple the tower and you lose.',
+  onTurnStart(player, info) {
+    multi = true;
+    if (info.first) build();
+    turn = { block: null, rest: blocks.map((b) => ({ x: b.body.position.x, y: b.body.position.y })), topY: towerTop(), settleMs: 0, anchor: null, done: false };
+    ctx.setStatus(`${player.name}: pull one block from below the top row and set it on top`);
+  },
+  turnResult() {
+    if (collapsed) return { lost: true };
+    return turn?.done ? { score: 1 } : null;
+  },
+  scoreText(total) { return `${total} ✓`; },
+  lostText(name) { return `${name} toppled the tower`; },
 
   reset() { build(); ctx.setStatus(`Pull ${GOAL} blocks from below the top row and stack them on top`); },
 
@@ -309,7 +373,7 @@ export default {
   // Test hook: per block, its screen centre, layer, whether it counts; plus game state.
   debug() {
     return {
-      collapsed, collapseWhy, won, held: held ? held.b.idx : null, topY0, onTop: collapsed ? 0 : onTop().length, timeScale,
+      multi, turn: turn && { block: turn.block?.idx ?? null, topY: turn.topY, done: turn.done, settleMs: turn.settleMs }, collapsed, collapseWhy, won, held: held ? held.b.idx : null, topY0, onTop: collapsed ? 0 : onTop().length, timeScale,
       blocks: blocks.map((b) => ({ i: b.idx, layer: b.layer, kind: b.kind, x: b.body.position.x, y: b.body.position.y, tilt: tiltDeg(b), touched: b.touched, screen: ctx.toScreen(b.mesh.position), asleep: b.body.sleepState === CANNON.Body.SLEEPING }))
     };
   },

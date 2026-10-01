@@ -42,6 +42,26 @@
     #bannerText { font-size: 24px; font-weight: 600; color: var(--text); text-shadow: 0 0 12px rgba(79, 209, 255, 0.45); }
     #bannerSub { margin: 6px 0 12px; color: var(--warm); font-size: 14px; }
     @media (prefers-reduced-motion: reduce) { #banner { transition: none; } }
+    /* Two players. Turn card: a large card that eases in (opacity + a small rise, 600 ms), with
+       a fixed glow in the player's colour; the stage behind it is NOT dimmed (no luminance step). */
+    #score { display: flex; gap: 6px; font: 13px var(--mono); }
+    #score .chip { padding: 3px 8px; border: 1px solid var(--line-2); border-left: 4px solid var(--pc); border-radius: 6px; color: var(--muted); white-space: nowrap; }
+    #score .chip.now { color: var(--text); border-color: var(--pc); }
+    #card { position: absolute; z-index: 7; inset: 0; display: grid; place-items: center; cursor: pointer; opacity: 0; transition: opacity 600ms ease-in-out; }
+    #card.show { opacity: 1; }
+    #card:not(.show) { pointer-events: none; }   /* while fading out, clicks reach the game */
+    #card .box { padding: 28px 44px; text-align: center; max-width: min(640px, 90vw); background: rgba(10, 16, 22, 0.9); border: 2px solid var(--pc, var(--accent)); border-radius: 14px;
+      box-shadow: 0 0 34px color-mix(in srgb, var(--pc, #4fd1ff) 30%, transparent); transform: translateY(10px); transition: transform 600ms ease-out; }
+    #card.show .box { transform: none; }
+    #cardTitle { font-size: clamp(26px, 4.4vw, 44px); font-weight: 700; }
+    #cardSub { margin: 10px 0 16px; color: var(--muted); font-size: 16px; }
+    #cardGo { font-size: 18px; min-height: 48px; padding: 0 22px; }
+    #cardKeys { margin-top: 10px; color: var(--muted); font: 12px var(--mono); }
+    #playersMenu { position: absolute; z-index: 9; right: 12px; top: calc(var(--bar-h) + 6px); padding: 12px 14px; display: grid; gap: 8px; min-width: 240px;
+      background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--radius); }
+    #playersMenu label { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+    #playersMenu input[type=text] { flex: 1; min-height: 32px; }
+    @media (prefers-reduced-motion: reduce) { #card, #card .box { transition: none; } }
     #status { display: flex; align-items: center; padding: 0 12px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); background: var(--panel-2); }
   </style>
   <script type="importmap">
@@ -58,11 +78,20 @@
     <a class="back" href="./index.html" title="Back to the arcade">← Arcade</a>
     <h1 id="title">Playground</h1>
     <span class="spacer"></span>
+    <span id="score" aria-label="Scoreboard" hidden></span>
     <span id="timer" title="Time since your first move">0:00.0</span>
     <span id="best">best –</span>
+    <button id="playersBtn" class="ghost" title="1 or 2 players (taking turns)" hidden>👤 1P</button>
     <button id="howtoBtn" class="ghost" title="How to play (H)">?</button>
     <button id="camBtn" title="Use your hands (the camera stays on this machine)">📷 Camera</button>
   </header>
+  <form id="playersMenu" hidden>
+    <label><input type="radio" name="n" value="1"> 1 player</label>
+    <label><input type="radio" name="n" value="2"> 2 players, taking turns</label>
+    <label>P1 <input type="text" name="p1" maxlength="20" placeholder="Player 1"></label>
+    <label>P2 <input type="text" name="p2" maxlength="20" placeholder="Player 2"></label>
+    <button type="submit">Start</button>
+  </form>
   <main id="stage">
     <video id="cam" playsinline muted></video>
     <canvas id="overlay"></canvas>
@@ -77,20 +106,47 @@
       <div id="bannerSub"></div>
       <button id="again" data-hand>↻ Play again</button>
     </section>
+    <section id="card" role="dialog" aria-label="Next turn" hidden>
+      <div class="box">
+        <div id="cardTitle"></div>
+        <div id="cardSub"></div>
+        <button id="cardGo" data-hand>▶ Start my turn</button>
+        <div id="cardKeys">other-hand pinch · Enter · click</div>
+      </div>
+    </section>
   </main>
   <footer id="status">Loading…</footer>
   <script type="module">
     const id = new URLSearchParams(location.search).get('game') ?? '';
     const $ = (s) => document.getElementById(s);
-    const { startPlayground } = await import(`./playground.js?v=${Date.now()}`);
+    const { startPlayground, readPlayers, playersQuery } = await import(`./playground.js?v=${Date.now()}`);
     startPlayground({
       gameId: id,
       el: {
         stage: $('stage'), video: $('cam'), overlay: $('overlay'), panel: $('panel'), status: $('status'),
         title: $('title'), timer: $('timer'), best: $('best'), camBtn: $('camBtn'),
         howto: $('howto'), howtoBtn: $('howtoBtn'), howtoClose: $('howtoClose'), howtoList: $('howtoList'),
-        banner: $('banner'), bannerText: $('bannerText'), bannerSub: $('bannerSub'), again: $('again')
+        banner: $('banner'), bannerText: $('bannerText'), bannerSub: $('bannerSub'), again: $('again'),
+        score: $('score'), card: $('card'), cardTitle: $('cardTitle'), cardSub: $('cardSub')
       }
+    }).then((pg) => {
+      // 1 / 2 players menu: only for games that support turns. Changing it reloads with the
+      // new URL (a match is set up once, at load).
+      if (!pg.game?.turnMode) return;
+      const { count, names } = readPlayers();
+      const btn = $('playersBtn');
+      const form = $('playersMenu');
+      btn.hidden = false;
+      btn.textContent = count === 2 ? '👥 2P' : '👤 1P';
+      form.n.value = String(count);
+      form.p1.value = names[0] === 'Player 1' ? '' : names[0];
+      form.p2.value = names[1] === 'Player 2' ? '' : names[1];
+      btn.addEventListener('click', () => { form.hidden = !form.hidden; });
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const q = playersQuery({ count: form.n.value === '2' ? 2 : 1, names: [form.p1.value.trim() || 'Player 1', form.p2.value.trim() || 'Player 2'] });
+        location.href = `./play.html?game=${encodeURIComponent(id)}${q}`;
+      });
     }).catch((err) => {
       console.error('playground failed to start:', err);
       $('status').textContent = `Could not start: ${err?.message ?? err}`;

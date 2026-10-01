@@ -93,6 +93,9 @@ let won = false;
 let goalRing = null;
 let goalGlowT = null;
 let wallMat = null;
+let matchLevel = 0;            // 2 players: the level both run
+let carriedFalls = 0;          // falls before a mid-turn restart still cost time
+const FALL_PENALTY_MS = 5000;
 let swap = null;               // { to, t } level change fading out (t < SWAP_S) then in
 let marbleMat = null;
 
@@ -374,6 +377,21 @@ export default {
   },
 
   isWon() { return won; },
+
+  // Two players: both run the same level (the one showing, or a level button pressed before
+  // the first turn); each fall adds FALL_PENALTY_MS to that player's time; fastest wins.
+  turnMode: 'timeTrial',
+  turnHint: `Same level for both. Fastest time wins; a fall adds ${FALL_PENALTY_MS / 1000} s.`,
+  onTurnStart(player, info) {
+    if (info.first && !info.restart) matchLevel = pendingLevel ?? level;
+    carriedFalls = info.restart ? carriedFalls + falls : 0;
+    pendingLevel = null;
+    won = false;
+    if (matchLevel !== level) swap = { to: matchLevel, t: 0 };
+    else buildLevel(level);
+    ctx.setStatus(`${player.name}: level ${matchLevel + 1} · a fall costs ${FALL_PENALTY_MS / 1000} s`);
+  },
+  penaltyMs() { return (carriedFalls + falls) * FALL_PENALTY_MS; },
   bestKey() { return `level${level + 1}`; },
   winText(t) { return `Level ${level + 1} in ${t}`; },
   againText() { return level + 1 < LEVELS.length ? `→ Level ${level + 2}` : '↻ Back to level 1'; },
