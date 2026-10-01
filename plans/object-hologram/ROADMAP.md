@@ -336,7 +336,7 @@ Visual feedback is real 3D "ghost hands" in the scene itself, not a flat overlay
 
 1. **Capture the 7 chess scans** (blocked on the user — needs the physical set and Scaniverse). Not the whole set at once: the board alone, plus one example each of pawn/rook/knight/bishop/queen/king — see the 2026-09-23(2) entry for why the whole-set approach was abandoned (confirmed unworkable by direct testing, not just fragile). Each capture should be simple and reliable, the same class of single-object scan the chair pipeline is already proven on.
 2. **Clean each of the 7 with `clean_scan.py`, unmodified** — same invocation pattern as the chair (`analyze_scan.py` for crop params, then `clean_scan.py ... -o ...`). No `--multi-part` needed for any of them.
-3. **Run `assemble_chess_set.py`** against the 7 cleaned meshes, verify visually via `index.html?model=assets/chess/chess_assembled.obj&plain=1`, then swap `models.js`'s `chair-raw` stand-in entry for the real `chess` entry.
+3. **Run `assemble_chess_set.py`** against the 7 cleaned meshes, verify visually via `viewer.html?model=assets/chess/chess_assembled.obj&plain=1`, then swap `models.js`'s `chair-raw` stand-in entry for the real `chess` entry.
 4. **Confirm live**: open `hologram.html`, load the real chess model via the carousel, explode it, select/grab an individual piece, reset — this is the first real-data exercise of everything built this session for per-part interaction.
 5. **Per-part explode's UI glue** (the actual pointerdown → `selectPartAtScreenPoint` call in `hologram.js`, coach-HUD text naming the active part) still isn't built — was scoped to wait for a real multi-part model to test against, which step 3 finally provides.
 

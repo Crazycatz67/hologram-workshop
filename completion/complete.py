@@ -28,7 +28,7 @@ Usage:
     .venv/bin/python completion/complete.py room.obj -o room_completed.obj --mode room
 
 Check the result in the v1 viewer:
-    http://localhost:8080/index.html?model=completion/out/chair_completed.obj&plain=1
+    http://localhost:8080/viewer.html?model=completion/out/chair_completed.obj&plain=1
 """
 
 import argparse

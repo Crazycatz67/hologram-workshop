@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en" class="site">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>About · Hologram Workshop</title>
+  <meta name="description" content="What Hologram Workshop is, what it can and can't do yet, how it works, and how your camera and scans stay private." />
+  <meta name="theme-color" content="#0a0d11" />
+  <link rel="icon" href="assets/site/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="assets/site/icon-192.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <script>try { document.documentElement.dataset.theme = localStorage.getItem('hw.site.theme') === 'light' ? 'light' : 'dark'; } catch (e) {}</script>
+  <link rel="stylesheet" href="theme.css" />
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body class="site">
+  <a class="skip" href="#main">Skip to content</a>
+  <main id="main" class="doc">
+    <header class="page">
+      <h1>About Hologram Workshop</h1>
+      <p>A browser tool that turns a phone scan into a hologram you can handle with your bare hands.
+        This page is an honest account of what it does, what it doesn't do yet, and how it works.</p>
+    </header>
+
+    <section>
+      <h2>What it is</h2>
+      <p>You scan a real object or room with a phone's LiDAR camera. The page shows it as a glowing
+        hologram, and your webcam watches your hands so you can grab it, turn it, resize it, take it
+        apart and measure it, the way you'd handle the real thing. A mouse does everything too.</p>
+      <p>It is a student project, free and open source: no install, no account, no server doing the work.</p>
+    </section>
+
+    <section>
+      <h2>What it does</h2>
+      <div class="box good">
+        <ul class="ticks">
+          <li><b>Hand control:</b> <span>aim with a pointing finger, click by pinching your other hand, fist to grab, two hands to tilt, scale or explode, clap to reset.</span></li>
+          <li><b>True-size measuring:</b> <span>the scan keeps its real-world scale, so the tape measure and size readout are in real centimetres.</span></li>
+          <li><b>Your own scans:</b> <span>the Platform opens GLB, glTF, OBJ and PLY files and splits them into objects and parts automatically.</span></li>
+          <li><b>A library:</b> <span>scenes and their versions are saved in your browser and shown as a ring you can spin.</span></li>
+          <li><b>Polygon lens and pins:</b> <span>look at the mesh under a lens, hide or mark faces without changing the scan, and pin pieces so they can't be moved by accident.</span></li>
+          <li><b>Practice:</b> <span>a short calibration and drills that arm one gesture at a time, so you can learn each move on its own.</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <section>
+      <h2>What it does <em>not</em> do (yet)</h2>
+      <div class="box warn">
+        <ul class="ticks">
+          <li><b>Webcam tracking isn't perfect.</b> <span>Poor light, a hand at the edge of the frame or a hand turned side-on can make the cursor wobble or drop. Good front light helps most.</span></li>
+          <li><b>It has mostly been tested by one person.</b> <span>Gesture thresholds are tuned on one set of hands, one laptop camera and one room.</span></li>
+          <li><b>Some gestures are still coming.</b> <span>The ✌ tool wheel and the 👎 undo gesture are designed but not built; undo works with <kbd>U</kbd> or <kbd>Ctrl</kbd>+<kbd>Z</kbd> today.</span></li>
+          <li><b>Scan completion and photo → 3D run offline.</b> <span>They are Python tools that run on a computer, not in the browser. In the browser a photo shows as a flat preview.</span></li>
+          <li><b>Not built for phones.</b> <span>The pages open on a phone, but hand control needs a laptop or desktop with a webcam.</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <section>
+      <h2>How it works</h2>
+      <ol class="steps">
+        <li><b>Hand tracking</b>: Google's MediaPipe finds 21 points on each hand in every webcam frame, inside your browser.</li>
+        <li><b>Smoothing</b>: a One Euro filter steadies the points without adding lag when you move fast.</li>
+        <li><b>Gestures</b>: each pose has one meaning. A short pause between different gestures stops one from bleeding into the next.</li>
+        <li><b>The hologram</b>: three.js draws the scan with a holographic material. It is tested so nothing flashes more than three times a second.</li>
+      </ol>
+    </section>
+
+    <section id="completion">
+      <h2>Scan completion</h2>
+      <p>A phone scan only sees what the camera saw: a chair's underside, the back of a sofa against a
+        wall, and gaps the scanner skipped come out missing. An offline Python tool fills those in from
+        the measured surfaces around them (thickness, symmetry and flat planes).</p>
+      <p><b>The real scan always wins.</b> Measured faces are never moved, and every filled-in surface is
+        marked as inferred, drawn with an amber hatch, so you always know which parts were measured and
+        which were guessed. On the sample chair the filled underside matches the real one to within
+        2 cm on about 98% of its area.</p>
+    </section>
+
+    <section>
+      <h2>Privacy</h2>
+      <p>The camera feed is processed in your browser and never leaves your device. No video, image,
+        hand data or scan is uploaded. There are no accounts, ads or analytics. Your saved scenes live in
+        this browser's storage; clearing site data removes them.</p>
+    </section>
+
+    <section>
+      <h2>Works in</h2>
+      <p>Recent Chrome, Edge and Safari on a laptop or desktop with a webcam. The camera needs a secure
+        page (this site is served over HTTPS) and your permission once.</p>
+    </section>
+
+    <section>
+      <h2>Credits and licences</h2>
+      <ul class="ticks">
+        <li><b>3D:</b> <span><a href="https://threejs.org/" rel="noopener">three.js</a> r161, MIT licence.</span></li>
+        <li><b>Hand tracking:</b> <span><a href="https://ai.google.dev/edge/mediapipe" rel="noopener">MediaPipe Tasks</a> by Google, Apache 2.0, loaded from a CDN.</span></li>
+        <li><b>Hand model:</b> <span>WebXR Input Profiles <code>generic-hand</code>, MIT licence, © 2019 Amazon.com, Inc. (<a href="https://github.com/immersive-web/webxr-input-profiles" rel="noopener">source</a>).</span></li>
+        <li><b>Hologram look:</b> <span><a href="https://github.com/ektogamat/threejs-vanilla-holographic-material" rel="noopener">threejs-vanilla-holographic-material</a> by Anderson Mancini, MIT licence.</span></li>
+        <li><b>Mesh picking:</b> <span><a href="https://github.com/gkjohnson/three-mesh-bvh" rel="noopener">three-mesh-bvh</a>, MIT licence.</span></li>
+      </ul>
+    </section>
+
+    <footer class="site-foot">
+      <p><b>Open source.</b> The code is at
+        <a href="https://github.com/Crazycatz67/hologram-workshop" rel="noopener">github.com/Crazycatz67/hologram-workshop</a>.
+        <a href="index.html">Back to the home page</a>.</p>
+      <p>Last updated October 2026.</p>
+    </footer>
+  </main>
+  <script type="module" src="site-nav.js"></script>
+</body>
+</html>

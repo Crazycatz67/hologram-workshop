@@ -13,7 +13,7 @@ const statusEl = document.getElementById('status');
 const fpsEl = document.getElementById('fps');
 const hintEl = document.getElementById('hint');
 
-// The view has its own grid cell (index.html's #stage); panels sit beside it.
+// The view has its own grid cell (viewer.html's #stage); panels sit beside it.
 const { scene, camera, renderer, controls } = createScene(document.getElementById('stage'));
 
 // The real scan texture is fully replaced by this material's procedural shader — that's
@@ -21,7 +21,7 @@ const { scene, camera, renderer, controls } = createScene(document.getElementByI
 // scanlineSize is high on purpose. At the library's default (8) the scanline bands are
 // wide enough to cut clean across a chair leg, and thin parts read as SEVERED -- reported
 // as the model looking "half disconnected". Confirmed it was the shader and not the mesh by
-// rendering the same file with an opaque material (index.html?plain=1), where the chair is
+// rendering the same file with an opaque material (viewer.html?plain=1), where the chair is
 // visibly whole. Finer bands read as surface texture instead of breaks.
 const hologramMaterial = new HolographicMaterial({
   hologramColor: '#4fd1ff',

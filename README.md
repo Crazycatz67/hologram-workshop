@@ -25,7 +25,8 @@ The index and the isolation rules are in [ROADMAP.md](ROADMAP.md).
 No install, no server — every page runs entirely in the browser:
 
 - **[Hologram + gestures](https://crazycatz67.github.io/hologram-workshop/hologram.html)** — the full experience. Includes a **practice mode** that arms one gesture at a time (move, spin, tilt, push/pull, scale, explode, clap) so each can be learned and tuned without the others firing, plus live sensitivity / trigger-delay / momentum controls. `D` shows the camera and tracking overlay, `P` toggles the panel, `R` resets the model and `U` (or `Ctrl+Z`) undoes a reset. Once the model is exploded, click a part to select it (click empty space to go back to the whole model)
-- **[Model viewer](https://crazycatz67.github.io/hologram-workshop/)** — the hologram alone, drag to orbit, no camera needed. `?model=<path>` loads a different mesh and `?plain=1` swaps in an opaque material, both for judging a `clean_scan.py` result
+- **[Home](https://crazycatz67.github.io/hologram-workshop/)** — the public landing page: a live 3D chair, one animated card per gesture with a Try-it link, what you need, privacy and credits ([About](https://crazycatz67.github.io/hologram-workshop/about.html))
+- **[Model viewer](https://crazycatz67.github.io/hologram-workshop/viewer.html)** — the hologram alone, drag to orbit, no camera needed. `?model=<path>` loads a different mesh and `?plain=1` swaps in an opaque material, both for judging a `clean_scan.py` result
 - **[Hand tracking](https://crazycatz67.github.io/hologram-workshop/hands.html)** — tracking on its own, with the raw pinch/gesture numbers on screen
 
 The gesture page carries an always-visible **gesture reference** (what each hand shape does) and a live status line naming which gestures are currently locked out by whichever one is active — mode-switching itself needs sustained, deliberate confirmation to interrupt an in-progress gesture, not just a brief flicker, so a misread frame can't hijack an active grab into something else. The scheme is **Engage → Aim → Act**: after any gesture ends, a *different* gesture can only start after a short neutral gap (400 ms, plus 100 ms of hands making no gesture pose), so one gesture can't chain into the next by accident. Clap-to-reset only fires from rest, never in the middle of another gesture, and is undoable.
@@ -66,7 +67,8 @@ Then open <http://localhost:8080>.
 | File | Role |
 | --- | --- |
 | `hologram.html`, `hologram.js` | The combined page: hologram + gesture control |
-| `index.html`, `main.js` | Model viewer only (no camera) |
+| `index.html`, `about.html`, `site.css`, `site-nav.js`, `assets/site/` | Public landing + about pages, shared site nav (no recorder) |
+| `viewer.html`, `main.js` | Model viewer only (no camera) |
 | `hands.html`, `hands.js` | Hand tracking only, with raw gesture numbers on screen |
 | `scene.js` | Renderer, camera, lights, controls, render loop |
 | `loadModel.js` | Model loader (GLB, or OBJ with or without MTL) and camera framing |

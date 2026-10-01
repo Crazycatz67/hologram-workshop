@@ -49,7 +49,7 @@ Usage:
     .venv/bin/python completion/benchmark.py --save-meshes        # write OBJs for viewing
 
 Saved meshes land in completion/out/ and open in the v1 viewer, e.g.
-    http://localhost:8080/index.html?model=completion/out/underside/poisson.obj&plain=1
+    http://localhost:8080/viewer.html?model=completion/out/underside/poisson.obj&plain=1
 """
 
 import argparse

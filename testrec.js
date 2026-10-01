@@ -5,7 +5,7 @@
 // asked. Every run of a wired test page now saves its full record to
 // docs/testing/runs/<page>/ through serve.py, and serve.py flags what changed.
 //
-// SCOPE (non-negotiable, see docs/testing/README.md): production pages (index.html,
+// SCOPE (non-negotiable, see docs/testing/README.md): production pages (index.html, viewer.html,
 // hologram.html, hands.html, platform/index.html) must never import this file. On any host
 // other than localhost / 127.0.0.1 / [::1] the recorder makes NO network request at all; it
 // keeps the record in memory and offers a "download run" button. No images, video or camera
