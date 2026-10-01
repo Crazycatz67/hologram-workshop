@@ -6,8 +6,15 @@ import * as THREE from 'three';
 //
 // Everything that changes the scene goes through the small action API returned below
 // (select, beginMove/moveBy/endMove, rotateSelected, scaleTarget, hideSelected, showAll,
-// undo). The mouse handlers are just one caller of it, so hand gestures can drive the same
-// actions later without touching the edit log or undo logic.
+// setPinned, undo). The mouse handlers are one caller of it; platform/hands.js (hand
+// gestures) is the other, so neither touches the edit log or undo logic directly.
+//
+// PINS. A pinned target (part or whole item; o.userData.pinned) refuses beginMove,
+// rotateTarget and scaleTarget, and onRefuse({ id, op, pinned }) says so. Pinning an item
+// does not pin its parts: grabbing a part of a pinned item moves only that part. Toggled with
+// K (either mode, on the selection) or setPinned / togglePin; recorded as op 'pin' / 'unpin'
+// with before/after states, so it is undoable and replays with versions. snapshot() carries
+// `pinned`; states without it (logs from before pins) leave the pin as it is.
 //
 // TARGETS. A target is either a part (its id, e.g. '3.2') or a whole library item
 // ('item:3', see itemKey). Parts sit under their item's root, so editing an item moves,
@@ -18,11 +25,12 @@ import * as THREE from 'three';
 //   { seq, t, at, op, item, part, before:{position,quaternion,scale,visible}, after:{...}, ... }
 //     seq  increasing id, unique for the session
 //     t    ms since this session started; at: the ISO wall-clock time
-//     op   move | rotate | scale | hide | show | showAll | arrange | importLayout
+//     op   move | rotate | scale | hide | show | showAll | arrange | importLayout | pin | unpin
 //     part the part id, or null when the edit targets the whole item
 //   Edits touching several targets at once (showAll, arrange, importLayout) carry
 //   `changes: [{ item, part, before, after }]` instead of one top-level before/after.
-//   Human-readable extras ride along (dx/dz for move, dy for rotate, factor for scale).
+//   Human-readable extras ride along (dx/dz for move, plus dy when a hand grab also turned
+//   it; dy for rotate, factor for scale).
 //   Other modules may add their own ops (polygon.js: polyHide, polyInfer) whose entries carry
 //   no transform states; they register an applier with registerOp(op, fn(entry, 'before'|
 //   'after')) and undo / replayTo / adoptHistory call it instead of applying states.
@@ -59,12 +67,15 @@ export function wheelPixels(e) {
 }
 const SCALE_MIN = 0.05, SCALE_MAX = 20; // absolute scale limits, so a slip can't make a part vanish
 
+const AXIS_Y = new THREE.Vector3(0, 1, 0);
+
 export const itemKey = (itemId) => `item:${itemId}`;
 export const isItemKey = (k) => typeof k === 'string' && k.startsWith('item:');
 
 // Full precision on purpose: replay must land on the exact same numbers, not rounded ones.
 export const snapshot = (o) => ({
-  position: o.position.toArray(), quaternion: o.quaternion.toArray(), scale: o.scale.toArray(), visible: o.visible
+  position: o.position.toArray(), quaternion: o.quaternion.toArray(), scale: o.scale.toArray(), visible: o.visible,
+  pinned: !!o.userData.pinned
 });
 function applyState(o, s) {
   if (!o || !s) return;
@@ -72,14 +83,17 @@ function applyState(o, s) {
   o.quaternion.fromArray(s.quaternion);
   o.scale.fromArray(s.scale);
   o.visible = s.visible;
+  // Logs saved before pins existed carry no `pinned`: leave the pin alone rather than unpin.
+  if (typeof s.pinned === 'boolean') o.userData.pinned = s.pinned;
   o.updateMatrixWorld(true);
 }
 export const changesOf = (e) => e.changes
   ?? (e.before || e.after ? [{ item: e.item, part: e.part ?? null, before: e.before, after: e.after }] : []);
 const sameState = (a, b, eps = 1e-6) => a.visible === b.visible
+  && (typeof a.pinned !== 'boolean' || typeof b.pinned !== 'boolean' || a.pinned === b.pinned)
   && ['position', 'quaternion', 'scale'].every((k) => a[k].every((v, i) => Math.abs(v - b[k][i]) <= eps));
 
-export function createObjectMode({ camera, canvas, controls, materialFor, edits, onChange }) {
+export function createObjectMode({ camera, canvas, controls, materialFor, edits, onChange, onRefuse }) {
   let parts = [];              // [{id, mesh}]
   const roots = new Map();     // String(itemId) -> item root (Group)
   const rootIds = new Map();   // String(itemId) -> the item id as main gave it (number today)
@@ -90,7 +104,8 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
   const opAppliers = new Map();     // op -> fn(entry, 'before'|'after'), for ops other modules own
   let seq = 0;
   const T0 = performance.now();
-  let drag = null;             // {id, startPos, before, plane, startHit, dx, dz}
+  let drag = null;             // {id, startPos, startQuat, pivot, before, plane, startHit, dx, dz, dy}
+  let pinHold = false;         // mouse pressed on a pinned target: orbit stays off until release
   let lastWheel = null;        // {kind, id, edit, time} for coalescing wheel ticks
   let replayCursor = null;     // seq the scene is scrubbed to by replayTo, or null when live
   let pendingMove = null;      // latest pointer position awaiting the per-frame hover pick
@@ -170,11 +185,20 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
     return box.isEmpty() ? box.setFromObject(o) : box;
   }
 
-  // Coalesces wheel ticks on the same target into one entry (and one undo step).
-  function wheelEdit(kind, key, now) {
-    const same = lastWheel && lastWheel.kind === kind && lastWheel.id === key && now - lastWheel.time < COALESCE_MS
+  // Coalesces wheel ticks on the same target into one entry (and one undo step). A `group`
+  // token (one hand gesture: a two-hand pinch) merges for as long as the gesture lasts,
+  // however long it pauses; without one, ticks merge within COALESCE_MS.
+  function wheelEdit(kind, key, now, group = null) {
+    const same = lastWheel && lastWheel.kind === kind && lastWheel.id === key
+      && (group != null ? lastWheel.group === group : lastWheel.group == null && now - lastWheel.time < COALESCE_MS)
       && edits[edits.length - 1] === lastWheel.edit;
     return same ? lastWheel.edit : null;
+  }
+
+  const pinnedKey = (key) => !!target(key)?.userData.pinned;
+  function refuse(id, op) {
+    onRefuse?.({ id, op, pinned: true });
+    return null;
   }
 
   const api = {
@@ -245,20 +269,32 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
     // Y is never touched, so the target keeps its height. `plane` is horizontal at the
     // target's bbox centre so the cursor stays glued to the point that was grabbed.
     beginMove(id, plane, startHit) {
-      ensureLive();
       const obj = target(id);
       if (!obj) return false;
-      drag = { id, startPos: obj.position.clone(), before: snapshot(obj), plane, startHit, dx: 0, dz: 0 };
+      if (obj.userData.pinned) { refuse(id, 'move'); return false; }
+      ensureLive();
+      // The pivot a hand twist turns about (moveBy's dy): the bbox centre, as rotateTarget.
+      const pivot = obj.parent.worldToLocal(worldBox(obj).getCenter(new THREE.Vector3()));
+      drag = { id, startPos: obj.position.clone(), startQuat: obj.quaternion.clone(), pivot, before: snapshot(obj), plane, startHit, dx: 0, dz: 0, dy: 0 };
       controls.enabled = false;   // orbit must not fight the drag
       notify();
       return true;
     },
-    moveBy(dx, dz) {
+    // dy (optional, radians; default keeps the current turn): a turn about the vertical through
+    // the target's centre, so a hand grab that twists while it moves is ONE edit, one undo.
+    moveBy(dx, dz, dy = drag?.dy ?? 0) {
       if (!drag) return;
-      drag.dx = dx; drag.dz = dz;
+      drag.dx = dx; drag.dz = dz; drag.dy = dy;
       const obj = target(drag.id);
+      const base = drag.startPos.clone();
+      if (dy) {
+        // Same convention as rotateTarget: about +Y in the parent's frame, through the pivot.
+        const q = new THREE.Quaternion().setFromAxisAngle(AXIS_Y, dy);
+        base.sub(drag.pivot).applyQuaternion(q).add(drag.pivot);
+        obj.quaternion.copy(drag.startQuat).premultiply(q);
+      } else obj.quaternion.copy(drag.startQuat);
       // dx/dz are world offsets; convert through the parent in case it is scaled/rotated.
-      const w = obj.parent.localToWorld(drag.startPos.clone());
+      const w = obj.parent.localToWorld(base);
       w.x += dx; w.z += dz;
       obj.position.copy(obj.parent.worldToLocal(w));
       obj.updateMatrixWorld(true);
@@ -267,23 +303,26 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
       if (!drag) return;
       // Finish any easing still in flight so the edit records where the cursor actually was.
       if (drag.armed && drag.goal && (drag.goal.dx !== drag.dx || drag.goal.dz !== drag.dz)) api.moveBy(drag.goal.dx, drag.goal.dz);
-      const { id, dx, dz, before } = drag;
+      const { id, dx, dz, dy, before } = drag;
       drag = null;
       controls.enabled = true;
       const obj = target(id);
-      if (obj && (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6)) {
+      if (obj && (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6 || Math.abs(dy) > 1e-6)) {
         lastWheel = null;
-        record({ op: 'move', item: itemOf(id), part: isItemKey(id) ? null : id, dx, dz, before, after: snapshot(obj) });
+        // dy only when the grab turned it, so mouse moves log exactly as before.
+        record({ op: 'move', item: itemOf(id), part: isItemKey(id) ? null : id, dx, dz, ...(Math.abs(dy) > 1e-6 ? { dy } : {}), before, after: snapshot(obj) });
       } else notify();
     },
 
-    // Rotate about the target's own vertical axis through its bbox centre.
-    rotateTarget(id, dy) {
+    // Rotate about the target's own vertical axis through its bbox centre. Returns the edit
+    // (or the one it merged into), or null. `group`: see wheelEdit.
+    rotateTarget(id, dy, { group = null } = {}) {
       const obj = target(id);
-      if (!obj || !dy) return;
+      if (!obj || !dy) return null;
+      if (obj.userData.pinned) return refuse(id, 'rotate');
       ensureLive();
       const now = performance.now();
-      const merge = wheelEdit('rotate', id, now);
+      const merge = wheelEdit('rotate', id, now, group);
       const before = merge ? null : snapshot(obj);
 
       // Pivot in the parent's frame: position is parent-local and the scan root is offset.
@@ -301,25 +340,28 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
         merge.after = snapshot(obj);
         lastWheel.time = now;
         notify();
-      } else {
-        const edit = record({ op: 'rotate', item: itemOf(id), part: isItemKey(id) ? null : id, dy, before, after: snapshot(obj) });
-        lastWheel = { kind: 'rotate', id, edit, time: now };
+        return merge;
       }
+      const edit = record({ op: 'rotate', item: itemOf(id), part: isItemKey(id) ? null : id, dy, before, after: snapshot(obj) });
+      lastWheel = { kind: 'rotate', id, edit, time: now, group };
+      return edit;
     },
     rotateSelected(dy) { api.rotateTarget(selectedId, dy); },
 
     // Scale = redesign. Uniform, about the part's own bbox centre; a whole item scales about
-    // its bottom centre so it keeps standing on the floor. `coalesce` merges wheel ticks.
-    scaleTarget(id, factor, { coalesce = false } = {}) {
+    // its bottom centre so it keeps standing on the floor. `coalesce` merges wheel ticks;
+    // `group` merges one hand gesture's steps (see wheelEdit).
+    scaleTarget(id, factor, { coalesce = false, group = null } = {}) {
       const obj = target(id);
       if (!obj || !(factor > 0) || !Number.isFinite(factor)) return null;
+      if (obj.userData.pinned) return refuse(id, 'scale');
       ensureLive();
       const cur = obj.scale.x;
       const next = Math.min(SCALE_MAX, Math.max(SCALE_MIN, cur * factor));
       const f = next / cur;
       if (Math.abs(f - 1) < 1e-9) return null;
       const now = performance.now();
-      const merge = coalesce ? wheelEdit('scale', id, now) : null;
+      const merge = coalesce || group != null ? wheelEdit('scale', id, now, group) : null;
       const before = merge ? null : snapshot(obj);
 
       const box = worldBox(obj);
@@ -339,7 +381,7 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
         return merge;
       }
       const edit = record({ op: 'scale', item: itemOf(id), part: isItemKey(id) ? null : id, factor: f, before, after: snapshot(obj) });
-      lastWheel = coalesce ? { kind: 'scale', id, edit, time: now } : null;
+      lastWheel = coalesce || group != null ? { kind: 'scale', id, edit, time: now, group } : null;
       return edit;
     },
     scaleSelected(factor, opts) { return api.scaleTarget(selectedId, factor, opts); },
@@ -363,6 +405,20 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
       if (!visible && selectedId != null && !shown(target(selectedId) ?? { visible: false })) selectedId = null;
       record({ op: visible ? 'show' : 'hide', item: itemOf(id), part: isItemKey(id) ? null : id, before, after: snapshot(obj) });
     },
+
+    // Pin / unpin one target as a recorded, undoable edit. Returns the entry, or null when
+    // nothing changed (no such target, already in that state, or mid-drag).
+    setPinned(id, on = true) {
+      const obj = target(id);
+      if (!obj || !!obj.userData.pinned === !!on || drag) return null;
+      ensureLive();
+      lastWheel = null;
+      const before = snapshot(obj);
+      obj.userData.pinned = !!on;
+      return record({ op: on ? 'pin' : 'unpin', item: itemOf(id), part: isItemKey(id) ? null : id, before, after: snapshot(obj) });
+    },
+    togglePin(id = selectedId) { return id == null ? null : api.setPinned(id, !pinnedKey(id)); },
+    isPinned: pinnedKey,
 
     showAll() {
       ensureLive();
@@ -443,7 +499,7 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
       let selection = null;
       if (sel) {
         const s = worldBox(sel).getSize(new THREE.Vector3());
-        selection = { id: selectedId, kind: isItemKey(selectedId) ? 'item' : 'part', size: [s.x, s.z, s.y] }; // W x D x H, axis-aligned
+        selection = { id: selectedId, kind: isItemKey(selectedId) ? 'item' : 'part', size: [s.x, s.z, s.y], pinned: pinnedKey(selectedId) }; // W x D x H, axis-aligned
       }
       return { mode, parts: parts.length, hidden: hiddenCount(), selection, edits: edits.length };
     },
@@ -469,11 +525,20 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
   canvas.addEventListener('pointerdown', (e) => {
     if (mode !== 'object' || e.button !== 0) return;
     const id = pick(e.clientX, e.clientY);
-    // With a whole item selected, grabbing any of its parts drags the whole item.
-    const wholeItem = id != null && isItemKey(selectedId) && String(byId(id)?.userData.itemId) === selectedId.slice(5);
+    // With a whole item selected, grabbing any of its parts drags the whole item; unless the
+    // item is pinned, when the grab takes just that part (the item stays put).
+    const wholeItem = id != null && isItemKey(selectedId) && String(byId(id)?.userData.itemId) === selectedId.slice(5)
+      && !pinnedKey(selectedId);
     const moveId = wholeItem ? selectedId : id;
     if (!wholeItem) api.select(id);
     if (id == null) return; // empty space: orbit still works
+    if (pinnedKey(moveId)) {
+      // Pinned: nothing moves, and the press must not turn into an orbit either.
+      refuse(moveId, 'move');
+      pinHold = true;
+      controls.enabled = false;
+      return;
+    }
     const centre = worldBox(target(moveId)).getCenter(new THREE.Vector3());
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -centre.y);
     const start = new THREE.Vector3();
@@ -481,7 +546,7 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
     // would fling the part, so leave this press to orbit instead of starting a drag.
     if (Math.abs(raycaster.ray.direction.dot(plane.normal)) < MIN_RAY_PLANE_SIN) return;
     if (!raycaster.ray.intersectPlane(plane, start)) return;
-    api.beginMove(moveId, plane, start);
+    if (!api.beginMove(moveId, plane, start)) return;
     drag.px = e.clientX; drag.py = e.clientY; drag.armed = false; drag.goal = null; drag.lastStep = null;
     try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
   }, true);
@@ -524,7 +589,9 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
 
   // Release lands exactly where the cursor is (not wherever the easing had got to), so the
   // recorded edit is the true drop point.
+  const endPinHold = () => { if (pinHold) { pinHold = false; if (!drag) controls.enabled = true; } };
   canvas.addEventListener('pointerup', (e) => {
+    endPinHold();
     if (drag?.armed) {
       const off = dragOffsetAt(e.clientX, e.clientY);
       if (off) drag.goal = off;
@@ -532,7 +599,7 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
     api.endMove();
   });
   // A cancelled pointer has no trustworthy position: keep the last one seen.
-  canvas.addEventListener('pointercancel', () => api.endMove());
+  canvas.addEventListener('pointercancel', () => { endPinHold(); api.endMove(); });
   canvas.addEventListener('pointerleave', () => { pendingMove = null; if (!drag) api.hover(null); });
 
   // Shift+wheel rotates the selection, Alt/Option+wheel scales it. Deltas are normalised to
@@ -553,6 +620,9 @@ export function createObjectMode({ camera, canvas, controls, materialFor, edits,
     const k = e.key;
     if (k === 'Tab') { e.preventDefault(); api.toggleMode(); return; }
     if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'z') { e.preventDefault(); api.undo(); return; }
+    // K pins / unpins the selection, in either mode (a hand click selects whole items in scene
+    // mode). Not P, as the design said: P is already the polygon lens on the Platform.
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat && k.toLowerCase() === 'k' && selectedId != null) { api.togglePin(); return; }
     if (mode !== 'object') return;
     if (k === 'Delete' || k === 'Backspace') { e.preventDefault(); api.hideSelected(); }
     else if (k.toLowerCase() === 'h') api.showAll();

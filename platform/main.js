@@ -75,7 +75,9 @@ const lib = {
   saveFailed: false,
   changeSeq: 0, savedSeq: 0,   // scene changes counted vs. the last one in the store (unload stash)   // the last working-copy save failed (storage full...): don't clear the scene
   rev: 0,              // working-copy revision this tab last loaded / wrote (store.js baseRev)
-  changedSinceVersion: true   // false right after a version save / a clean open: Cmd+S then makes no duplicate
+  changedSinceVersion: true,  // false right after a version save / a clean open: Cmd+S then makes no duplicate
+  editsPending: false, // an unsaved change is a real edit (not just the view): the save marks the copy dirty
+  viewSig: ''          // camera + mode + selection last seen (#51: a reload restores the view too)
 };
 
 startRenderLoop({
@@ -129,9 +131,11 @@ function materialFor(kind, mesh) {
 }
 
 const modeBtn = $('mode'), undoBtn = $('undo'), showAllBtn = $('showall');
-const partsEl = $('parts'), selEl = $('sel');
+const partsEl = $('parts'), selEl = $('sel'), pinBtn = $('pinBtn');
 const objectMode = createObjectMode({
   camera, canvas: renderer.domElement, controls, materialFor, edits,
+  // A pinned target refused a move / turn / resize (mouse or hands): say why nothing moved.
+  onRefuse: ({ id }) => setStatus(`📌 ${objectMode.isItemKey(id) ? items.get(Number(id.slice(5)))?.name ?? 'This item' : `Part #${id}`} is pinned · press K (or the pin chip) to unpin it`),
   onChange: (st) => {
     modeBtn.textContent = st.mode === 'object' ? 'Object mode' : 'Scene mode';
     modeBtn.classList.toggle('active', st.mode === 'object');
@@ -141,6 +145,15 @@ const objectMode = createObjectMode({
       ? `selected ${selName}  ·  ${st.selection.size.map((n) => n.toFixed(2)).join(' × ')} m (W×D×H)`
       : st.mode === 'object' ? 'nothing selected' : '';
     selEl.style.display = selEl.textContent ? '' : 'none';
+    // Pin chip: on the selection, either mode (hands select whole items in scene mode too).
+    if (pinBtn) {
+      const pinned = !!st.selection?.pinned;
+      pinBtn.hidden = !st.selection;
+      pinBtn.textContent = pinned ? '📌 Pinned' : '📌 Pin';
+      pinBtn.classList.toggle('active', pinned);
+      pinBtn.setAttribute('aria-pressed', String(pinned));
+      pinBtn.title = pinned ? 'K: unpin, so it can be moved, turned and resized again' : 'K: pin it in place (blocks moving, turning and resizing; undoable)';
+    }
     undoBtn.disabled = st.edits === 0;
     showAllBtn.disabled = st.hidden === 0;
     showAllBtn.textContent = st.hidden ? `Show all (${st.hidden} hidden)` : 'Show all';
@@ -150,6 +163,7 @@ const objectMode = createObjectMode({
     syncPolygonBtn(st);
     measurements?.onState(st);
     noteEdits();
+    noteView();
   }
 });
 window.hologram.objectMode = objectMode;
@@ -160,6 +174,7 @@ window.hologram.measurements = measurements;
 modeBtn.addEventListener('click', () => objectMode.toggleMode());
 undoBtn.addEventListener('click', () => { objectMode.undo(); syncLibrary(); });
 showAllBtn.addEventListener('click', () => objectMode.showAll());
+pinBtn?.addEventListener('click', () => objectMode.togglePin());
 plainBtn.textContent = plain ? 'Hologram look' : 'Plain material';
 
 // ---- Polygon mode (polygon.js) ---------------------------------------------------------------
@@ -187,7 +202,8 @@ function togglePolygon() {
   setStatus(`Polygon: ${polygon.state().name} as triangles · point at it to aim the lens, click to select faces · Esc leaves`);
   syncPolygonBtn();
 }
-import('./polygon.js' + V).then(({ createPolygonMode }) => {
+// #51: openProject waits for this, so a saved polygon edit finds its op registered on reopen.
+const polygonLoaded = import('./polygon.js' + V).then(({ createPolygonMode }) => {
   polygon = createPolygonMode({
     scene, camera, canvas: renderer.domElement, objectMode, getItem: (id) => items.get(id) ?? null, getItems: readyItems,
     onSkin: (k) => look.setSkin(k),   // the hologram eases to a faint skin under the wire
@@ -600,9 +616,39 @@ function noteEdits() {
   lib.sig = s;
   if (!lib.opening) scheduleAutosave();
 }
-function scheduleAutosave(delay = AUTOSAVE_MS) {
+// #51 (owner decision 2026-10-01): a reload restores the camera, the Scene/Object mode and
+// the selection as well as the edits. They are not edits (no undo step, no "changed since
+// version"), so a change to them alone saves with view:true.
+const r4 = (v) => v.toArray().map((n) => Math.round(n * 1e4) / 1e4).join();
+function viewState() {
+  const ready = readyItems(), key = objectMode.selectedId;
+  let sel = null;
+  if (key != null) {
+    const whole = objectMode.isItemKey(key);
+    const i = ready.findIndex((it) => (whole ? `item:${it.id}` === key : it.parts.some((p) => p.id === key)));
+    if (i >= 0) sel = { i, part: whole ? null : ready[i].parts.find((p) => p.id === key).local };
+  }
+  return { mode: objectMode.mode, sel };
+}
+const viewSig = () => `${r4(camera.position)}|${r4(controls.target)}|${JSON.stringify(viewState())}`;
+function noteView() {
+  if (!lib.projectId || lib.opening || lib.ring?.isOpen?.()) return;   // the ring flies the camera itself
+  const s = viewSig();
+  if (s === lib.viewSig) return;
+  lib.viewSig = s;
+  scheduleAutosave(AUTOSAVE_MS, { view: true });
+}
+// Puts the saved mode + selection back (byRec: saved item index -> the item it reopened as).
+function applyView(view, byRec) {
+  if (!view) return;
+  if (view.mode === 'object' || view.mode === 'scene') objectMode.setMode(view.mode);
+  const it = view.sel ? byRec.get(view.sel.i) : null;
+  if (!it) return;
+  objectMode.select(view.sel.part == null ? objectMode.itemKey(it.id) : it.parts.find((p) => p.local === view.sel.part)?.id ?? null);
+}
+function scheduleAutosave(delay = AUTOSAVE_MS, { view = false } = {}) {
   if (!lib.store || !lib.projectId || lib.opening) return;
-  lib.changedSinceVersion = true;
+  if (!view) { lib.changedSinceVersion = true; lib.editsPending = true; }
   lib.changeSeq++;
   lib.pending = true;
   clearTimeout(lib.timer);
@@ -683,7 +729,7 @@ const sceneStats = () => {
   };
 };
 // Where each item sat when it was loaded (see registerItem): replay needs the same start.
-const sceneExtras = () => ({ loaded: readyItems().map((it) => ({ sha256: it.sha256, name: it.name, state: it.loaded })) });
+const sceneExtras = () => ({ loaded: readyItems().map((it) => ({ sha256: it.sha256, name: it.name, state: it.loaded })), view: viewState() });
 // One entry per item's MAIN file, even when two items are the same file (two copies of one
 // scan, or the same bytes under another name): each becomes its own item again on reopen.
 // Sidecars (textures, .bin, .mtl) shared between items are listed once.
@@ -731,12 +777,14 @@ async function saveWorkingNow(projectId, { thumb = true, whileOpening = false } 
   const since = performance.now() - lib.lastThumbAt;
   if (thumb && since >= THUMB_MIN_MS) thumbBlob = await takeThumb();
   else if (thumb && !lib.thumbTimer) {   // edits kept coming: one trailing save brings the card up to date
-    lib.thumbTimer = setTimeout(() => { lib.thumbTimer = null; scheduleAutosave(0); }, THUMB_MIN_MS - since);
+    lib.thumbTimer = setTimeout(() => { lib.thumbTimer = null; scheduleAutosave(0, { view: true }); }, THUMB_MIN_MS - since);
   }
   const seq = lib.changeSeq;
+  const edited = lib.editsPending;
+  lib.editsPending = false;
   try {
     const w = await lib.store.saveWorking(projectId, {
-      layout: exporter.buildLayout(exportCtx), extras: sceneExtras(), stats: sceneStats(), sources: currentSources(), thumbBlob, baseRev: lib.rev
+      layout: exporter.buildLayout(exportCtx), extras: sceneExtras(), stats: sceneStats(), sources: currentSources(), thumbBlob, baseRev: lib.rev, dirty: edited
     });
     if (projectId === lib.projectId) { lib.rev = w.rev; lib.saveFailed = false; lib.savedSeq = seq; freeSpaceBtn.hidden = true; }
     if (lib.changeSeq === seq || projectId !== lib.projectId) dropRescue(projectId);
@@ -745,7 +793,7 @@ async function saveWorkingNow(projectId, { thumb = true, whileOpening = false } 
     if ((err?.code === 'conflict' || err?.code === 'gone') && projectId === lib.projectId) return keepConflictAsCopy();
     // Not saved: stay pending, so the next flush (a project switch, hiding the tab) retries
     // and openProject refuses to clear the scene over unsaved edits.
-    if (projectId === lib.projectId) { lib.pending = true; lib.saveFailed = true; }
+    if (projectId === lib.projectId) { lib.pending = true; lib.saveFailed = true; lib.editsPending ||= edited; }
     throw err;
   }
   refreshRing();
@@ -819,6 +867,7 @@ function saveVersionNow() {
     lib.savedSeq = seq;
     if (lib.changeSeq === seq) dropRescue(lib.projectId);
     lib.changedSinceVersion = false;
+    if (lib.changeSeq === seq) lib.editsPending = false;   // the version holds them; a later view-only save stays clean
     setStatus(`saved "${v.label}" of ${lib.title}`);
     refreshRing();
     return v;
@@ -900,17 +949,20 @@ async function replaceScene(groups, removeFirst, beforeClear = null) {
 function applyProjectLayout(layout, extras) {
   const recs = extras?.loaded ?? [];
   const used = new Set();
+  const byRec = new Map();   // saved item index -> the item it reopened as (applyView)
   for (const it of readyItems()) {
     let i = recs.findIndex((r, k) => !used.has(k) && r.sha256 && r.sha256 === it.sha256);
     if (i < 0) i = recs.findIndex((r, k) => !used.has(k) && r.name === it.name);
-    if (i < 0 || !recs[i].state) continue;
+    if (i < 0) continue;
+    byRec.set(i, it);
+    if (!recs[i].state) continue;
     used.add(i);
     const s = recs[i].state, o = it.root;
     o.position.fromArray(s.position); o.quaternion.fromArray(s.quaternion); o.scale.fromArray(s.scale);
     o.visible = s.visible; o.updateMatrixWorld(true);
     it.loaded = s;
   }
-  if (!layout?.items?.length) { frameAll(); return { applied: 0, mismatches: [], historyRestored: 0 }; }
+  if (!layout?.items?.length) { frameAll(); return { applied: 0, mismatches: [], historyRestored: 0, byRec }; }
   // No edits: the scene is already exactly as saved (the loaded placement above). Going
   // through importLayout would record a pointless "importLayout" step in the undo history.
   if (!layout.edits?.length) {
@@ -919,11 +971,11 @@ function applyProjectLayout(layout, extras) {
       controls.target.fromArray(layout.camera.target);
       controls.update();
     } else frameAll();
-    return { applied: readyItems().length, mismatches: [], historyRestored: 0 };
+    return { applied: readyItems().length, mismatches: [], historyRestored: 0, byRec };
   }
   const rep = exporter.importLayout(exportCtx, layout);
   syncLibrary();
-  return rep;
+  return { ...rep, byRec };
 }
 
 // Opens a project's working copy, or (versionId) resets the working copy to that version
@@ -969,7 +1021,10 @@ async function openProject(projectId, versionId = null, { fallback = true } = {}
     lib.pending = lib.saveFailed = lib.discardOk = false;
     lib.savedSeq = lib.changeSeq;
     lib.changedSinceVersion = !!ver.dirty;
+    lib.editsPending = false;
+    await polygonLoaded;   // its edit-log ops must be registered before the history is adopted
     const rep = applyProjectLayout(ver.layout, ver.extras);
+    applyView(ver.extras?.view, rep.byRec);
     const sigOpened = lib.sig = editSig();
     setStatus(`opened ${p.title}${target ? ` (${target.label})` : ''}` +
       (rep.historyRestored ? `  ·  ${rep.historyRestored} edit${rep.historyRestored === 1 ? '' : 's'} restored, undo works` : '') +
@@ -990,6 +1045,7 @@ async function openProject(projectId, versionId = null, { fallback = true } = {}
       } catch (err) { console.warn('thumbnail not stored:', err); }   // the project is open; a missing card picture is not a failed open
     }
     lib.opening = false;
+    lib.viewSig = viewSig();   // the view as opened is the saved one: no save until it changes
     if (editSig() !== sigOpened) scheduleAutosave();   // edits made during the thumbnail step
     return true;
   } catch (err) {
@@ -1225,7 +1281,7 @@ function stashForUnload() {
   if (!lib.store || !lib.projectId || lib.opening || lib.changeSeq === lib.savedSeq) return;
   try {
     localStorage.setItem(RESCUE_PREFIX + lib.projectId, JSON.stringify({
-      projectId: lib.projectId, title: lib.title, rev: lib.rev, at: Date.now(),
+      projectId: lib.projectId, title: lib.title, rev: lib.rev, at: Date.now(), dirty: lib.editsPending,
       layout: exporter.buildLayout(exportCtx), extras: sceneExtras(), stats: sceneStats(), sources: currentSources()
     }));
   } catch (err) { console.warn('could not stash unsaved edits:', err); }
@@ -1240,7 +1296,7 @@ async function applyRescues() {
     try {
       if (r?.projectId && r.layout) {
         try {
-          await lib.store.saveWorking(r.projectId, { layout: r.layout, extras: r.extras, stats: r.stats, sources: r.sources, baseRev: r.rev });
+          await lib.store.saveWorking(r.projectId, { layout: r.layout, extras: r.extras, stats: r.stats, sources: r.sources, baseRev: r.rev, dirty: r.dirty ?? true });
           console.info(`restored unsaved edits to "${r.title}"`);
         } catch (err) {
           if (err?.code !== 'conflict' && err?.code !== 'gone') throw err;
@@ -1287,6 +1343,8 @@ window.addEventListener('keydown', (e) => {
   }
 });
 $('saveVersionBtn')?.addEventListener('click', () => saveVersionNow());
+// #51: orbit / pan / zoom (mouse, hands, Focus, auto-rotate) are saved too, on the same debounce.
+controls.addEventListener('change', () => noteView());
 // Leaving or hiding the tab: don't sit on an unsaved edit for the rest of the debounce.
 // No thumbnail then: its async toBlob would push the write past a reload / tab close.
 // The localStorage stash covers a reload / close, where the IndexedDB write can't finish.

@@ -68,8 +68,8 @@ function applyXform(o, t) {
 export function buildLayout(ctx) {
   const items = ctx.items().map((it) => ({
     id: it.id, name: it.name, kind: it.kind, sourceFile: it.sourceFile, fileSize: it.fileSize, sha256: it.sha256,
-    transform: xform(it.root), hidden: !it.root.visible,
-    parts: it.parts.map((p) => ({ id: p.local, transform: xform(p.mesh), hidden: !p.mesh.visible }))
+    transform: xform(it.root), hidden: !it.root.visible, pinned: !!it.root.userData.pinned,
+    parts: it.parts.map((p) => ({ id: p.local, transform: xform(p.mesh), hidden: !p.mesh.visible, pinned: !!p.mesh.userData.pinned }))
   }));
   return {
     version: 2, createdAt: new Date().toISOString(), items,
@@ -116,11 +116,13 @@ export function importLayout(ctx, layout) {
     used.add(it.id);
     idMap.set(String(li.id), it);
     if (how === 'name' && li.sha256 && it.sha256) mismatches.push(`"${li.name}" matched by name only (file contents differ)`);
-    track(it, null, it.root, () => { applyXform(it.root, li.transform); it.root.visible = !li.hidden; });
+    // Pins too (objectmode.js PINS); layouts from before pins carry none and leave them alone.
+    const pin = (o, l) => { if (typeof l.pinned === 'boolean') o.userData.pinned = l.pinned; };
+    track(it, null, it.root, () => { applyXform(it.root, li.transform); it.root.visible = !li.hidden; pin(it.root, li); });
     for (const lp of li.parts ?? []) {
       const p = it.parts.find((x) => x.local === lp.id);
       if (!p) { mismatches.push(`"${li.name}" has no part #${lp.id}`); continue; }
-      track(it, p, p.mesh, () => { applyXform(p.mesh, lp.transform); p.mesh.visible = !lp.hidden; });
+      track(it, p, p.mesh, () => { applyXform(p.mesh, lp.transform); p.mesh.visible = !lp.hidden; pin(p.mesh, lp); });
     }
     applied++;
   }
@@ -144,7 +146,7 @@ export function importLayout(ctx, layout) {
         const obj = om.resolve(c.item, c.part);
         const s = c.before;
         obj.position.fromArray(s.position); obj.quaternion.fromArray(s.quaternion); obj.scale.fromArray(s.scale);
-        obj.visible = s.visible; obj.updateMatrixWorld(true);
+        obj.visible = s.visible; obj.userData.pinned = !!s.pinned; obj.updateMatrixWorld(true);
       }
       adopted = om.adoptHistory(history);
       if (adopted) historyRestored = history.length;
@@ -152,7 +154,7 @@ export function importLayout(ctx, layout) {
         const obj = om.resolve(c.item, c.part);
         const s = c.after;
         obj.position.fromArray(s.position); obj.quaternion.fromArray(s.quaternion); obj.scale.fromArray(s.scale);
-        obj.visible = s.visible; obj.updateMatrixWorld(true);
+        obj.visible = s.visible; obj.userData.pinned = !!s.pinned; obj.updateMatrixWorld(true);
       }
     }
     if (!adopted) {
@@ -177,6 +179,15 @@ function remapHistory(list, idMap) {
   };
   const out = [];
   for (const e of list) {
+    // Face-level ops (polygon.js polyHide / polyInfer, BUGS #51) carry no transform states:
+    // their item and each polys[].part are remapped instead.
+    if (Array.isArray(e.polys)) {
+      const item = mapItem(e.item);
+      const polys = e.polys.map((p) => ({ ...p, part: mapPart(e.item, p.part) }));
+      if (item == null || polys.some((p) => p.part == null)) return null;
+      out.push({ ...JSON.parse(JSON.stringify(e)), item, polys });
+      continue;
+    }
     const ch = e.changes ?? (e.before && e.after ? [{ item: e.item, part: e.part ?? null, before: e.before, after: e.after }] : null);
     if (!ch) return null;
     const mapped = [];

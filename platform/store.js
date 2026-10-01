@@ -32,7 +32,8 @@
 //   store.listProjects({ includeDeleted=false }) -> [{ project, versions:[summary] }]
 //         newest first; versions oldest first with the working copy last; summaries have no layout
 //   store.getProject(id) / store.getVersion(id) -> full record | null
-//   store.saveWorking(projectId, { layout, extras?, thumbBlob?, stats?, sources?, baseRev? }) -> summary
+//   store.saveWorking(projectId, { layout, extras?, thumbBlob?, stats?, sources?, baseRev?, dirty=true }) -> summary
+//         dirty:false = a view-only save (camera / mode / selection): the dirty flag is left as it was
 //         baseRev: the working copy's `rev` this tab last loaded or wrote. If another tab wrote
 //         the working copy since, nothing is written and StoreConflictError (code 'conflict')
 //         is thrown, so two tabs on one project never silently overwrite each other.
@@ -340,7 +341,9 @@ export async function openStore({ name = DB_NAME, now = () => Date.now(), autoPe
       });
     },
 
-    async saveWorking(projectId, { layout, extras, thumbBlob = null, stats, sources, baseRev } = {}) {
+    // dirty:false = only the view changed (camera / mode / selection, BUGS #51): the copy keeps
+    // its "changed since version" flag as it was, so checkout makes no version of a camera move.
+    async saveWorking(projectId, { layout, extras, thumbBlob = null, stats, sources, baseRev, dirty = true } = {}) {
       let oldThumb = null, sample = false;
       const res = await run(['projects', 'versions', 'thumbs', 'blobs'], 'readwrite', async (tx) => {
         const p = await liveProject(tx, projectId);
@@ -361,7 +364,7 @@ export async function openStore({ name = DB_NAME, now = () => Date.now(), autoPe
           w.thumbId = await putThumb(tx, thumbBlob);
         }
         w.updatedAt = p.updatedAt = now();
-        w.dirty = true;
+        if (dirty) w.dirty = true;
         await put(tx, 'versions', w);
         await put(tx, 'projects', p);
         return summary(w);

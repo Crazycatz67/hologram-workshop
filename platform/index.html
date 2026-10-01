@@ -35,6 +35,7 @@
       display: flex; align-items: center; gap: var(--gap); padding: 0 12px;
       background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; overflow-x: auto;
     }
+    #topbar button { flex: 0 0 auto; white-space: nowrap; }
     .brand { font-weight: 700; letter-spacing: .02em; margin-right: 6px; white-space: nowrap; }
     .brand span { color: var(--accent); }
     .spacer { flex: 1; }
@@ -153,6 +154,10 @@
     }
     #freeSpace.holding { background-size: 100% 100%; transition: background-size var(--hold-ms, 650ms) linear; }
     #sel { color: var(--select); }
+    /* Pin chip (K): calm on/off state, no animation (photosafety) */
+    #pinBtn { flex: none; font: inherit; color: var(--muted); padding: 1px 8px; cursor: pointer; border: 1px solid var(--line); border-radius: 10px; background: transparent; }
+    #pinBtn.active { color: var(--select); border-color: var(--select); }
+    #pinBtn[hidden] { display: none; }
     #fps { margin-left: auto; color: var(--faint); }
 
     /* ---- stage overlays ------------------------------------------------------- */
@@ -271,6 +276,24 @@
       .lr-panel { top: 58%; }
     }
 
+    /* Top bar fit (BUGS #50). Full labels need ~1440 px (~1560 with the longest main.js labels), so: tighten up to 1600 px, then below
+       1520 px turn every labelled button into its icon (data-icon). The label text stays in the
+       DOM (font-size 0), so the accessible name and the title tooltip are unchanged. main.js
+       rewrites some labels (mode, polygon, view), which is why this is CSS, not spans. */
+    @media (max-width: 1600px) {
+      #topbar { gap: 5px; padding: 0 8px; }
+      #topbar button { padding: 0 8px; }
+      .brand { margin-right: 0; }
+    }
+    @media (max-width: 1520px) {
+      #topbar { gap: 4px; padding: 0 6px; }
+      #topbar button[data-icon] { font-size: 0; gap: 0; padding: 0; width: 32px; }
+      #topbar button[data-icon]::before { content: attr(data-icon); font-size: 14px; line-height: 1; }
+      #topbar .brand { font-size: 0; margin: 0; }
+      #topbar .brand::before { content: "HW"; font-size: 13px; color: var(--accent); }
+      #topbar #help, #topbar #handsBtn { width: 32px; padding: 0; }
+    }
+
     /* ---- narrow screens: side panels become drawers over the view -------------- */
     @media (max-width: 960px) {
       #app { grid-template-columns: 0 1fr 0; }
@@ -298,19 +321,19 @@
 <body>
   <div id="app">
     <header id="topbar">
-      <button id="toggleLeft" class="ghost" title="Show / hide the items in this scene" aria-controls="left">☰ Items</button>
+      <button id="toggleLeft" class="ghost" data-icon="☰" title="Show / hide the items in this scene" aria-controls="left">☰ Items</button>
       <div class="brand">Hologram <span>Workshop</span></div>
       <div class="sep"></div>
-      <button id="libraryBtn" title="Library: your saved scenes and their versions (L)" aria-controls="libraryRing" aria-expanded="false">Library</button>
-      <button id="saveVersionBtn" title="Save a version of this scene (Ctrl/⌘+S)">Save version</button>
+      <button id="libraryBtn" data-icon="▤" title="Library: your saved scenes and their versions (L)" aria-controls="libraryRing" aria-expanded="false">Library</button>
+      <button id="saveVersionBtn" data-icon="💾" title="Save a version of this scene (Ctrl/⌘+S)">Save version</button>
       <div class="sep"></div>
-      <button id="pick" class="primary">Add files…</button>
-      <button id="folder">Add folder…</button>
-      <button id="sample" class="wide-only">Sample</button>
+      <button id="pick" class="primary" data-icon="＋" title="Add scan or photo files to this scene">Add files…</button>
+      <button id="folder" data-icon="📁" title="Add a whole folder of files">Add folder…</button>
+      <button id="sample" class="wide-only" data-icon="◈" title="Load the sample chair">Sample</button>
       <div class="sep"></div>
-      <button id="arrange">Arrange all</button>
+      <button id="arrange" data-icon="⊞" title="Arrange all items in a tidy row">Arrange all</button>
       <div id="exportwrap">
-        <button id="exportBtn" aria-haspopup="menu">Export ▾</button>
+        <button id="exportBtn" data-icon="⇪" title="Export the scene" aria-haspopup="menu">Export ▾</button>
         <div id="exportMenu" role="menu" hidden>
           <button data-act="glb">Scene as GLB</button>
           <button data-act="layout">Layout + history (JSON)</button>
@@ -322,14 +345,14 @@
       </div>
       <div class="spacer"></div>
       <button id="handsBtn" aria-pressed="false" aria-label="Camera off: turn it on" title="Camera on / off: point at items with your hand (C calibrates)">📷</button>
-      <button id="mode" title="Tab: switch between moving the camera and editing objects">Scene mode</button>
-      <button id="polyBtn" disabled aria-pressed="false" title="P: Polygon mode: the selected item (or the whole scene) turns into its triangles; a lens under the mouse picks faces. Click selects, Shift-click adds, wheel sizes the lens, Delete hides, I marks inferred, Esc leaves">Polygon</button>
-      <button id="undo" disabled title="Undo (Ctrl/Cmd+Z)">Undo</button>
-      <button id="showall" disabled>Show all</button>
-      <button id="inferredBtn" hidden aria-pressed="false" title="I: switch between the completed scan (filled-in surfaces shown ghosted and hatched) and the scan as captured">View: Completed</button>
+      <button id="mode" data-icon="✥" title="Tab: switch between moving the camera and editing objects">Scene mode</button>
+      <button id="polyBtn" data-icon="◇" disabled aria-pressed="false" title="P: Polygon mode: the selected item (or the whole scene) turns into its triangles; a lens under the mouse picks faces. Click selects, Shift-click adds, wheel sizes the lens, Delete hides, I marks inferred, Esc leaves">Polygon</button>
+      <button id="undo" data-icon="↶" disabled title="Undo (Ctrl/Cmd+Z)">Undo</button>
+      <button id="showall" data-icon="👁" title="Show all hidden items" disabled>Show all</button>
+      <button id="inferredBtn" data-icon="◐" hidden aria-pressed="false" title="I: switch between the completed scan (filled-in surfaces shown ghosted and hatched) and the scan as captured">View: Completed</button>
       <div class="sep"></div>
       <button id="help" class="ghost" title="Controls and tips (?)" aria-controls="guide">?</button>
-      <button id="toggleRight" class="ghost" title="Show / hide the inspector" aria-controls="right">Inspector ☰</button>
+      <button id="toggleRight" class="ghost" data-icon="☰" title="Show / hide the inspector" aria-controls="right">Inspector ☰</button>
     </header>
 
     <aside id="left" class="side" aria-label="Items in this scene">
@@ -376,6 +399,7 @@
       <span id="info"></span>
       <span id="parts"></span>
       <span id="sel"></span>
+      <button id="pinBtn" type="button" hidden aria-pressed="false">📌 Pin</button>
       <span id="fps">— fps</span>
     </footer>
   </div>
@@ -384,7 +408,8 @@
     <h3>Controls</h3>
     <p><b>Library</b> (<kbd>L</kbd>): <kbd>←</kbd>/<kbd>→</kbd> (or drag, scroll, swipe) between projects, <kbd>↑</kbd>/<kbd>↓</kbd> through a project's versions, <kbd>Enter</kbd> or click the centre card to open, <kbd>Esc</kbd> closes. "…" forks, renames or deletes (press and hold). <kbd>Ctrl/⌘</kbd>+<kbd>S</kbd> saves a version.</p>
     <p><b>Scene mode</b>: drag to orbit, scroll to zoom, right-drag to pan, <kbd>R</kbd> auto-rotate.</p>
-    <p><b>Object mode</b> (<kbd>Tab</kbd>): hover highlights, click selects, drag moves along the floor, <kbd>Shift</kbd>+scroll rotates, <kbd>Alt/⌥</kbd>+scroll resizes (a redesign), <kbd>Del</kbd> hides, <kbd>H</kbd> shows all, <kbd>Esc</kbd> deselects, <kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd> undoes.</p>
+    <p><b>Object mode</b> (<kbd>Tab</kbd>): hover highlights, click selects, drag moves along the floor, <kbd>Shift</kbd>+scroll rotates, <kbd>Alt/⌥</kbd>+scroll resizes (a redesign), <kbd>Del</kbd> hides, <kbd>H</kbd> shows all, <kbd>Esc</kbd> deselects, <kbd>K</kbd> pins the selection in place (any mode; pinned things refuse moving, turning and resizing; a part of a pinned item can still be moved on its own), <kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd> undoes.</p>
+    <p><b>Hands</b> (📷): point (index out, other three fingers curled) and pinch your other hand to select. Make a fist to move the selection along the floor (left/right, push/pull; twist turns it); with nothing selected a fist turns the view. Pinch both hands and pull apart to resize. Lower both hands for 1 s to reset tracking, <kbd>C</kbd> recalibrates.</p>
     <p><b>Completed scans</b> (Track B output, with its <code>.json</code> sidecar dropped alongside): filled-in surfaces are drawn ghosted with a hatch, never as measured. <kbd>I</kbd> or <b>View</b> switches between completed and as scanned.</p>
     <p><b>Capturing</b>: Scaniverse <b>Object</b> mode for single items, <b>Area</b> mode for rooms; export GLB or OBJ.</p>
     <p>Files are read in your browser and never uploaded.</p>

@@ -527,12 +527,58 @@ await emit('choose', { projectId: projId });
   await emit('choose', { projectId: projId });
 }
 
+// #51: a camera move is saved on its own (debounced) and does not count as a change since the
+// last version (no "kept" version on checkout, Cmd+S still a no-op).
+{
+  await L.flush();
+  fw.dispatchEvent(new fw.KeyboardEvent('keydown', { key: 's', ctrlKey: true, cancelable: true }));
+  await L.flush(); await sleep(50); await L.flush();
+  const v0 = (await S.getProject(projId)).versionCount;
+  H.camera.position.set(1.234, 0.987, 2.345); H.controls.target.set(0.012, 0.345, -0.021); H.controls.update();
+  const saved = await until(async () => { const w = await workingOf(projId); return w.layout?.camera?.position?.[0] === 1.234 && w; }, 6000);
+  fw.dispatchEvent(new fw.KeyboardEvent('keydown', { key: 's', ctrlKey: true, cancelable: true }));
+  await L.flush(); await sleep(50); await L.flush();
+  const v1 = (await S.getProject(projId)).versionCount;
+  check('B33 #51 a camera move autosaves by itself and is not a change since the version', !!saved && saved.dirty === false && v1 === v0,
+    `camera saved ${!!saved}, dirty ${saved?.dirty}, versions ${v0} -> ${v1}`);
+}
+
 // Reload: the last project reopens (not the ring). #37: an edit made just before the reload
-// (inside the autosave debounce) must survive it.
+// (inside the autosave debounce) must survive it. #51: so must the camera, the Scene/Object
+// mode and the selection, changed just before the reload too.
 const ringOpensBefore = ringLog.opened;
 await L.flush();
 om.rotateTarget(om.itemKey(items()[1].id), 0.33);
+// #51 cause 3: polygon face edits (I-mark, Delete-hide) must survive the reload too.
+const polyFaces = (Hx) => {
+  const out = [];
+  for (const it of [...Hx.items.values()].filter((i) => i.status === 'ready')) for (const p of it.parts) {
+    const f = Hx.polygon.faceState(p.mesh);
+    let hid = 0, inf = 0;
+    if (f) for (let k = 0; k < f.faces; k++) { hid += f.hidden[k]; if (f.inferred(k)) inf++; }
+    out.push(`${it.name}#${p.local}:${hid}/${inf}`);
+  }
+  return out.join(',');
+};
+{
+  await until(() => H.polygon, 10000);
+  const P = H.polygon, m = items()[0].parts[0].mesh;
+  m.geometry.computeBoundingBox();
+  const c = m.geometry.boundingBox.getCenter(H.camera.position.clone()).applyMatrix4(m.matrixWorld).project(H.camera);
+  const r = fw.document.querySelector('#stage canvas').getBoundingClientRect();
+  const at = (dx) => [r.left + (c.x + 1) / 2 * r.width + dx, r.top + (1 - c.y) / 2 * r.height];
+  P.enter(null); P.radius = 40;
+  P.setPointer(...at(0)); P.select(); P.toggleInferredPatch(); P.clearPatch();
+  P.setPointer(...at(25)); P.select(); P.hidePatch(); P.clearPatch(); P.exit();
+}
+const polyBefore = polyFaces(H), polyOpsBefore = H.edits.map((e) => e.op).join();
 const editsBeforeReload = H.edits.length;
+om.setMode('object');
+const selPart = items()[1].parts[0];
+om.select(selPart.id);
+H.camera.position.set(1.5, 1.1, 2.0); H.controls.target.set(0.05, 0.35, 0.02); H.controls.update();
+const r4 = (v) => v.toArray().map((n) => n.toFixed(4)).join();
+const viewBefore = { cam: r4(H.camera.position), tgt: r4(H.controls.target), mode: 'object', sel: `${items()[1].name}#${selPart.local}` };
 frame.src = `./index.html?db=${APP_DB}&ring=stub&v=${Date.now()}`;
 await sleep(300);
 const fw2 = await until(() => frame.contentWindow?.hologram?.library?.ready && frame.contentWindow, 30000);
@@ -544,6 +590,17 @@ check('B20 a return visit reopens the last project instead of the ring', fw2.hol
 check('B29 #37 an edit inside the autosave debounce survives a reload', fw2.hologram.edits.length === editsBeforeReload
   && (await fw2.hologram.library.store.getVersion((await fw2.hologram.library.store.getProject(projId)).workingVersionId)).layout.edits.length === editsBeforeReload
   && !Object.keys(localStorage).some((k) => k.startsWith(`hologram-platform-rescue:${APP_DB}:`)), `${fw2.hologram.edits.length}/${editsBeforeReload}`);
+{
+  const H2 = fw2.hologram, om2 = H2.objectMode, sid = om2.selectedId;
+  const it2 = [...H2.items.values()].find((i) => i.parts.some((p) => p.id === sid));
+  const viewAfter = { cam: r4(H2.camera.position), tgt: r4(H2.controls.target), mode: om2.mode, sel: it2 ? `${it2.name}#${it2.parts.find((p) => p.id === sid).local}` : String(sid) };
+  check('B34 #51 a reload restores the camera, the Scene/Object mode and the selection exactly', JSON.stringify(viewAfter) === JSON.stringify(viewBefore),
+    `${JSON.stringify(viewAfter)} vs ${JSON.stringify(viewBefore)}`);
+  const polyAfter = polyFaces(H2), polyOpsAfter = H2.edits.map((e) => e.op).join();
+  check('B35 #51 polygon edits (I-mark, hide) and the full undo history survive a reload',
+    /polyInfer/.test(polyOpsBefore) && /polyHide/.test(polyOpsBefore) && /\/[1-9]/.test(polyBefore) && polyAfter === polyBefore && polyOpsAfter === polyOpsBefore,
+    `ops ${polyOpsAfter} vs ${polyOpsBefore}; faces ${polyAfter === polyBefore ? 'same' : `${polyAfter} vs ${polyBefore}`}`);
+}
 await fw2.hologram.library.thumbsDone;
 check('B21 no console errors in the app during all of the above', errors.length === 0, errors.slice(0, 3).join(' | '));
 

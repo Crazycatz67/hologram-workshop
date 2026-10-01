@@ -324,6 +324,31 @@ const adopted = objectMode.adoptHistory(saved);
 check('a saved history (JSON) is adopted by an unedited session and re-applies the faces', adopted && hiddenCount() === afterH && inferredCount() === afterI,
   `adopted ${adopted}, hidden ${hiddenCount()}, inferred ${inferredCount()}`);
 
+// BUGS #54 (owner: mark a patch inferred, move it -> "deleted mesh / dark spot"): every face of
+// the part is still drawn (shown + relabelled overlay + hidden = all) and the overlay follows its
+// part through the move and its undo. The darker look is the inferred mark (look.js P5), not a hole.
+{
+  const m = parts.find((x) => poly.faceState(x).overlay);
+  const whole = () => {
+    const f = poly.faceState(m);
+    const shown = f.display ? f.display.index.count / 3 : f.faces;
+    return shown + (f.overlay ? f.overlay.geometry.index.count / 3 : 0) + f.hidden.reduce((n, v) => n + v, 0) === f.faces;
+  };
+  const follows = () => {
+    poly.tick();
+    const o = poly.faceState(m).overlay;
+    o.updateMatrixWorld();
+    return o.visible && o.matrixWorld.elements.every((v, i) => Math.abs(v - m.matrixWorld.elements[i]) < 1e-9);
+  };
+  const n0 = edits.length, p0 = m.position.clone();
+  objectMode.beginMove(m.userData.partId, null, null); objectMode.moveBy(0.2, -0.1, 0.4); objectMode.endMove();
+  const moved = !!m && m.position.distanceTo(p0) > 0.1 && whole() && follows() && edits.length === n0 + 1 && inferredCount() === afterI;
+  objectMode.undo();
+  check('#54 marked-inferred faces stay drawn and follow their part through a move and its undo',
+    moved && m.position.distanceTo(p0) < 1e-9 && whole() && follows() && inferredCount() === afterI && hiddenCount() === afterH,
+    `moved ${moved}, inferred ${inferredCount()}/${afterI}, hidden ${hiddenCount()}/${afterH}`);
+}
+
 // ---- D. display ---------------------------------------------------------------------------------
 {
   // Fresh state: one hide, then compare the pixels where it was against the unedited render.

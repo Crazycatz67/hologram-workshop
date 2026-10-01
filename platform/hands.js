@@ -3,7 +3,7 @@
 // reticle, ghost hands, calibration and the lower-both-hands reset; this file only says what a
 // hand means HERE: aim = objectMode hover, click = objectMode select. Every change still goes
 // through objectmode.js, so undo, autosave and versions see hand edits exactly like mouse ones.
-// No grab / move / rotate / scale yet (step 3).
+// Step 3 adds grab / move / twist-turn / two-hand scale and pins (see GESTURES below).
 //
 // CONTRACT
 //   createPlatformHands({ scene, camera, renderer, controls, objectMode, getItems, button?,
@@ -34,6 +34,34 @@
 //     scene mode:  select the whole item under the click (design table); empty space clears.
 //   Mouse clicks are ignored here: objectmode.js already handles the mouse, and handling them
 //   twice would change mouse behaviour (scene-mode clicks select nothing today).
+//   A pinned whole item does not swallow clicks on its parts: they select the part, which is
+//   how you grab one part of a pinned item.
+//
+// GESTURES (step 3). Which hand shape is which gesture is decided by the v1 manipulator
+// (../manipulator.js), not here: it already holds the stabilisers, deadzones, follow springs,
+// the Engage -> Aim -> Act gaps and the BUGS #47 latch (a same-hand pinch on the aiming hand
+// is never a fist, so it never starts a grab). It drives an invisible PROXY in a private
+// camera frame instead of a model; every display frame this adapter reads the proxy's change
+// and turns it into objectMode calls, then puts the proxy back. So the Platform never moves
+// an object itself, and every hand edit lands in objectMode's edit log (undo, autosave,
+// versions). Channels: move, spin, push, scale (no tilt, explode or clap on the Platform).
+//   Fist, something selected     -> objectMode.beginMove(sel) ... moveBy(dx, dz, dy) ...
+//                                   endMove(): ONE 'move' edit per grab. Hand left/right ->
+//                                   along the screen's right on the floor; push/pull -> along
+//                                   the view direction on the floor; wrist twist -> turn about
+//                                   the vertical (dy). Height never changes.
+//   Fist, nothing selected       -> orbit the camera about its target (no edit).
+//   Both hands pinching          -> objectMode.scaleTarget(sel, f, { group }): ONE 'scale'
+//                                   edit per two-hand pinch.
+//   Selection pinned             -> nothing moves and the camera holds still; the status line
+//                                   says it is pinned.
+//   The gesture target is the selection at the moment the gesture starts, in either mode
+//   (scene mode selects whole items), so hands never need Tab. Gestures pause while busy().
+//   A release lets the follow spring land (<= SETTLE_MAX_MS) before the edit is committed.
+//   hands.gesture  the manipulator-shaped object the runtime drives ({ update(hands, aspect,
+//     t), tick(t), mode }); tests feed synthetic hands straight into it after ensureGesture().
+//   hands.ensureGesture() -> Promise   loads ../manipulator.js (no MediaPipe) and builds it.
+//   hands.session  the running gesture: null | { kind: 'move'|'orbit'|'scale'|'held', id }.
 
 import * as THREE from 'three';
 
@@ -57,7 +85,11 @@ export function createPlatformHands({
   let loading = null;
   let clearFrames = 0;      // display frames still to run after stop, so the reticle eases out
   let hoverKey = null;      // what the HAND set as objectMode's hover (never the mouse's)
-  const stats = { clicks: 0, selects: 0, misses: 0, ignored: 0, bvhBuilt: 0, bvhMs: 0 };
+  const stats = {
+    clicks: 0, selects: 0, misses: 0, ignored: 0, bvhBuilt: 0, bvhMs: 0,
+    // step 3: gestures started, by what they did; refused = blocked by a pin
+    grabs: 0, moves: 0, orbits: 0, scales: 0, refused: 0
+  };
 
   // The camera stream and the debug skeleton canvas: the runtime needs both. Hidden, like on
   // hologram.html (seeing your own video breaks the illusion); visibility rather than display,
@@ -163,11 +195,202 @@ export function createPlatformHands({
     // Mouse parity (objectmode pointerdown): with a whole item selected, clicking one of its
     // parts keeps the whole item (it is what a grab will move in step 3).
     const sel = objectMode.selectedId;
-    if (key && !isItemKey(key) && isItemKey(sel) && String(h.itemId) === sel.slice(5)) key = sel;
+    // Not when that item is pinned: then the click takes the part, which a grab can move alone.
+    if (key && !isItemKey(key) && isItemKey(sel) && String(h.itemId) === sel.slice(5) && !objectMode.isPinned?.(sel)) key = sel;
     if (key) stats.selects++; else stats.misses++;
     objectMode.select(key);
     return key;
   }
+
+  // ---- gestures: the v1 manipulator on a proxy, read back as objectMode calls ----------------
+  // The proxy sits 1 unit in front of a private camera that has the real camera's fov and
+  // aspect, so after a step its x / y are "world units per unit of depth" across / up the
+  // screen, ln(|position|) is the push/pull, its Y turn is the twist and its scale the pinch
+  // ratio. Put back every frame, so the manipulator's view clamp and depth limits never bite:
+  // its springs keep their own state and only ever ADD the next step to whatever is there.
+  let gestureLib = null;      // { createManipulator, MODE }
+  let gestureLoad = null;
+  let manip = null;
+  let session = null;         // { kind, id, gesture, dx, dz, dy, group, endAt, still }
+  let groupSeq = 0;
+  const vcam = new THREE.PerspectiveCamera();
+  const proxy = new THREE.Object3D();
+  const PROXY_HOME = new THREE.Vector3(0, 0, -1);
+  proxy.position.copy(PROXY_HOME);
+  // After a release the follow spring still glides the last few mm (it trails a steady hand by
+  // ~63 ms); the edit is committed once two display frames bring nothing new, or after this.
+  const SETTLE_MAX_MS = 400;
+  // Click = the OTHER hand's pinch while one hand aims. If MediaPipe reads that pinching hand
+  // as Closed_Fist, the v1 manipulator would start a grab (it only latches the AIMING hand,
+  // BUGS #47) and the click would drag the selection. So no grab opens while a pointer was up
+  // this recently. The manipulator's own 300 ms post-pointer gap already delays a real
+  // pointer -> fist switch past this, so that still grabs (hands-test G4).
+  const POINTER_GRAB_BLOCK_MS = 200;
+  let lastPointerAt = -Infinity;
+  const GESTURE_CHANNELS = ['move', 'spin', 'push', 'scale'];
+
+  function ensureGesture() {
+    gestureLoad ??= import('../manipulator.js' + V).then((m) => {
+      gestureLib = m;
+      syncVcam();
+      manip = m.createManipulator(proxy, vcam);
+      // No coasting: an edit ends where the hand let go, not wherever momentum would carry it.
+      manip.configure({ channels: GESTURE_CHANNELS, momentum: false });
+      return gesture;
+    });
+    return gestureLoad;
+  }
+
+  function syncVcam() {
+    if (vcam.fov !== camera.fov || vcam.aspect !== camera.aspect) {
+      vcam.fov = camera.fov;
+      vcam.aspect = camera.aspect;
+      vcam.updateProjectionMatrix();
+    }
+  }
+
+  // The proxy's change since it was last put back, then put it back.
+  const qTmp = new THREE.Quaternion();
+  function takeProxyStep() {
+    const p = proxy.position;
+    const len = p.length();
+    qTmp.copy(proxy.quaternion);
+    const step = {
+      x: p.x - PROXY_HOME.x, y: p.y - PROXY_HOME.y,
+      depth: len > 0 ? Math.log(len / PROXY_HOME.length()) : 0,
+      spin: 2 * Math.atan2(qTmp.y, qTmp.w),
+      scale: proxy.scale.x
+    };
+    if (step.spin > Math.PI) step.spin -= 2 * Math.PI;
+    proxy.position.copy(PROXY_HOME);
+    proxy.quaternion.identity();
+    proxy.scale.set(1, 1, 1);
+    return step;
+  }
+  const isStill = (d) => Math.abs(d.x) < 1e-9 && Math.abs(d.y) < 1e-9 && Math.abs(d.depth) < 1e-9 && Math.abs(d.spin) < 1e-9 && Math.abs(d.scale - 1) < 1e-9;
+
+  const nameOf = (key) => {
+    if (isItemKey(key)) return getItems().find((it) => String(it.id) === key.slice(5))?.name ?? 'This item';
+    return `Part #${key}`;
+  };
+  function refusePinned(key) {
+    stats.refused++;
+    setStatus(`📌 ${nameOf(key)} is pinned · press K (or the pin chip) to unpin it`);
+  }
+
+  function centreOf(obj) {
+    obj.updateWorldMatrix(true, true);
+    return new THREE.Box3().setFromObject(obj).getCenter(new THREE.Vector3());
+  }
+
+  function openSession(kind, nowMs) {
+    const sel = objectMode.selectedId;
+    if (kind === 'grab') stats.grabs++;
+    if (kind === 'grab' && nowMs - lastPointerAt < POINTER_GRAB_BLOCK_MS) return { kind: 'held', id: sel, gesture: kind };
+    // A mouse drag already owns the selection; the hand waits.
+    if (objectMode.dragging) return { kind: 'held', id: sel, gesture: kind };
+    if (sel == null) {
+      if (kind === 'grab') { stats.orbits++; return { kind: 'orbit', id: null, gesture: kind }; }
+      return { kind: 'held', id: null, gesture: kind };
+    }
+    if (objectMode.isPinned?.(sel)) { refusePinned(sel); return { kind: 'held', id: sel, gesture: kind }; }
+    if (kind === 'scale') { stats.scales++; return { kind: 'scale', id: sel, gesture: kind, group: `hand-scale-${++groupSeq}` }; }
+    const obj = objectMode.target(sel);
+    const c = obj ? centreOf(obj) : new THREE.Vector3();
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -c.y);
+    if (!obj || !objectMode.beginMove(sel, plane, c)) return { kind: 'held', id: sel, gesture: kind };
+    stats.moves++;
+    return { kind: 'move', id: sel, gesture: kind, dx: 0, dz: 0, dy: 0, centre: c };
+  }
+
+  // The screen's right and the view direction, both laid flat on the floor.
+  const flatRight = new THREE.Vector3(), flatFwd = new THREE.Vector3();
+  function floorAxes() {
+    camera.updateMatrixWorld();
+    flatRight.setFromMatrixColumn(camera.matrixWorld, 0).setY(0);
+    camera.getWorldDirection(flatFwd).setY(0);
+    if (flatRight.lengthSq() < 1e-12) flatRight.set(1, 0, 0);
+    // Looking straight down: "forward" on the floor is screen-up.
+    if (flatFwd.lengthSq() < 1e-12) flatFwd.setFromMatrixColumn(camera.matrixWorld, 1).setY(0);
+    flatRight.normalize();
+    flatFwd.normalize();
+  }
+
+  const sph = new THREE.Spherical();
+  function feed(s, d) {
+    if (s.kind === 'move') {
+      if (!objectMode.dragging) { s.kind = 'held'; return; }   // ended elsewhere (Tab, mouse)
+      floorAxes();
+      // The proxy works at depth 1; the real target is `dist` away, so lateral steps scale up
+      // by dist, and a push of ln-ratio `depth` moves it dist * (e^depth - 1) along the view.
+      const at = s.centre.clone().add(new THREE.Vector3(s.dx, 0, s.dz));
+      const dist = Math.max(0.05, camera.position.distanceTo(at));
+      const lateral = d.x * dist;
+      const along = dist * (Math.exp(d.depth) - 1);
+      s.dx += flatRight.x * lateral + flatFwd.x * along;
+      s.dz += flatRight.z * lateral + flatFwd.z * along;
+      s.dy += d.spin;
+      if (d.x || d.depth || d.spin) objectMode.moveBy(s.dx, s.dz, s.dy);
+    } else if (s.kind === 'orbit') {
+      if (!d.x && !d.y) return;
+      // The world follows the fist: hand right turns the scene right (camera goes left), hand
+      // up tips its near edge up (camera goes down). At depth 1 the step is already ~radians.
+      const off = camera.position.clone().sub(controls.target);
+      sph.setFromVector3(off);
+      sph.theta -= d.x;
+      const lo = Math.max(0.05, controls.minPolarAngle ?? 0), hi = Math.min(Math.PI - 0.05, controls.maxPolarAngle ?? Math.PI);
+      sph.phi = THREE.MathUtils.clamp(sph.phi + d.y, lo, hi);
+      camera.position.copy(controls.target).add(off.setFromSpherical(sph));
+      camera.lookAt(controls.target);
+      controls.update();
+    } else if (s.kind === 'scale') {
+      if (Math.abs(d.scale - 1) > 1e-9) objectMode.scaleTarget(s.id, d.scale, { group: s.group });
+    }
+  }
+
+  function closeSession() {
+    if (!session) return;
+    if (session.kind === 'move' && objectMode.dragging) objectMode.endMove();
+    session = null;
+  }
+
+  // Once per display frame (gesture.tick), after the manipulator has stepped.
+  function applyGesture(nowMs) {
+    const MODE = gestureLib.MODE;
+    const d = takeProxyStep();
+    const mode = busy() || runtime?.calibration?.active ? MODE.IDLE : manip.mode;
+    const want = mode === MODE.GRAB ? 'grab' : mode === MODE.TRANSFORM ? 'scale' : null;
+    if (session && session.gesture !== want) {
+      // The gesture ended (or changed): let the spring land, then commit the one edit.
+      session.endAt ??= nowMs;
+      feed(session, d);
+      session.still = isStill(d) ? (session.still ?? 0) + 1 : 0;
+      if (want || session.still >= 2 || nowMs - session.endAt > SETTLE_MAX_MS || busy()) closeSession();
+      if (session) return;
+      if (want) session = openSession(want, nowMs);   // this frame's step belonged to the old one
+      return;
+    }
+    if (!session && want) { session = openSession(want, nowMs); return; }   // first frame: references only
+    if (session) feed(session, d);
+  }
+
+  // What the runtime calls "the manipulator" (handsRuntime.js: update on camera frames, tick
+  // every display frame). Busy (polygon lens, Library ring): hands are not read at all.
+  const gesture = {
+    update(hands, aspect, t) {
+      if (!manip) return 'idle';
+      if (busy()) return manip.mode;
+      syncVcam();
+      if (hands.some((h) => h.engaged !== false && h.pointer?.gun)) lastPointerAt = t;
+      return manip.update(hands, aspect, t);
+    },
+    tick(t = performance.now()) {
+      if (!manip) return;
+      manip.tick(t);
+      applyGesture(t);
+    },
+    get mode() { return manip?.mode ?? 'idle'; }
+  };
 
   function onAction(type, detail) {
     if (type === 'aim') handleAim(detail);
@@ -183,11 +406,12 @@ export function createPlatformHands({
   async function ensureRuntime() {
     if (runtime) return runtime;
     bvhLoad ??= import('three-mesh-bvh').then((m) => { MeshBVH = m.MeshBVH; }).catch((err) => console.warn('hands: three-mesh-bvh unavailable, raycasting plain', err));
-    loading ??= loadRuntime().then((createHandsRuntime) => {
+    loading ??= Promise.all([loadRuntime(), ensureGesture()]).then(([createHandsRuntime]) => {
       runtime = createHandsRuntime({
         scene, camera, renderer, overlay, video,
         pickTargets: () => (hasTargets() ? pickRoot : null),
         ghostAnchor: () => pickRoot,
+        manipulator: () => gesture,
         // A steady cursor on any drawn surface selects what is there (hold-to-select); off while
         // the lens or the ring owns the input.
         holdOn: () => (busy() ? null : 'surface'),
@@ -240,6 +464,7 @@ export function createPlatformHands({
     if (!runtime?.tracking) return;
     runtime.stop();
     setHover(null);
+    closeSession();
     clearFrames = 30;   // ~0.5 s of frames so the reticle and ghost hands fade instead of freezing
     syncButton();
     setStatus('Camera off');
@@ -283,7 +508,8 @@ export function createPlatformHands({
 
   return {
     update, start, stop, toggle, calibrate, handleAim, handleClick, pickRoot,
-    ensureRuntime,
+    ensureRuntime, ensureGesture, gesture,
+    get session() { return session && { kind: session.kind, id: session.id }; },
     get runtime() { return runtime; },
     get tracking() { return !!runtime?.tracking; },
     get hoverKey() { return hoverKey; },
