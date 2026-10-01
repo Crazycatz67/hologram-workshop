@@ -30,6 +30,7 @@ export const PAGES = [
   { id: 'home', label: 'Home', href: 'index.html' },
   { id: 'gesture', label: 'Gesture demo', href: 'hologram.html' },
   { id: 'platform', label: 'Platform', href: 'platform/index.html' },
+  { id: 'games', label: 'Games', href: 'demos/index.html' },
   { id: 'practice', label: 'Practice', href: 'hologram.html#try=practice' },
   { id: 'viewer', label: 'Viewer', href: 'viewer.html' },
   { id: 'about', label: 'About', href: 'about.html' }
