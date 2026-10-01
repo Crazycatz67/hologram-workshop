@@ -30,3 +30,6 @@ docs/testing/runs/
 
 # Agent worktrees (Claude Code isolation)
 .claude/worktrees/
+
+# Semi-real gesture fixtures (Kaggle ASL hand shapes): local only until their licences are checked
+docs/lab/gestures/fixtures/semi-real/

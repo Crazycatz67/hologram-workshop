@@ -1,0 +1,9299 @@
+{
+ "schema": "gesture-replay-report/1",
+ "generated": "2026-10-01T21:49:02.637Z",
+ "commit": "cde7592",
+ "dirty": true,
+ "seed": 4242,
+ "realClips": 0,
+ "modelled": [
+  "undo"
+ ],
+ "clips": [
+  {
+   "name": "grab-move",
+   "url": "./fixtures/synthetic/grab-move.json",
+   "set": "synthetic",
+   "synthetic": true,
+   "frames": 75,
+   "durationMs": 2466.67,
+   "expected": "grab",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "scale",
+   "url": "./fixtures/synthetic/scale.json",
+   "set": "synthetic",
+   "synthetic": true,
+   "frames": 63,
+   "durationMs": 2066.67,
+   "expected": "scale",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "explode",
+   "url": "./fixtures/synthetic/explode.json",
+   "set": "synthetic",
+   "synthetic": true,
+   "frames": 46,
+   "durationMs": 1500,
+   "expected": "explode",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "clap",
+   "url": "./fixtures/synthetic/clap.json",
+   "set": "synthetic",
+   "synthetic": true,
+   "frames": 45,
+   "durationMs": 1466.67,
+   "expected": "clap",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "wheel-pick",
+   "url": "./fixtures/synthetic/wheel-pick.json",
+   "set": "synthetic",
+   "synthetic": true,
+   "frames": 91,
+   "durationMs": 3000,
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "mapped": true
+  },
+  {
+   "name": "undo",
+   "url": "./fixtures/synthetic/undo.json",
+   "set": "synthetic",
+   "synthetic": true,
+   "frames": 60,
+   "durationMs": 1966.67,
+   "expected": "undo",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "aim-sweep",
+   "url": "./fixtures/synthetic/aim-sweep.json",
+   "set": "synthetic",
+   "synthetic": true,
+   "frames": 108,
+   "durationMs": 3566.67,
+   "expected": "aim",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "click-other",
+   "url": "./fixtures/synthetic/click-other.json",
+   "set": "synthetic",
+   "synthetic": true,
+   "frames": 61,
+   "durationMs": 2000,
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "mapped": true
+  },
+  {
+   "name": "null-rest",
+   "url": "./fixtures/synthetic/null-rest.json",
+   "set": "synthetic",
+   "synthetic": true,
+   "frames": 90,
+   "durationMs": 2966.67,
+   "expected": "none",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "null-talk",
+   "url": "./fixtures/synthetic/null-talk.json",
+   "set": "synthetic",
+   "synthetic": true,
+   "frames": 90,
+   "durationMs": 2966.67,
+   "expected": "none",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "grab-move.sr1",
+   "url": "./fixtures/semi-real/grab-move.sr1.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 75,
+   "durationMs": 2466.67,
+   "expected": "grab",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "scale.sr1",
+   "url": "./fixtures/semi-real/scale.sr1.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 63,
+   "durationMs": 2066.67,
+   "expected": "scale",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "explode.sr1",
+   "url": "./fixtures/semi-real/explode.sr1.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 46,
+   "durationMs": 1500,
+   "expected": "explode",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "clap.sr1",
+   "url": "./fixtures/semi-real/clap.sr1.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 45,
+   "durationMs": 1466.67,
+   "expected": "clap",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "wheel-pick.sr1",
+   "url": "./fixtures/semi-real/wheel-pick.sr1.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 91,
+   "durationMs": 3000,
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "mapped": true
+  },
+  {
+   "name": "undo.sr1",
+   "url": "./fixtures/semi-real/undo.sr1.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 60,
+   "durationMs": 1966.67,
+   "expected": "undo",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "aim-sweep.sr1",
+   "url": "./fixtures/semi-real/aim-sweep.sr1.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 108,
+   "durationMs": 3566.67,
+   "expected": "aim",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "click-other.sr1",
+   "url": "./fixtures/semi-real/click-other.sr1.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 61,
+   "durationMs": 2000,
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "mapped": true
+  },
+  {
+   "name": "null-rest.sr1",
+   "url": "./fixtures/semi-real/null-rest.sr1.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 90,
+   "durationMs": 2966.67,
+   "expected": "none",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "null-talk.sr1",
+   "url": "./fixtures/semi-real/null-talk.sr1.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 90,
+   "durationMs": 2966.67,
+   "expected": "none",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "grab-move.sr2",
+   "url": "./fixtures/semi-real/grab-move.sr2.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 75,
+   "durationMs": 2466.67,
+   "expected": "grab",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "scale.sr2",
+   "url": "./fixtures/semi-real/scale.sr2.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 63,
+   "durationMs": 2066.67,
+   "expected": "scale",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "explode.sr2",
+   "url": "./fixtures/semi-real/explode.sr2.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 46,
+   "durationMs": 1500,
+   "expected": "explode",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "clap.sr2",
+   "url": "./fixtures/semi-real/clap.sr2.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 45,
+   "durationMs": 1466.67,
+   "expected": "clap",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "wheel-pick.sr2",
+   "url": "./fixtures/semi-real/wheel-pick.sr2.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 91,
+   "durationMs": 3000,
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "mapped": true
+  },
+  {
+   "name": "undo.sr2",
+   "url": "./fixtures/semi-real/undo.sr2.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 60,
+   "durationMs": 1966.67,
+   "expected": "undo",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "aim-sweep.sr2",
+   "url": "./fixtures/semi-real/aim-sweep.sr2.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 108,
+   "durationMs": 3566.67,
+   "expected": "aim",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "click-other.sr2",
+   "url": "./fixtures/semi-real/click-other.sr2.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 61,
+   "durationMs": 2000,
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "mapped": true
+  },
+  {
+   "name": "null-rest.sr2",
+   "url": "./fixtures/semi-real/null-rest.sr2.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 90,
+   "durationMs": 2966.67,
+   "expected": "none",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "null-talk.sr2",
+   "url": "./fixtures/semi-real/null-talk.sr2.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 90,
+   "durationMs": 2966.67,
+   "expected": "none",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "grab-move.sr3",
+   "url": "./fixtures/semi-real/grab-move.sr3.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 75,
+   "durationMs": 2466.67,
+   "expected": "grab",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "scale.sr3",
+   "url": "./fixtures/semi-real/scale.sr3.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 63,
+   "durationMs": 2066.67,
+   "expected": "scale",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "explode.sr3",
+   "url": "./fixtures/semi-real/explode.sr3.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 46,
+   "durationMs": 1500,
+   "expected": "explode",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "clap.sr3",
+   "url": "./fixtures/semi-real/clap.sr3.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 45,
+   "durationMs": 1466.67,
+   "expected": "clap",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "wheel-pick.sr3",
+   "url": "./fixtures/semi-real/wheel-pick.sr3.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 91,
+   "durationMs": 3000,
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "mapped": true
+  },
+  {
+   "name": "undo.sr3",
+   "url": "./fixtures/semi-real/undo.sr3.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 60,
+   "durationMs": 1966.67,
+   "expected": "undo",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "aim-sweep.sr3",
+   "url": "./fixtures/semi-real/aim-sweep.sr3.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 108,
+   "durationMs": 3566.67,
+   "expected": "aim",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "click-other.sr3",
+   "url": "./fixtures/semi-real/click-other.sr3.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 61,
+   "durationMs": 2000,
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "mapped": true
+  },
+  {
+   "name": "null-rest.sr3",
+   "url": "./fixtures/semi-real/null-rest.sr3.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 90,
+   "durationMs": 2966.67,
+   "expected": "none",
+   "allowed": [],
+   "mapped": true
+  },
+  {
+   "name": "null-talk.sr3",
+   "url": "./fixtures/semi-real/null-talk.sr3.json",
+   "set": "semi-real",
+   "synthetic": false,
+   "frames": 90,
+   "durationMs": 2966.67,
+   "expected": "none",
+   "allowed": [],
+   "mapped": true
+  }
+ ],
+ "variants": [
+  "base",
+  "jitter-0.003",
+  "jitter-0.006",
+  "fps-15",
+  "fps-30",
+  "drop-10",
+  "drop-30",
+  "mirror"
+ ],
+ "sets": {
+  "semi-real": {
+   "label": "real human hand shapes (Kaggle ASL alphabet via the ASL project dataset), synthetic motion",
+   "clips": [
+    "grab-move.sr1",
+    "scale.sr1",
+    "explode.sr1",
+    "clap.sr1",
+    "wheel-pick.sr1",
+    "undo.sr1",
+    "aim-sweep.sr1",
+    "click-other.sr1",
+    "null-rest.sr1",
+    "null-talk.sr1",
+    "grab-move.sr2",
+    "scale.sr2",
+    "explode.sr2",
+    "clap.sr2",
+    "wheel-pick.sr2",
+    "undo.sr2",
+    "aim-sweep.sr2",
+    "click-other.sr2",
+    "null-rest.sr2",
+    "null-talk.sr2",
+    "grab-move.sr3",
+    "scale.sr3",
+    "explode.sr3",
+    "clap.sr3",
+    "wheel-pick.sr3",
+    "undo.sr3",
+    "aim-sweep.sr3",
+    "click-other.sr3",
+    "null-rest.sr3",
+    "null-talk.sr3"
+   ],
+   "perGesture": {
+    "grab": {
+     "clips": [
+      "grab-move.sr1",
+      "grab-move.sr2",
+      "grab-move.sr3"
+     ],
+     "runs": 24,
+     "fires": 24,
+     "misses": 0,
+     "falseFireRuns": 0,
+     "ttfMedianMs": 800,
+     "ttfMaxMs": 1017
+    },
+    "scale": {
+     "clips": [
+      "scale.sr1",
+      "scale.sr2",
+      "scale.sr3"
+     ],
+     "runs": 24,
+     "fires": 16,
+     "misses": 8,
+     "falseFireRuns": 1,
+     "ttfMedianMs": 900,
+     "ttfMaxMs": 950
+    },
+    "explode": {
+     "clips": [
+      "explode.sr1",
+      "explode.sr2",
+      "explode.sr3"
+     ],
+     "runs": 24,
+     "fires": 24,
+     "misses": 0,
+     "falseFireRuns": 0,
+     "ttfMedianMs": 700,
+     "ttfMaxMs": 733
+    },
+    "clap": {
+     "clips": [
+      "clap.sr1",
+      "clap.sr2",
+      "clap.sr3"
+     ],
+     "runs": 24,
+     "fires": 23,
+     "misses": 1,
+     "falseFireRuns": 24,
+     "ttfMedianMs": 867,
+     "ttfMaxMs": 933
+    },
+    "wheel": {
+     "clips": [
+      "wheel-pick.sr1",
+      "wheel-pick.sr2",
+      "wheel-pick.sr3"
+     ],
+     "runs": 24,
+     "fires": 22,
+     "misses": 2,
+     "falseFireRuns": 23,
+     "ttfMedianMs": 1167,
+     "ttfMaxMs": 1400
+    },
+    "undo": {
+     "clips": [
+      "undo.sr1",
+      "undo.sr2",
+      "undo.sr3"
+     ],
+     "runs": 24,
+     "fires": 24,
+     "misses": 0,
+     "falseFireRuns": 0,
+     "ttfMedianMs": 1167,
+     "ttfMaxMs": 1533
+    },
+    "aim": {
+     "clips": [
+      "aim-sweep.sr1",
+      "aim-sweep.sr2",
+      "aim-sweep.sr3"
+     ],
+     "runs": 24,
+     "fires": 24,
+     "misses": 0,
+     "falseFireRuns": 1,
+     "ttfMedianMs": 300,
+     "ttfMaxMs": 333
+    },
+    "click": {
+     "clips": [
+      "click-other.sr1",
+      "click-other.sr2",
+      "click-other.sr3"
+     ],
+     "runs": 24,
+     "fires": 22,
+     "misses": 2,
+     "falseFireRuns": 0,
+     "ttfMedianMs": 1033,
+     "ttfMaxMs": 1200
+    },
+    "none": {
+     "clips": [
+      "null-rest.sr1",
+      "null-talk.sr1",
+      "null-rest.sr2",
+      "null-talk.sr2",
+      "null-rest.sr3",
+      "null-talk.sr3"
+     ],
+     "runs": 48,
+     "fires": 0,
+     "misses": 0,
+     "falseFireRuns": 24,
+     "ttfMedianMs": null,
+     "ttfMaxMs": null
+    }
+   },
+   "falseFires": {
+    "grab": {
+     "runs": 1,
+     "clips": [
+      "aim-sweep.sr1"
+     ]
+    },
+    "tilt": {
+     "runs": 0,
+     "clips": []
+    },
+    "scale": {
+     "runs": 0,
+     "clips": []
+    },
+    "explode": {
+     "runs": 72,
+     "clips": [
+      "scale.sr1",
+      "clap.sr1",
+      "wheel-pick.sr1",
+      "null-talk.sr1",
+      "clap.sr2",
+      "wheel-pick.sr2",
+      "null-talk.sr2",
+      "clap.sr3",
+      "wheel-pick.sr3",
+      "null-talk.sr3"
+     ]
+    },
+    "clap": {
+     "runs": 0,
+     "clips": []
+    },
+    "click": {
+     "runs": 1,
+     "clips": [
+      "wheel-pick.sr3"
+     ]
+    },
+    "select": {
+     "runs": 0,
+     "clips": []
+    },
+    "wheel": {
+     "runs": 0,
+     "clips": []
+    },
+    "undo": {
+     "runs": 0,
+     "clips": []
+    },
+    "aim": {
+     "runs": 0,
+     "clips": []
+    }
+   },
+   "matrix": {
+    "rows": [
+     "grab",
+     "scale",
+     "explode",
+     "clap",
+     "wheel",
+     "undo",
+     "aim",
+     "click",
+     "none"
+    ],
+    "cols": [
+     "grab",
+     "tilt",
+     "scale",
+     "explode",
+     "clap",
+     "click",
+     "select",
+     "wheel",
+     "undo",
+     "aim",
+     "nothing"
+    ],
+    "counts": {
+     "grab": {
+      "grab": 24,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0
+     },
+     "scale": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 16,
+      "explode": 1,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 8
+     },
+     "explode": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 24,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0
+     },
+     "clap": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 24,
+      "clap": 23,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 1
+     },
+     "wheel": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 23,
+      "clap": 0,
+      "click": 1,
+      "select": 0,
+      "wheel": 22,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 2
+     },
+     "undo": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 24,
+      "aim": 0,
+      "nothing": 0
+     },
+     "aim": {
+      "grab": 1,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 24,
+      "nothing": 0
+     },
+     "click": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 22,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 2
+     },
+     "none": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 24,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 24
+     }
+    },
+    "runs": {
+     "grab": 24,
+     "scale": 24,
+     "explode": 24,
+     "clap": 24,
+     "wheel": 24,
+     "undo": 24,
+     "aim": 24,
+     "click": 24,
+     "none": 48
+    },
+    "rates": {
+     "grab": {
+      "grab": 1,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0
+     },
+     "scale": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0.667,
+      "explode": 0.042,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0.333
+     },
+     "explode": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 1,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0
+     },
+     "clap": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 1,
+      "clap": 0.958,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0.042
+     },
+     "wheel": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0.958,
+      "clap": 0,
+      "click": 0.042,
+      "select": 0,
+      "wheel": 0.917,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0.083
+     },
+     "undo": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 1,
+      "aim": 0,
+      "nothing": 0
+     },
+     "aim": {
+      "grab": 0.042,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 1,
+      "nothing": 0
+     },
+     "click": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 0.917,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0.083
+     },
+     "none": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0.5,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0.5
+     }
+    }
+   },
+   "byVariant": {
+    "base": {
+     "runs": 30,
+     "pass": 20,
+     "failed": [
+      "scale.sr1",
+      "clap.sr1",
+      "wheel-pick.sr1",
+      "null-talk.sr1",
+      "clap.sr2",
+      "wheel-pick.sr2",
+      "null-talk.sr2",
+      "clap.sr3",
+      "wheel-pick.sr3",
+      "null-talk.sr3"
+     ]
+    },
+    "jitter-0.003": {
+     "runs": 30,
+     "pass": 21,
+     "failed": [
+      "scale.sr1",
+      "clap.sr1",
+      "wheel-pick.sr1",
+      "null-talk.sr1",
+      "clap.sr2",
+      "null-talk.sr2",
+      "clap.sr3",
+      "wheel-pick.sr3",
+      "null-talk.sr3"
+     ]
+    },
+    "jitter-0.006": {
+     "runs": 30,
+     "pass": 19,
+     "failed": [
+      "scale.sr1",
+      "clap.sr1",
+      "wheel-pick.sr1",
+      "aim-sweep.sr1",
+      "null-talk.sr1",
+      "clap.sr2",
+      "wheel-pick.sr2",
+      "null-talk.sr2",
+      "clap.sr3",
+      "wheel-pick.sr3",
+      "null-talk.sr3"
+     ]
+    },
+    "fps-15": {
+     "runs": 30,
+     "pass": 20,
+     "failed": [
+      "scale.sr1",
+      "clap.sr1",
+      "wheel-pick.sr1",
+      "null-talk.sr1",
+      "clap.sr2",
+      "wheel-pick.sr2",
+      "null-talk.sr2",
+      "clap.sr3",
+      "wheel-pick.sr3",
+      "null-talk.sr3"
+     ]
+    },
+    "fps-30": {
+     "runs": 30,
+     "pass": 20,
+     "failed": [
+      "scale.sr1",
+      "clap.sr1",
+      "wheel-pick.sr1",
+      "null-talk.sr1",
+      "clap.sr2",
+      "wheel-pick.sr2",
+      "null-talk.sr2",
+      "clap.sr3",
+      "wheel-pick.sr3",
+      "null-talk.sr3"
+     ]
+    },
+    "drop-10": {
+     "runs": 30,
+     "pass": 19,
+     "failed": [
+      "scale.sr1",
+      "clap.sr1",
+      "wheel-pick.sr1",
+      "null-talk.sr1",
+      "clap.sr2",
+      "wheel-pick.sr2",
+      "null-talk.sr2",
+      "clap.sr3",
+      "wheel-pick.sr3",
+      "click-other.sr3",
+      "null-talk.sr3"
+     ]
+    },
+    "drop-30": {
+     "runs": 30,
+     "pass": 19,
+     "failed": [
+      "scale.sr1",
+      "clap.sr1",
+      "wheel-pick.sr1",
+      "null-talk.sr1",
+      "clap.sr2",
+      "wheel-pick.sr2",
+      "click-other.sr2",
+      "null-talk.sr2",
+      "clap.sr3",
+      "wheel-pick.sr3",
+      "null-talk.sr3"
+     ]
+    },
+    "mirror": {
+     "runs": 30,
+     "pass": 20,
+     "failed": [
+      "scale.sr1",
+      "clap.sr1",
+      "wheel-pick.sr1",
+      "null-talk.sr1",
+      "clap.sr2",
+      "wheel-pick.sr2",
+      "null-talk.sr2",
+      "clap.sr3",
+      "wheel-pick.sr3",
+      "null-talk.sr3"
+     ]
+    }
+   },
+   "gate": {
+    "pass": false,
+    "failures": [
+     "clap -> explode in 100% of runs (> 30%)",
+     "wheel -> explode in 96% of runs (> 30%)",
+     "none -> explode in 50% of runs (> 30%)",
+     "null clip null-talk.sr1 fired explode in 8/8 runs",
+     "null clip null-talk.sr2 fired explode in 8/8 runs",
+     "null clip null-talk.sr3 fired explode in 8/8 runs"
+    ],
+    "offDiagonalMax": 0.3
+   },
+   "poseReadings": {
+    "fist": {
+     "letters": "A/S",
+     "label": "Closed_Fist",
+     "n": 150,
+     "fist": 100,
+     "pinch": 0,
+     "pointer": 0
+    },
+    "open": {
+     "letters": "B",
+     "label": "Open_Palm",
+     "n": 150,
+     "fist": 0,
+     "pinch": 0,
+     "pointer": 0
+    },
+    "victory": {
+     "letters": "V",
+     "label": "Victory",
+     "n": 150,
+     "fist": 0,
+     "pinch": 0,
+     "pointer": 0
+    },
+    "pointer": {
+     "letters": "L/G",
+     "label": "None",
+     "n": 150,
+     "fist": 0,
+     "pinch": 3,
+     "pointer": 93
+    },
+    "pinch": {
+     "letters": "F",
+     "label": "None",
+     "n": 150,
+     "fist": 0,
+     "pinch": 90,
+     "pointer": 0
+    },
+    "thumbdown": {
+     "letters": "A",
+     "label": "Thumb_Down",
+     "n": 150,
+     "fist": 0,
+     "pinch": 0,
+     "pointer": 0
+    },
+    "pointer-D": {
+     "letters": "D",
+     "label": "None",
+     "n": 150,
+     "fist": 0,
+     "pinch": 9,
+     "pointer": 20
+    }
+   },
+   "motion": {
+    "jitterPalm": 0.0335,
+    "transitionFramesP50": 3,
+    "transitionFramesP90": 11,
+    "transitions": 3064,
+    "sequences": 300
+   }
+  },
+  "synthetic": {
+   "label": "synthetic hands (gesture-lab makeHand + gun-lab buildWorldHand), synthetic motion",
+   "clips": [
+    "grab-move",
+    "scale",
+    "explode",
+    "clap",
+    "wheel-pick",
+    "undo",
+    "aim-sweep",
+    "click-other",
+    "null-rest",
+    "null-talk"
+   ],
+   "perGesture": {
+    "grab": {
+     "clips": [
+      "grab-move"
+     ],
+     "runs": 8,
+     "fires": 8,
+     "misses": 0,
+     "falseFireRuns": 0,
+     "ttfMedianMs": 817,
+     "ttfMaxMs": 833
+    },
+    "scale": {
+     "clips": [
+      "scale"
+     ],
+     "runs": 8,
+     "fires": 8,
+     "misses": 0,
+     "falseFireRuns": 0,
+     "ttfMedianMs": 900,
+     "ttfMaxMs": 950
+    },
+    "explode": {
+     "clips": [
+      "explode"
+     ],
+     "runs": 8,
+     "fires": 8,
+     "misses": 0,
+     "falseFireRuns": 0,
+     "ttfMedianMs": 700,
+     "ttfMaxMs": 733
+    },
+    "clap": {
+     "clips": [
+      "clap"
+     ],
+     "runs": 8,
+     "fires": 7,
+     "misses": 1,
+     "falseFireRuns": 8,
+     "ttfMedianMs": 867,
+     "ttfMaxMs": 933
+    },
+    "wheel": {
+     "clips": [
+      "wheel-pick"
+     ],
+     "runs": 8,
+     "fires": 7,
+     "misses": 1,
+     "falseFireRuns": 8,
+     "ttfMedianMs": 1133,
+     "ttfMaxMs": 1133
+    },
+    "undo": {
+     "clips": [
+      "undo"
+     ],
+     "runs": 8,
+     "fires": 8,
+     "misses": 0,
+     "falseFireRuns": 0,
+     "ttfMedianMs": 967,
+     "ttfMaxMs": 1267
+    },
+    "aim": {
+     "clips": [
+      "aim-sweep"
+     ],
+     "runs": 8,
+     "fires": 8,
+     "misses": 0,
+     "falseFireRuns": 0,
+     "ttfMedianMs": 300,
+     "ttfMaxMs": 333
+    },
+    "click": {
+     "clips": [
+      "click-other"
+     ],
+     "runs": 8,
+     "fires": 7,
+     "misses": 1,
+     "falseFireRuns": 0,
+     "ttfMedianMs": 1033,
+     "ttfMaxMs": 1067
+    },
+    "none": {
+     "clips": [
+      "null-rest",
+      "null-talk"
+     ],
+     "runs": 16,
+     "fires": 0,
+     "misses": 0,
+     "falseFireRuns": 8,
+     "ttfMedianMs": null,
+     "ttfMaxMs": null
+    }
+   },
+   "falseFires": {
+    "grab": {
+     "runs": 0,
+     "clips": []
+    },
+    "tilt": {
+     "runs": 0,
+     "clips": []
+    },
+    "scale": {
+     "runs": 0,
+     "clips": []
+    },
+    "explode": {
+     "runs": 23,
+     "clips": [
+      "clap",
+      "wheel-pick",
+      "null-talk"
+     ]
+    },
+    "clap": {
+     "runs": 0,
+     "clips": []
+    },
+    "click": {
+     "runs": 1,
+     "clips": [
+      "wheel-pick"
+     ]
+    },
+    "select": {
+     "runs": 0,
+     "clips": []
+    },
+    "wheel": {
+     "runs": 0,
+     "clips": []
+    },
+    "undo": {
+     "runs": 0,
+     "clips": []
+    },
+    "aim": {
+     "runs": 0,
+     "clips": []
+    }
+   },
+   "matrix": {
+    "rows": [
+     "grab",
+     "scale",
+     "explode",
+     "clap",
+     "wheel",
+     "undo",
+     "aim",
+     "click",
+     "none"
+    ],
+    "cols": [
+     "grab",
+     "tilt",
+     "scale",
+     "explode",
+     "clap",
+     "click",
+     "select",
+     "wheel",
+     "undo",
+     "aim",
+     "nothing"
+    ],
+    "counts": {
+     "grab": {
+      "grab": 8,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0
+     },
+     "scale": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 8,
+      "explode": 0,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0
+     },
+     "explode": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 8,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0
+     },
+     "clap": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 8,
+      "clap": 7,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 1
+     },
+     "wheel": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 7,
+      "clap": 0,
+      "click": 1,
+      "select": 0,
+      "wheel": 7,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 1
+     },
+     "undo": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 8,
+      "aim": 0,
+      "nothing": 0
+     },
+     "aim": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 8,
+      "nothing": 0
+     },
+     "click": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 7,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 1
+     },
+     "none": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 8,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 8
+     }
+    },
+    "runs": {
+     "grab": 8,
+     "scale": 8,
+     "explode": 8,
+     "clap": 8,
+     "wheel": 8,
+     "undo": 8,
+     "aim": 8,
+     "click": 8,
+     "none": 16
+    },
+    "rates": {
+     "grab": {
+      "grab": 1,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0
+     },
+     "scale": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 1,
+      "explode": 0,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0
+     },
+     "explode": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 1,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0
+     },
+     "clap": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 1,
+      "clap": 0.875,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0.125
+     },
+     "wheel": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0.875,
+      "clap": 0,
+      "click": 0.125,
+      "select": 0,
+      "wheel": 0.875,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0.125
+     },
+     "undo": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 1,
+      "aim": 0,
+      "nothing": 0
+     },
+     "aim": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 1,
+      "nothing": 0
+     },
+     "click": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0,
+      "clap": 0,
+      "click": 0.875,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0.125
+     },
+     "none": {
+      "grab": 0,
+      "tilt": 0,
+      "scale": 0,
+      "explode": 0.5,
+      "clap": 0,
+      "click": 0,
+      "select": 0,
+      "wheel": 0,
+      "undo": 0,
+      "aim": 0,
+      "nothing": 0.5
+     }
+    }
+   },
+   "byVariant": {
+    "base": {
+     "runs": 10,
+     "pass": 7,
+     "failed": [
+      "clap",
+      "wheel-pick",
+      "null-talk"
+     ]
+    },
+    "jitter-0.003": {
+     "runs": 10,
+     "pass": 7,
+     "failed": [
+      "clap",
+      "wheel-pick",
+      "null-talk"
+     ]
+    },
+    "jitter-0.006": {
+     "runs": 10,
+     "pass": 7,
+     "failed": [
+      "clap",
+      "wheel-pick",
+      "null-talk"
+     ]
+    },
+    "fps-15": {
+     "runs": 10,
+     "pass": 7,
+     "failed": [
+      "clap",
+      "wheel-pick",
+      "null-talk"
+     ]
+    },
+    "fps-30": {
+     "runs": 10,
+     "pass": 7,
+     "failed": [
+      "clap",
+      "wheel-pick",
+      "null-talk"
+     ]
+    },
+    "drop-10": {
+     "runs": 10,
+     "pass": 6,
+     "failed": [
+      "clap",
+      "wheel-pick",
+      "click-other",
+      "null-talk"
+     ]
+    },
+    "drop-30": {
+     "runs": 10,
+     "pass": 7,
+     "failed": [
+      "clap",
+      "wheel-pick",
+      "null-talk"
+     ]
+    },
+    "mirror": {
+     "runs": 10,
+     "pass": 7,
+     "failed": [
+      "clap",
+      "wheel-pick",
+      "null-talk"
+     ]
+    }
+   },
+   "gate": {
+    "pass": false,
+    "failures": [
+     "clap -> explode in 100% of runs (> 30%)",
+     "wheel -> explode in 88% of runs (> 30%)",
+     "none -> explode in 50% of runs (> 30%)",
+     "null clip null-talk fired explode in 8/8 runs"
+    ],
+    "offDiagonalMax": 0.3
+   }
+  }
+ },
+ "gate": {
+  "pass": false,
+  "failures": [
+   "[semi-real] clap -> explode in 100% of runs (> 30%)",
+   "[semi-real] wheel -> explode in 96% of runs (> 30%)",
+   "[semi-real] none -> explode in 50% of runs (> 30%)",
+   "[semi-real] null clip null-talk.sr1 fired explode in 8/8 runs",
+   "[semi-real] null clip null-talk.sr2 fired explode in 8/8 runs",
+   "[semi-real] null clip null-talk.sr3 fired explode in 8/8 runs",
+   "[synthetic] clap -> explode in 100% of runs (> 30%)",
+   "[synthetic] wheel -> explode in 88% of runs (> 30%)",
+   "[synthetic] none -> explode in 50% of runs (> 30%)",
+   "[synthetic] null clip null-talk fired explode in 8/8 runs"
+  ]
+ },
+ "runs": [
+  {
+   "clip": "grab-move",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "base",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 817
+   },
+   "channels": {
+    "move": {
+     "tMs": 817,
+     "mag": "2.1cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.003",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 817
+   },
+   "channels": {
+    "move": {
+     "tMs": 817,
+     "mag": "2.1cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.006",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 800
+   },
+   "channels": {
+    "move": {
+     "tMs": 800,
+     "mag": "1.3cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-15",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 833
+   },
+   "channels": {
+    "move": {
+     "tMs": 833,
+     "mag": "1.8cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 38,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-30",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 817
+   },
+   "channels": {
+    "move": {
+     "tMs": 817,
+     "mag": "1.5cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-10",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 817
+   },
+   "channels": {
+    "move": {
+     "tMs": 817,
+     "mag": "1.1cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-30",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 817
+   },
+   "channels": {
+    "move": {
+     "tMs": 817,
+     "mag": "1.5cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "mirror",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 817
+   },
+   "channels": {
+    "move": {
+     "tMs": 817,
+     "mag": "2.1cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "base",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.003",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.006",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-15",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 933
+   },
+   "channels": {
+    "scale": {
+     "tMs": 933,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 32,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-30",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 917
+   },
+   "channels": {
+    "scale": {
+     "tMs": 917,
+     "mag": "×1.06"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-10",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-30",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 950
+   },
+   "channels": {
+    "scale": {
+     "tMs": 950,
+     "mag": "×1.08"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "mirror",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "base",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.07"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.003",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.07"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.006",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.07"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-15",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 733
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 23,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-30",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-10",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.08"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-30",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.07"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "mirror",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.07"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "clap",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "base",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.003",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.006",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 533,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 533,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-15",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 933
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 23,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-30",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 900
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-10",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-30",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "mirror",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "base",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1133,
+    "explode": 1317,
+    "aim": 1567
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1133,
+     "type": "open"
+    },
+    {
+     "t": 2433,
+     "type": "close",
+     "why": "pick"
+    },
+    {
+     "t": 2433,
+     "type": "pick",
+     "dir": "up"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.003",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1133,
+    "explode": 1317,
+    "aim": 1567
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1133,
+     "type": "open"
+    },
+    {
+     "t": 2433,
+     "type": "close",
+     "why": "pick"
+    },
+    {
+     "t": 2433,
+     "type": "pick",
+     "dir": "up"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.006",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1133,
+    "explode": 1317,
+    "aim": 1567
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.07"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1133,
+     "type": "open"
+    },
+    {
+     "t": 2433,
+     "type": "close",
+     "why": "pick"
+    },
+    {
+     "t": 2433,
+     "type": "pick",
+     "dir": "up"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-15",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1133,
+    "explode": 1467,
+    "aim": 1600
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1467,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1133,
+     "type": "open"
+    },
+    {
+     "t": 2467,
+     "type": "close",
+     "why": "pick"
+    },
+    {
+     "t": 2467,
+     "type": "pick",
+     "dir": "up"
+    }
+   ],
+   "frames": 46,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-30",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1133,
+    "explode": 1317,
+    "aim": 1567
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1133,
+     "type": "open"
+    },
+    {
+     "t": 2433,
+     "type": "close",
+     "why": "pick"
+    },
+    {
+     "t": 2433,
+     "type": "pick",
+     "dir": "up"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-10",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1033,
+    "explode": 1333,
+    "aim": 1567
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1333,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1033,
+     "type": "open"
+    },
+    {
+     "t": 2433,
+     "type": "close",
+     "why": "pick"
+    },
+    {
+     "t": 2433,
+     "type": "pick",
+     "dir": "up"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-30",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "aim": 1567,
+    "click": 2433
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 2433,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 91,
+   "wrong": [
+    "click"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "mirror",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1133,
+    "explode": 1317,
+    "aim": 1567
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1133,
+     "type": "open"
+    },
+    {
+     "t": 2433,
+     "type": "close",
+     "why": "pick"
+    },
+    {
+     "t": 2433,
+     "type": "pick",
+     "dir": "up"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "undo",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "base",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 967
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.003",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 967
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.006",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 967
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-15",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1000
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 30,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-30",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 967
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-10",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1033
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-30",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1267
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "mirror",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 967
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "base",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.003",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.006",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-15",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 333
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 54,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-30",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-10",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-30",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "mirror",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "base",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.003",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.006",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-15",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 333,
+    "select": 650,
+    "click": 1067
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 650,
+     "via": "hold"
+    },
+    {
+     "t": 1067,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 31,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-30",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-10",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": false
+  },
+  {
+   "clip": "click-other",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-30",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "mirror",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "base",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.003",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.006",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-15",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-10",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "mirror",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-talk",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "base",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 250
+   },
+   "channels": {
+    "explode": {
+     "tMs": 250,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.003",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 250
+   },
+   "channels": {
+    "explode": {
+     "tMs": 250,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "jitter-0.006",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 217
+   },
+   "channels": {
+    "explode": {
+     "tMs": 217,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-15",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 267
+   },
+   "channels": {
+    "explode": {
+     "tMs": 267,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "fps-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 233
+   },
+   "channels": {
+    "explode": {
+     "tMs": 233,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-10",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 250
+   },
+   "channels": {
+    "explode": {
+     "tMs": 250,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "drop-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 367
+   },
+   "channels": {
+    "explode": {
+     "tMs": 367,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk",
+   "set": "synthetic",
+   "synthetic": true,
+   "variant": "mirror",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 250
+   },
+   "channels": {
+    "explode": {
+     "tMs": 250,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "grab-move.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 817
+   },
+   "channels": {
+    "move": {
+     "tMs": 817,
+     "mag": "1.7cm"
+    },
+    "spin": {
+     "tMs": 1400,
+     "mag": "3.0°"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 817
+   },
+   "channels": {
+    "move": {
+     "tMs": 817,
+     "mag": "1.8cm"
+    },
+    "spin": {
+     "tMs": 867,
+     "mag": "2.3°"
+    },
+    "push": {
+     "tMs": 933,
+     "mag": "1.1cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 800
+   },
+   "channels": {
+    "move": {
+     "tMs": 800,
+     "mag": "1.1cm"
+    },
+    "spin": {
+     "tMs": 1083,
+     "mag": "2.2°"
+    },
+    "push": {
+     "tMs": 1167,
+     "mag": "-1.1cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 833
+   },
+   "channels": {
+    "move": {
+     "tMs": 833,
+     "mag": "1.3cm"
+    },
+    "spin": {
+     "tMs": 1450,
+     "mag": "2.4°"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 38,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 817
+   },
+   "channels": {
+    "move": {
+     "tMs": 817,
+     "mag": "1.1cm"
+    },
+    "spin": {
+     "tMs": 900,
+     "mag": "2.1°"
+    },
+    "push": {
+     "tMs": 1083,
+     "mag": "1.1cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 817
+   },
+   "channels": {
+    "move": {
+     "tMs": 817,
+     "mag": "1.7cm"
+    },
+    "spin": {
+     "tMs": 1400,
+     "mag": "3.0°"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 1017
+   },
+   "channels": {
+    "move": {
+     "tMs": 1017,
+     "mag": "1.1cm"
+    },
+    "spin": {
+     "tMs": 1433,
+     "mag": "2.1°"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 817
+   },
+   "channels": {
+    "move": {
+     "tMs": 817,
+     "mag": "1.7cm"
+    },
+    "spin": {
+     "tMs": 1400,
+     "mag": "-3.0°"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": false
+  },
+  {
+   "clip": "scale.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "explode": 2083
+   },
+   "channels": {
+    "explode": {
+     "tMs": 2083,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "scale.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": false
+  },
+  {
+   "clip": "scale.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 32,
+   "wrong": [],
+   "pass": false
+  },
+  {
+   "clip": "scale.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": false
+  },
+  {
+   "clip": "scale.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": false
+  },
+  {
+   "clip": "scale.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": false
+  },
+  {
+   "clip": "scale.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": false
+  },
+  {
+   "clip": "explode.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.07"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.06"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 683
+   },
+   "channels": {
+    "explode": {
+     "tMs": 683,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 733
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 23,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.06"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.07"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "clap.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 750,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 750,
+     "mag": "stretch 1.08"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 550,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 550,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 300,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 300,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 933
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 23,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 900
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 450,
+    "clap": 933
+   },
+   "channels": {
+    "explode": {
+     "tMs": 450,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 933
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 750,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 750,
+     "mag": "stretch 1.08"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1133,
+    "explode": 1317,
+    "aim": 1800
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1133,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1133,
+    "explode": 1333,
+    "aim": 1800
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1333,
+     "mag": "stretch 1.06"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1133,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1133,
+    "explode": 1333,
+    "aim": 1767
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1333,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1133,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1133,
+    "explode": 1350,
+    "aim": 1800
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1350,
+     "mag": "stretch 1.06"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1133,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 46,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1133,
+    "explode": 1333,
+    "aim": 1800
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1333,
+     "mag": "stretch 1.06"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1133,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1233,
+    "explode": 1333,
+    "aim": 1833
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1333,
+     "mag": "stretch 1.06"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1233,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "explode": 1350,
+    "wheel": 1400,
+    "aim": 1900
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1350,
+     "mag": "stretch 1.07"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1400,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1133,
+    "explode": 1317,
+    "aim": 1800
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1133,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "undo.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1133
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1133
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1133
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1200
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 30,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1167
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1167
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1333
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1133
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300,
+    "grab": 1917
+   },
+   "channels": {
+    "move": {
+     "tMs": 1917,
+     "mag": "1.9cm"
+    },
+    "spin": {
+     "tMs": 2033,
+     "mag": "-2.7°"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [
+    "grab"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "aim-sweep.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 333
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 54,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 333,
+    "select": 650,
+    "click": 1067
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 650,
+     "via": "hold"
+    },
+    {
+     "t": 1067,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 31,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 683,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 683,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-talk.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 250
+   },
+   "channels": {
+    "explode": {
+     "tMs": 250,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 233
+   },
+   "channels": {
+    "explode": {
+     "tMs": 233,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 233
+   },
+   "channels": {
+    "explode": {
+     "tMs": 233,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 300
+   },
+   "channels": {
+    "explode": {
+     "tMs": 300,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 267
+   },
+   "channels": {
+    "explode": {
+     "tMs": 267,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 250
+   },
+   "channels": {
+    "explode": {
+     "tMs": 250,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 250
+   },
+   "channels": {
+    "explode": {
+     "tMs": 250,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr1",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 250
+   },
+   "channels": {
+    "explode": {
+     "tMs": 250,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "grab-move.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 683
+   },
+   "channels": {
+    "spin": {
+     "tMs": 683,
+     "mag": "2.0°"
+    },
+    "move": {
+     "tMs": 800,
+     "mag": "1.1cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 667
+   },
+   "channels": {
+    "spin": {
+     "tMs": 667,
+     "mag": "2.2°"
+    },
+    "move": {
+     "tMs": 800,
+     "mag": "1.1cm"
+    },
+    "push": {
+     "tMs": 1150,
+     "mag": "-1.1cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 750
+   },
+   "channels": {
+    "push": {
+     "tMs": 750,
+     "mag": "-1.4cm"
+    },
+    "move": {
+     "tMs": 800,
+     "mag": "1.0cm"
+    },
+    "spin": {
+     "tMs": 800,
+     "mag": "2.1°"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 800
+   },
+   "channels": {
+    "spin": {
+     "tMs": 800,
+     "mag": "-2.3°"
+    },
+    "move": {
+     "tMs": 833,
+     "mag": "1.6cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 38,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 800
+   },
+   "channels": {
+    "spin": {
+     "tMs": 800,
+     "mag": "-2.1°"
+    },
+    "move": {
+     "tMs": 817,
+     "mag": "1.5cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 717
+   },
+   "channels": {
+    "spin": {
+     "tMs": 717,
+     "mag": "2.1°"
+    },
+    "move": {
+     "tMs": 800,
+     "mag": "1.1cm"
+    },
+    "push": {
+     "tMs": 1100,
+     "mag": "-1.0cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 817
+   },
+   "channels": {
+    "move": {
+     "tMs": 817,
+     "mag": "1.4cm"
+    },
+    "push": {
+     "tMs": 1367,
+     "mag": "1.0cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 683
+   },
+   "channels": {
+    "spin": {
+     "tMs": 683,
+     "mag": "-2.0°"
+    },
+    "move": {
+     "tMs": 800,
+     "mag": "1.1cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 933
+   },
+   "channels": {
+    "scale": {
+     "tMs": 933,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 32,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 917
+   },
+   "channels": {
+    "scale": {
+     "tMs": 917,
+     "mag": "×1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.07"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.08"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.08"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 733
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 23,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.06"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.06"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.07"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "clap.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 667,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 667,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 183,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 183,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 317,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 317,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 433,
+    "clap": 933
+   },
+   "channels": {
+    "explode": {
+     "tMs": 433,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 23,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 400,
+    "clap": 900
+   },
+   "channels": {
+    "explode": {
+     "tMs": 400,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 750,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 750,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 667
+   },
+   "channels": {
+    "explode": {
+     "tMs": 667,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 667,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 667,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "aim": 1067,
+    "wheel": 1267,
+    "explode": 1317
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1267,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "aim": 1067,
+    "wheel": 1267
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1267,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 91,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "wheel-pick.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1267,
+    "aim": 1300,
+    "explode": 1317
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1267,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "aim": 1133,
+    "wheel": 1267,
+    "explode": 1350
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1350,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1267,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 46,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "aim": 1200,
+    "wheel": 1267,
+    "explode": 1333
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1333,
+     "mag": "stretch 1.06"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1267,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "aim": 1133,
+    "wheel": 1200,
+    "explode": 1317
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1200,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "aim": 833,
+    "explode": 1317
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.06"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "aim": 1067,
+    "wheel": 1267,
+    "explode": 1317
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1267,
+     "type": "open"
+    },
+    {
+     "t": 3583,
+     "type": "close",
+     "why": "api"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "undo.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1167
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1167
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1167
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1200
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 30,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1167
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1267
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1533
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1167
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 333
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 54,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 333,
+    "select": 650,
+    "click": 1067
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 650,
+     "via": "hold"
+    },
+    {
+     "t": 1067,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 31,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": false
+  },
+  {
+   "clip": "click-other.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1033
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1033,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-talk.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 250
+   },
+   "channels": {
+    "explode": {
+     "tMs": 250,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 233
+   },
+   "channels": {
+    "explode": {
+     "tMs": 233,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 217
+   },
+   "channels": {
+    "explode": {
+     "tMs": 217,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 333
+   },
+   "channels": {
+    "explode": {
+     "tMs": 333,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 300
+   },
+   "channels": {
+    "explode": {
+     "tMs": 300,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 250
+   },
+   "channels": {
+    "explode": {
+     "tMs": 250,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 433
+   },
+   "channels": {
+    "explode": {
+     "tMs": 433,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr2",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 250
+   },
+   "channels": {
+    "explode": {
+     "tMs": 250,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "grab-move.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 800
+   },
+   "channels": {
+    "move": {
+     "tMs": 800,
+     "mag": "1.3cm"
+    },
+    "spin": {
+     "tMs": 1650,
+     "mag": "-2.1°"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 800
+   },
+   "channels": {
+    "move": {
+     "tMs": 800,
+     "mag": "1.0cm"
+    },
+    "push": {
+     "tMs": 1533,
+     "mag": "1.3cm"
+    },
+    "spin": {
+     "tMs": 1717,
+     "mag": "-2.0°"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 717
+   },
+   "channels": {
+    "spin": {
+     "tMs": 717,
+     "mag": "-2.0°"
+    },
+    "move": {
+     "tMs": 800,
+     "mag": "1.5cm"
+    },
+    "push": {
+     "tMs": 967,
+     "mag": "-1.1cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 783
+   },
+   "channels": {
+    "spin": {
+     "tMs": 783,
+     "mag": "2.4°"
+    },
+    "move": {
+     "tMs": 817,
+     "mag": "1.1cm"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 38,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 800
+   },
+   "channels": {
+    "move": {
+     "tMs": 800,
+     "mag": "1.1cm"
+    },
+    "spin": {
+     "tMs": 1450,
+     "mag": "2.1°"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 883
+   },
+   "channels": {
+    "move": {
+     "tMs": 883,
+     "mag": "1.3cm"
+    },
+    "spin": {
+     "tMs": 1517,
+     "mag": "2.0°"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 800
+   },
+   "channels": {
+    "move": {
+     "tMs": 800,
+     "mag": "1.0cm"
+    },
+    "push": {
+     "tMs": 1583,
+     "mag": "1.0cm"
+    },
+    "spin": {
+     "tMs": 1800,
+     "mag": "2.4°"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "grab-move.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "grab",
+   "allowed": [],
+   "fired": {
+    "grab": 800
+   },
+   "channels": {
+    "move": {
+     "tMs": 800,
+     "mag": "1.3cm"
+    },
+    "spin": {
+     "tMs": 1650,
+     "mag": "2.1°"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 75,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 950
+   },
+   "channels": {
+    "scale": {
+     "tMs": 950,
+     "mag": "×1.08"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 32,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 917
+   },
+   "channels": {
+    "scale": {
+     "tMs": 917,
+     "mag": "×1.06"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 917
+   },
+   "channels": {
+    "scale": {
+     "tMs": 917,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "scale.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "scale",
+   "allowed": [],
+   "fired": {
+    "scale": 900
+   },
+   "channels": {
+    "scale": {
+     "tMs": 900,
+     "mag": "×1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 63,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.08"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.07"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.08"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 733
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 23,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.06"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.08"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "explode.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "explode",
+   "allowed": [],
+   "fired": {
+    "explode": 700
+   },
+   "channels": {
+    "explode": {
+     "tMs": 700,
+     "mag": "stretch 1.08"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 46,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "clap.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 617,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 617,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 933
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 23,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 900
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "clap.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "clap",
+   "allowed": [],
+   "fired": {
+    "explode": 733,
+    "clap": 867
+   },
+   "channels": {
+    "explode": {
+     "tMs": 733,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1167,
+    "explode": 1317,
+    "aim": 1600
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1167,
+     "type": "open"
+    },
+    {
+     "t": 2533,
+     "type": "close",
+     "why": "pick"
+    },
+    {
+     "t": 2533,
+     "type": "pick",
+     "dir": "up"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1167,
+    "explode": 1317,
+    "aim": 1600
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1167,
+     "type": "open"
+    },
+    {
+     "t": 2533,
+     "type": "close",
+     "why": "pick"
+    },
+    {
+     "t": 2533,
+     "type": "pick",
+     "dir": "up"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1167,
+    "explode": 1317,
+    "aim": 1600
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.06"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1167,
+     "type": "open"
+    },
+    {
+     "t": 2533,
+     "type": "close",
+     "why": "pick"
+    },
+    {
+     "t": 2533,
+     "type": "pick",
+     "dir": "up"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1133,
+    "explode": 1167,
+    "aim": 1600
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1167,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1133,
+     "type": "open"
+    },
+    {
+     "t": 2533,
+     "type": "close",
+     "why": "pick"
+    },
+    {
+     "t": 2533,
+     "type": "pick",
+     "dir": "up"
+    }
+   ],
+   "frames": 46,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "explode": 350,
+    "wheel": 1167,
+    "aim": 1600
+   },
+   "channels": {
+    "explode": {
+     "tMs": 350,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1167,
+     "type": "open"
+    },
+    {
+     "t": 2533,
+     "type": "close",
+     "why": "pick"
+    },
+    {
+     "t": 2533,
+     "type": "pick",
+     "dir": "up"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "explode": 1317,
+    "aim": 1633,
+    "click": 2533
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.06"
+    }
+   },
+   "clicks": [
+    {
+     "t": 2533,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 91,
+   "wrong": [
+    "explode",
+    "click"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1267,
+    "explode": 1317,
+    "aim": 1600
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1267,
+     "type": "open"
+    },
+    {
+     "t": 2533,
+     "type": "close",
+     "why": "pick"
+    },
+    {
+     "t": 2533,
+     "type": "pick",
+     "dir": "up"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "wheel-pick.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "wheel",
+   "allowed": [
+    "aim"
+   ],
+   "fired": {
+    "wheel": 1167,
+    "explode": 1317,
+    "aim": 1600
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1317,
+     "mag": "stretch 1.05"
+    }
+   },
+   "clicks": [],
+   "wheel": [
+    {
+     "t": 1167,
+     "type": "open"
+    },
+    {
+     "t": 2533,
+     "type": "close",
+     "why": "pick"
+    },
+    {
+     "t": 2533,
+     "type": "pick",
+     "dir": "up"
+    }
+   ],
+   "frames": 91,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "undo.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 967
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 967
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 967
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1000
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 30,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 967
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1067
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 1300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "undo.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "undo",
+   "allowed": [],
+   "fired": {
+    "undo": 967
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 60,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 333
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 54,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "aim-sweep.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "aim",
+   "allowed": [],
+   "fired": {
+    "aim": 300
+   },
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 108,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1167
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1167,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1167
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1167,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1167
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1167,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 333,
+    "select": 650,
+    "click": 1200
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 650,
+     "via": "hold"
+    },
+    {
+     "t": 1200,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 31,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1200
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1200,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 683
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 683,
+     "via": "hold"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": false
+  },
+  {
+   "clip": "click-other.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1167
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1167,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "click-other.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "click",
+   "allowed": [
+    "aim",
+    "select"
+   ],
+   "fired": {
+    "aim": 300,
+    "select": 667,
+    "click": 1167
+   },
+   "channels": {},
+   "clicks": [
+    {
+     "t": 667,
+     "via": "hold"
+    },
+    {
+     "t": 1167,
+     "via": "other-pinch"
+    }
+   ],
+   "wheel": [],
+   "frames": 61,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-rest.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "none",
+   "allowed": [],
+   "fired": {},
+   "channels": {},
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [],
+   "pass": true
+  },
+  {
+   "clip": "null-talk.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "base",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 217
+   },
+   "channels": {
+    "explode": {
+     "tMs": 217,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.003",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 217
+   },
+   "channels": {
+    "explode": {
+     "tMs": 217,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "jitter-0.006",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 233
+   },
+   "channels": {
+    "explode": {
+     "tMs": 233,
+     "mag": "stretch 1.07"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-15",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 283
+   },
+   "channels": {
+    "explode": {
+     "tMs": 283,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 45,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "fps-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 250
+   },
+   "channels": {
+    "explode": {
+     "tMs": 250,
+     "mag": "stretch 1.04"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-10",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 217
+   },
+   "channels": {
+    "explode": {
+     "tMs": 217,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "drop-30",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 1183
+   },
+   "channels": {
+    "explode": {
+     "tMs": 1183,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  },
+  {
+   "clip": "null-talk.sr3",
+   "set": "semi-real",
+   "synthetic": false,
+   "variant": "mirror",
+   "expected": "none",
+   "allowed": [],
+   "fired": {
+    "explode": 217
+   },
+   "channels": {
+    "explode": {
+     "tMs": 217,
+     "mag": "stretch 1.03"
+    }
+   },
+   "clicks": [],
+   "wheel": [],
+   "frames": 90,
+   "wrong": [
+    "explode"
+   ],
+   "pass": false
+  }
+ ],
+ "runtimeMs": 214,
+ "comparedTo": "docs/lab/gestures/report.json (2026-10-01T21:43:56.699Z)"
+}

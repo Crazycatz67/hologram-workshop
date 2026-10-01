@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:," />
+  <title>Gesture Replay Lab</title>
+  <style>
+    html, body { margin: 0; background: #05070a; color: #c9dcec; }
+    body { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 16px; }
+    #status { color: #4fd1ff; margin-bottom: 12px; }
+    pre { white-space: pre-wrap; }
+    /* The tool wheel is driven for real (toolWheel.js) but nobody needs to see it here. */
+    #wheel-host { position: fixed; left: 0; top: 0; width: 0; height: 0; overflow: hidden; visibility: hidden; }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="status">running… (replaying recorded clips + fixtures, no camera)</div>
+  <pre id="out"></pre>
+  <div id="wheel-host" aria-hidden="true"></div>
+  <script type="module" src="./replay-lab.js"></script>
+</body>
+</html>
