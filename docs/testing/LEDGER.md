@@ -343,3 +343,22 @@ Findings: (1) gesture-lab tilt bleed + roll 180 (possibly Euler gimbal artefact 
 12. Open on your phone (same Wi-Fi, http://<Mac IP>:8080/). Expected: no sideways scroll, menu opens, buttons reach gesture demo and Platform.
 13. On the Mac, scroll the cards. Expected: feature cards animate; viewer link goes to /viewer.html.
 Send back: pass/fail per step number (1-13), plus a note on tilt flip and whether the hand lags.
+
+## Commit-gate pass 5, 2026-10-01 (Timmy), tree on cde7592 + dirty (tool wheel, tilt limit 75, games hub/play/paint/chair/tower/maze, tester tour), own :8099 + own headless Chrome (CDP :9399, 1460x812, rec=off for suites). tower/maze included after Cody-GM finished.
+
+| Check | Before (pass 4) | Now | Status |
+| --- | --- | --- | --- |
+| test.html | 345/0 | 346/0 | GREEN |
+| toolwheel-test (new) | n/a | 30/0 | GREEN |
+| ring / library / p5 / polygon | 74 / 72 / 24 / 43 | 74 / 72 / 24 / 43 / 0 fail (library: 2 console lines = its deliberate 404/blob negative tests) | GREEN |
+| platform hands-test | 55/0 | 55/0 on 3 warm runs; 54/1 (B4) on the first load of a fresh browser profile (2 of 2 fresh profiles; the second load passed), see flag | GREEN, B4 flaky |
+| handui / hand-model | 28 / 24 | 28/0 / 24/0 | GREEN |
+| safety-test | 5/5 | ALL PASS | GREEN |
+| labs | | holdgate 19/19, gun 45/0 (+3 info), smoothing done, gesture-lab 7 gestures fire, no bleed; tilt row p-70.3/r0 at 10-60 fps (pass 4 flag spin bleed 180 / roll 180 is GONE) | GREEN |
+| testguide node check (scratch script, both modes) | 370/0, 44 steps | 553/0: dev 44 steps, tour 35 steps (+TG11 wheel step, tour only); RUN_STEPS follows mode; throwing storage ok | GREEN |
+| tester tour | n/a | guide.html Tour button -> state mode tour/active, dock shows on guide + hologram + platform + hands, none on landing/demos (by design); rating 4 saves and survives reload | GREEN |
+| games by real mouse/keys | n/a | paint WIN 4 s; maze WIN 10 s (arrow keys); tower WIN 21 s (3 blocks to the top, needs care: wrong drop spot collapses it); chair WIN in 6 of 9 scripted attempts, see flag. 0 console errors, 0 flashes/s (screenshot sampling ~5 Hz, headless) | GREEN, flag |
+| console sweep (0 errors) | 8 pages | index, viewer, about, hologram, hands, platform, guide (dev+tour), demos/index, play paint/chair/tower/maze | GREEN |
+
+Flags: (1) hands-test B4 is FLAKY not real: on a cold browser profile the three-mesh-bvh CDN module isn't loaded within the test's 1 s wait (built=0); app falls back to a plain raycast. Test should poll longer (platform/hands-test.js:157). (2) W key opens the tool wheel on hologram.html, but it closes itself after ~0.7 s ('rest', toolWheel.js WHEEL.restMs, point() with no hands); a click within 0.7 s works (Tape picked). Mouse/keyboard users get no time. Platform W needs the camera runtime (null otherwise). (3) Rebuild the chair: in 3 of 9 scripted mouse runs the part "runner - left" ended unmovable (drags did nothing, dist stuck); never reproduced with extra logging on, so driver timing is possible; not confirmed as a game bug.
+Not verified: real hands, wheel by hand, feel of the 75 degree limit, photosafety by eye.
