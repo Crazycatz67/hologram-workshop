@@ -144,6 +144,15 @@ export function isFistLike(gesture, landmarks, aspect = 1, { pointer, worldLandm
   return false;
 }
 
+// Explode's pose is two RELAXED open hands. These MediaPipe labels are deliberate poses of
+// their own (✌ opens the tool wheel, ☝ aims, 👎 undoes), so a hand reading one of them is
+// never "open" for explode, even though none of them is a fist or a pinch (replay-lab
+// 2026-10-01: ✌ + a relaxed other hand armed explode in 88-96% of wheel runs).
+export const NOT_OPEN_GESTURES = new Set(['Victory', 'Pointing_Up', 'Thumb_Down']);
+export function isOpenForExplode(hand) {
+  return !!hand && !NOT_OPEN_GESTURES.has(hand.gesture) && hand.pointer?.gun !== true;
+}
+
 // One hand's pointer state, in the small shape the hand object carries (hand.pointer). The
 // full feature set stays in gunPose.js; the pages only need the verdict and, for the live
 // readout, the first failed check.

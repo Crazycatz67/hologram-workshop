@@ -336,6 +336,81 @@ async function main() {
     m.reset();
   });
 
+  // Explode bleed (replay-lab 2026-10-01): clap, ✌ + a relaxed hand and "talking hands" all
+  // stretched the model past gesture-lab's 3% "visible" line. Explode now needs relaxed open
+  // hands (never ✌/☝/👎) AND a deliberate spread from a stable start before it moves anything.
+  group('Explode bleed — only a deliberate spread explodes (replay-lab)', () => {
+    const m = createManipulator(object, camera);
+    const as = (h, gesture) => ({ ...h, gesture });
+    const stretchOf = () => Math.max(object.scale.x, object.scale.y) / Math.min(object.scale.x, object.scale.y);
+    checkTrue('isOpenForExplode: ✌ / ☝ / 👎 are never open; Open_Palm and None are',
+      ['Victory', 'Pointing_Up', 'Thumb_Down'].every((g) => !gestures.isOpenForExplode?.({ gesture: g })) &&
+      ['Open_Palm', 'None'].every((g) => gestures.isOpenForExplode?.({ gesture: g })));
+
+    // ✌ + a relaxed open hand, the ✌ hand moving away fast (as when it goes on to aim).
+    m.reset();
+    m.configure({ channels: ALL_CHANNELS, sensitivity: 1, momentum: false, triggerFrames: 3 });
+    let t = 1000;
+    const seen = new Set();
+    for (let i = 0; i < 20; i++) { seen.add(m.update([hand(0.3, 0.6, 0, 'open'), as(hand(0.55, 0.5, 0, 'open'), 'Victory')], 1.78, t)); t += 16.7; }
+    for (let i = 1; i <= 25; i++) { seen.add(m.update([hand(0.3, 0.6, 0, 'open'), as(hand(0.55 + 0.012 * i, 0.5, 0, 'open'), 'Victory')], 1.78, t)); t += 16.7; }
+    checkTrue('✌ + a relaxed open hand never explodes', !seen.has(MODE.EXPLODE) && stretchOf() < 1.03,
+      `modes ${[...seen].join(',')}, stretch ${stretchOf().toFixed(3)}`);
+
+    // Clap on a stretched model: the closing hands must not squash it before the reset.
+    m.reset();
+    m.configure({ channels: ALL_CHANNELS, sensitivity: 1, momentum: false, triggerFrames: 3 });
+    object.scale.x *= 1.3;
+    t = 1000;
+    let minX = object.scale.x;
+    const x0 = object.scale.x;
+    let reset = false;
+    for (let i = 0; i < 20; i++) { m.update([hand(0.20, 0.5, 0, 'open'), hand(0.80, 0.5, 0, 'open')], 1.78, t); t += 16.7; minX = Math.min(minX, object.scale.x); }
+    for (let i = 1; i <= 12 && !reset; i++) {
+      const sep = 0.60 + (0.06 - 0.60) * (i / 12);
+      m.update([hand(0.5 - sep / 2, 0.5, 0, 'open'), hand(0.5 + sep / 2, 0.5, 0, 'open')], 1.78, t);
+      t += 16.7;
+      if (Math.abs(object.scale.x - 1) < 1e-6) reset = true; else minX = Math.min(minX, object.scale.x);
+    }
+    checkTrue('a clap resets a stretched model without squashing it first', reset && minX > x0 * 0.97,
+      `reset=${reset}, lowest scale.x before reset ${minX.toFixed(3)} of ${x0.toFixed(3)}`);
+
+    // Talking hands: two raised, loosely open hands wandering (±6% of the frame, ~1 Hz) for 3 s.
+    // The old code stretched the model to 1.26 here.
+    m.reset();
+    m.configure({ channels: ALL_CHANNELS, sensitivity: 1, momentum: false, triggerFrames: 3 });
+    t = 1000;
+    let talkMax = 1;
+    for (let i = 0; i < 180; i++) {
+      const u = (2 * i) / 180;
+      const w = (f, p) => 0.06 * Math.sin(u * f + p);
+      m.update([hand(0.36 + w(9, 0), 0.6 + w(7, 1), 0, 'open'), hand(0.64 + w(8, 2), 0.6 + w(11, 3), 0, 'open')], 1.78, t);
+      t += 16.7;
+      talkMax = Math.max(talkMax, stretchOf());
+    }
+    checkTrue('"talking hands" (wandering open hands) never stretch the model', talkMax < 1.03,
+      `peak stretch ${talkMax.toFixed(3)}`);
+
+    // Holding still for 1 s and then a deliberate spread still explodes, with all channels on.
+    m.reset();
+    m.configure({ channels: ALL_CHANNELS, sensitivity: 1, momentum: false, triggerFrames: 3 });
+    t = 1000;
+    for (let i = 0; i < 60; i++) { m.update([hand(0.45, 0.5, 0, 'open'), hand(0.55, 0.5, 0, 'open')], 1.78, t); t += 16.7; }
+    for (let i = 1; i <= 25; i++) { m.update([hand(0.45 - 0.008 * i, 0.5, 0, 'open'), hand(0.55 + 0.008 * i, 0.5, 0, 'open')], 1.78, t); t += 16.7; }
+    checkTrue('a still hold then a deliberate spread still explodes (all channels on)', object.scale.x > 1.3,
+      `scale.x=${object.scale.x.toFixed(2)}`);
+
+    // A SLOW but wide spread (together -> wide apart over 1.5 s) still explodes, by distance.
+    m.reset();
+    m.configure({ channels: ALL_CHANNELS, sensitivity: 1, momentum: false, triggerFrames: 3 });
+    t = 1000;
+    for (let i = 0; i < 30; i++) { m.update([hand(0.45, 0.5, 0, 'open'), hand(0.55, 0.5, 0, 'open')], 1.78, t); t += 33.3; }
+    for (let i = 1; i <= 45; i++) { m.update([hand(0.45 - 0.2 * i / 45, 0.5, 0, 'open'), hand(0.55 + 0.2 * i / 45, 0.5, 0, 'open')], 1.78, t); t += 33.3; }
+    for (let i = 0; i < 15; i++) { m.update([hand(0.25, 0.5, 0, 'open'), hand(0.75, 0.5, 0, 'open')], 1.78, t); t += 33.3; }
+    checkTrue('a slow (1.5 s) but wide spread still explodes', object.scale.x > 1.3, `scale.x=${object.scale.x.toFixed(2)}`);
+    m.reset();
+  });
+
   group('Mode-switch rigidity — an active gesture resists a brief interruption', () => {
     // Reported live as "two hands, it breaks out": mid-tilt, a single misread frame where
     // the second (open) hand briefly LOOKED like it was pinching was enough to hijack

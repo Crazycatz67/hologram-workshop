@@ -31,6 +31,9 @@ you need.
 - Inferred geometry is always visibly marked; the measured scan is never altered.
 - Free and local only: no paid APIs, no build step, three.js r161 pinned.
 - Bugs go in `BUGS.md` with track tags `[A]`/`[B]`/`[A-v1]`; never renumber.
+- **Never turn on the owner's real webcam.** A headless Chrome that may call getUserMedia must use BOTH
+  `--use-fake-ui-for-media-stream` AND `--use-fake-device-for-media-stream` (fake-ui alone grants the
+  REAL camera; incident 2026-10-01).
 - Never commit, push or send. The overseer commits after Timmy's GREEN.
 
 ## Current state (2026-10-01)

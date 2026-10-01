@@ -727,3 +727,13 @@ new tracker on every start and `stop()` never closed it.
 - **Fix:** manipulator.js `TILT_LIMIT` 75°/`easeTilt`. Pitch and roll are each held within ±75° of the grab start, easing from 45° (exponential approach, low-fps safe). Moving back is never slowed.
 - **Regression check:** test.js #G3b (10 s full-rate hold at 10/30/60 fps: max 75.0°, roll/spin 0.0, eased, tilts back). #G3 windows moved below the limit.
 - **Still to confirm:** live webcam check that the 45–75° ease feels smooth, not sticky. Momentum coast after release is not limited (small near the limit).
+
+## 57. [A-v1] Explode bleeds into clap, ✌ tool wheel and "talking hands"
+
+**Status: FIXED (needs live confirm)** (2026-10-01). Found by replay-lab (Cody-R), gate FAIL on both fixture sets.
+- **Symptom:** clap→explode 100% of runs (closing open hands squashed a stretched model just before the reset, stretch 1.03–1.08); wheel→explode 88–96% (✌ + relaxed other hand); null "talking hands"→explode 100%.
+- **Reproduction:** `docs/lab/gestures/replay-lab.html` (40 clips × 8 variants); test.js "Explode bleed" group.
+- **Root cause:** manipulator.js update() `openHanded` accepted any non-fist, non-pinch, non-gun hand (✌/☝/👎 included), and commandExplode drove the stretch from ANY span change past the 0.3-palm deadzone, closing included, from the first explode frame.
+- **Fix:** gestures.js `NOT_OPEN_GESTURES`/`isOpenForExplode` (Victory, Pointing_Up, Thumb_Down never open). manipulator.js commandExplode: nothing moves until a deliberate spread from the stable start: ≥2.5 palms at ≥6 palms/s (timed from leaving the start deadzone), or ≥5 palms at any speed (`EXPLODE_START_SPREAD`, `EXPLODE_MIN_SPREAD_SPEED`, `EXPLODE_FAR_SPREAD`). Closing or holding still never counts; after the spread, closing un-explodes as before.
+- **Regression check:** test.js group "Explode bleed — only a deliberate spread explodes" (4 checks fail on the old code; plus slow-wide-spread and still-hold-then-spread positives). replay-lab gate PASS both sets.
+- **Still to confirm:** live: a normal explode still fires first try; small spreads (<~2.5 palms, gesture-lab "smallest amplitude" 10% → 50%) no longer explode; vigorous hand-waving (±7% frame at ~1 Hz) can still trigger it. Thresholds are synthetic/Kaggle-shape provisional.

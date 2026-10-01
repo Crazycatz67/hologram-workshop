@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createStabilizer } from './stabilizer.js';
-import { handSpan, handTwist, isFistLike, palmLength } from './gestures.js';
+import { handSpan, handTwist, isFistLike, isOpenForExplode, palmLength } from './gestures.js';
 
 export const MODE = { IDLE: 'idle', GRAB: 'grab', TRANSFORM: 'transform', EXPLODE: 'explode' };
 
@@ -54,6 +54,20 @@ const SCALE_DEADZONE = 0.12;   // palm lengths of hand span (was 0.05 in ln(span
 export const SCALE_V_WEIGHT = 1.75;
 const PALM_REF_DEADZONE = 0.04; // ln(palm size): when the span's palm-length normaliser updates
 const EXPLODE_DEADZONE = 0.3;  // palm lengths of hand span (≈5% of a canonical pull-apart)
+// Explode needs a DELIBERATE spread before it moves anything (replay-lab 2026-10-01: a clap's
+// closing hands, ✌ + a relaxed hand and "talking hands" all stretched the model 3-8%). Until
+// the hands have spread EXPLODE_START_SPREAD palms beyond the narrowest span of the session
+// (the stable start) at an average of EXPLODE_MIN_SPREAD_SPEED palms/s or faster, explode is
+// armed but commands nothing; closing or holding still never counts. Synthetic + Kaggle-shape
+// clips: deliberate spreads 6-6.7 palms at ~14-18/s; clap jitter <=1.1 palms; talking hands
+// <=2.2 palms at ~3/s (test.js: ±6%-of-frame wandering at ~1 Hz stays out; ±8% does not).
+// PROVISIONAL until the owner's recorded clips confirm them.
+const EXPLODE_START_SPREAD = 2.5;     // palm lengths
+const EXPLODE_MIN_SPREAD_SPEED = 6.0; // palm lengths per second, averaged from the start
+// A slow spread still counts once it is this wide: a deliberate "together -> wide apart" is
+// 5-7 palms; talking hands stay under ~2.5 (test.js sweep: 3-4.5 palms in <=0.5-0.6 s fire,
+// slower ones only past this distance).
+const EXPLODE_FAR_SPREAD = 5.0;       // palm lengths, any speed
 
 // Two-hand scale (BUGS #31). The hand span is wrist distance / average palm length, and the
 // live palm length was most of its noise (smoothed peak-to-peak 0.020-0.053 in ln, vs
@@ -563,11 +577,12 @@ export function createManipulator(object, camera) {
   const pinchLatch = new Set();   // handedness of an aiming hand holding a same-hand pinch
   const wasGunBy = new Map();     // handedness -> was a pointer on its previous frame
   const SAME_PINCH_CLOSE = 0.25;  // keep in step with pointer.js SAME_PINCH_CLOSE
-  // Whether the current explode session has actually pulled the hands apart. Two open hands
-  // are both the explode pose AND the clap's ready stance, so explode engages the moment the
-  // hands come up; until they have pulled apart it is still "at rest" for the clap. Once
-  // they have, a fast close is un-exploding, never a clap (BUGS #27).
+  // Whether the current explode session has made its deliberate spread (EXPLODE_START_SPREAD
+  // at EXPLODE_MIN_SPREAD_SPEED). Two open hands are both the explode pose AND the clap's
+  // ready stance, so explode engages the moment the hands come up; until they have spread it
+  // commands nothing and is still "at rest" for the clap. Once pulled, closing un-explodes.
   let explodePulled = false;
+  let explodeStart = null; // { span, age s } narrowest span of this session and time since
   // One-step undo of the last reset (clap, R key or Reset button): the pose from just before.
   let undoSnapshot = null;
   let resetCount = 0;
@@ -608,6 +623,7 @@ export function createManipulator(object, camera) {
   function clearExplode() {
     explodeSig = null;
     explodePulled = false;
+    explodeStart = null;
   }
 
   // Drops every gesture's tracking and follow state -- object AND every part -- so nothing
@@ -1077,7 +1093,7 @@ export function createManipulator(object, camera) {
       // pointing: once a pointer stopped reading as a fist, "pointer + relaxed other hand"
       // would otherwise have become explode, and aiming moves the hands apart.
       const openHanded =
-        hands.length === 2 && hands.every((h) => !fistOf(h, aspect) && !h.pinch?.pinching && !h.pointer?.gun);
+        hands.length === 2 && hands.every((h) => !fistOf(h, aspect) && !h.pinch?.pinching && isOpenForExplode(h));
 
       // Each mode is gated on its channel being armed, so practice mode can silence a
       // gesture completely rather than merely ignoring its effect.
@@ -1370,10 +1386,30 @@ export function createManipulator(object, camera) {
       explodeV = { x: 0, y: 0 };
       explodeScale0 = { x: object.scale.x, y: object.scale.y };
       explodeLiteralV = explodeAmount;
+      explodeStart = { span, age: 0 };
+      return;
+    }
+    if (!explodePulled) {
+      // Not yet a deliberate spread: track the stable start, command nothing.
+      const jump = span - explodeSig.last;
+      explodeSig.last = span;
+      explodeStart.age += dt;
+      // A tracking jump shifts the start with it (as takeUpSlack does), so it never counts.
+      if (Math.abs(jump) > MAX_EXPLODE_SPAN_RATE_PER_SECOND * dt) explodeStart.span += jump;
+      if (span <= explodeStart.span) { explodeStart = { span, age: 0 }; return; }
+      const rise = span - explodeStart.span;
+      // Still near the start (inside the deadzone): the spread has not begun, so a long still
+      // hold before it never dilutes its speed.
+      if (rise <= EXPLODE_DEADZONE) { explodeStart.age = 0; return; }
+      const fast = rise >= EXPLODE_START_SPREAD && rise / Math.max(explodeStart.age, dt) >= EXPLODE_MIN_SPREAD_SPEED;
+      if (!fast && rise < EXPLODE_FAR_SPREAD) return;
+      // The spread counts from the stable start, less the usual deadzone.
+      explodePulled = true;
+      explodeSig.anchor = span - EXPLODE_DEADZONE;
+      explodeCh.cmd += (rise - EXPLODE_DEADZONE) * EXPLODE_SENSITIVITY * settings.sensitivity;
       return;
     }
     const d = takeUpSlack(explodeSig, span, EXPLODE_DEADZONE, MAX_EXPLODE_SPAN_RATE_PER_SECOND, dt);
-    if (d > 0) explodePulled = true;
     explodeCh.cmd += d * EXPLODE_SENSITIVITY * settings.sensitivity;
   }
 }
