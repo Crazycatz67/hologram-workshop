@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hologram playground</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="../theme.css">
+  <style>
+    body { display: grid; grid-template-rows: var(--bar-h) 1fr var(--status-h); font-family: var(--sans); }
+    #bar { display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+    #bar a.back { color: var(--muted); text-decoration: none; padding: 8px 6px; }
+    #bar h1 { font-size: 16px; font-weight: 600; margin: 0 8px 0 0; }
+    #bar .spacer { flex: 1; }
+    #timer { font: 600 18px var(--mono); color: var(--accent); min-width: 72px; text-align: right; }
+    #best { font: 13px var(--mono); color: var(--muted); min-width: 84px; }
+    #bar button { min-height: 36px; }
+    #stage { position: relative; overflow: hidden; min-height: 0; }
+    #stage > video, #stage > #overlay, #stage > canvas:not(#overlay) { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    #cam, #overlay { object-fit: cover; visibility: hidden; }
+    body.debug-camera #cam, body.debug-camera #overlay { visibility: visible; }
+    #cam { z-index: 0; transform: scaleX(-1); background: #000; }
+    #overlay { z-index: 1; }
+    #stage > canvas:not(#overlay) { z-index: 2; }
+    /* Game buttons (palette etc.): 48 px hit targets so the hand cursor can press them. */
+    #panel { position: absolute; z-index: 4; left: 12px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 8px; }
+    #panel:empty { display: none; }
+    #panel button { min-width: 48px; min-height: 48px; }
+    #howto { position: absolute; z-index: 5; right: 14px; top: 14px; max-width: 340px; padding: 10px 14px 12px; background: rgba(16, 22, 29, 0.92); border: 1px solid var(--line-2); border-radius: var(--radius); }
+    #howto h2 { font-size: 13px; margin: 0 0 6px; color: var(--muted); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+    #howto ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+    #howto li { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 6px; font-size: 14px; }
+    #howto .ic { font-size: 20px; text-align: center; }
+    #howto kbd { font: 11px var(--mono); color: var(--muted); }
+    #howto kbd:empty { display: none; }
+    #howtoClose { position: absolute; right: 4px; top: 2px; background: none; border: 0; color: var(--muted); min-height: 0; padding: 4px 8px; }
+    /* Win banner: fades in over 700 ms with a FIXED glow (no pulsing, no flash; BUGS #14). */
+    #banner { position: absolute; z-index: 6; left: 50%; top: 22%; transform: translateX(-50%); padding: 18px 28px; text-align: center;
+      background: rgba(10, 16, 22, 0.88); border: 1px solid rgba(79, 209, 255, 0.5); border-radius: 10px;
+      box-shadow: 0 0 28px rgba(79, 209, 255, 0.28); opacity: 0; transition: opacity 700ms ease-in-out; }
+    #banner.show { opacity: 1; }
+    #bannerText { font-size: 24px; font-weight: 600; color: var(--text); text-shadow: 0 0 12px rgba(79, 209, 255, 0.45); }
+    #bannerSub { margin: 6px 0 12px; color: var(--warm); font-size: 14px; }
+    @media (prefers-reduced-motion: reduce) { #banner { transition: none; } }
+    #status { display: flex; align-items: center; padding: 0 12px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); background: var(--panel-2); }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header id="bar">
+    <a class="back" href="./index.html" title="Back to the arcade">← Arcade</a>
+    <h1 id="title">Playground</h1>
+    <span class="spacer"></span>
+    <span id="timer" title="Time since your first move">0:00.0</span>
+    <span id="best">best –</span>
+    <button id="howtoBtn" class="ghost" title="How to play (H)">?</button>
+    <button id="camBtn" title="Use your hands (the camera stays on this machine)">📷 Camera</button>
+  </header>
+  <main id="stage">
+    <video id="cam" playsinline muted></video>
+    <canvas id="overlay"></canvas>
+    <div id="panel"></div>
+    <section id="howto" aria-label="How to play">
+      <button id="howtoClose" title="Hide (H)" aria-label="Hide how to play">×</button>
+      <h2>How to play</h2>
+      <ul id="howtoList"></ul>
+    </section>
+    <section id="banner" role="status" hidden>
+      <div id="bannerText"></div>
+      <div id="bannerSub"></div>
+      <button id="again" data-hand>↻ Play again</button>
+    </section>
+  </main>
+  <footer id="status">Loading…</footer>
+  <script type="module">
+    const id = new URLSearchParams(location.search).get('game') ?? '';
+    const $ = (s) => document.getElementById(s);
+    const { startPlayground } = await import(`./playground.js?v=${Date.now()}`);
+    startPlayground({
+      gameId: id,
+      el: {
+        stage: $('stage'), video: $('cam'), overlay: $('overlay'), panel: $('panel'), status: $('status'),
+        title: $('title'), timer: $('timer'), best: $('best'), camBtn: $('camBtn'),
+        howto: $('howto'), howtoBtn: $('howtoBtn'), howtoClose: $('howtoClose'), howtoList: $('howtoList'),
+        banner: $('banner'), bannerText: $('bannerText'), bannerSub: $('bannerSub'), again: $('again')
+      }
+    }).catch((err) => {
+      console.error('playground failed to start:', err);
+      $('status').textContent = `Could not start: ${err?.message ?? err}`;
+      window.playground = { ...(window.playground ?? {}), error: String(err?.message ?? err) };
+    });
+  </script>
+</body>
+</html>

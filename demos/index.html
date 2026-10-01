@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hologram playground · Arcade</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="../theme.css">
+  <style>
+    html, body { overflow: auto; }
+    body { font-family: var(--sans); padding: 28px clamp(16px, 4vw, 48px) 48px; }
+    header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
+    h1 { margin: 0; font-size: 26px; }
+    header p { margin: 0; color: var(--muted); }
+    header a { color: var(--muted); }
+    #cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+    .card { display: flex; flex-direction: column; gap: 8px; padding: 16px; border: 1px solid var(--line-2); border-radius: 10px;
+      background: var(--panel); color: var(--text); text-decoration: none; min-height: 200px; transition: border-color 200ms ease, background-color 200ms ease; }
+    a.card:hover, a.card:focus-visible { border-color: var(--accent); background: #121c25; }
+    .thumb { font-size: 46px; line-height: 1; height: 72px; display: grid; place-items: center; border-radius: 8px;
+      background: radial-gradient(circle at 50% 60%, rgba(79, 209, 255, 0.16), transparent 70%); }
+    .card h2 { margin: 0; font-size: 18px; }
+    .card p { margin: 0; color: var(--muted); font-size: 14px; flex: 1; }
+    .row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .verbs { font-size: 18px; letter-spacing: 2px; }
+    .badge { margin-left: auto; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line-2); color: var(--muted); font: 12px var(--mono); }
+    .best { color: var(--warm); font: 12px var(--mono); }
+    .card.soon { opacity: 0.55; }
+    @media (prefers-reduced-motion: reduce) { .card { transition: none; } }
+  </style>
+  <script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.161.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <header>
+    <h1>🕹 Hologram playground</h1>
+    <p>Short games for your hands (or a mouse). About a minute each.</p>
+    <a href="../index.html">Home</a>
+  </header>
+  <main id="cards" aria-label="Games"></main>
+  <script type="module">
+    // The list and best times come from playground.js, so a new game is one GAMES entry.
+    const { GAMES, readBest, formatTime } = await import(`./playground.js?v=${Date.now()}`);
+    const cards = document.getElementById('cards');
+    for (const g of GAMES) {
+      const el = document.createElement(g.ready ? 'a' : 'div');
+      el.className = `card${g.ready ? '' : ' soon'}`;
+      if (g.ready) { el.href = `./play.html?game=${g.id}`; el.dataset.hand = ''; }
+      el.dataset.game = g.id;
+      const best = g.ready ? readBest(g.id) : null;
+      el.innerHTML = `<div class="thumb"></div><h2></h2><p></p><div class="row"><span class="verbs"></span><span class="badge"></span></div><div class="row best"></div>`;
+      el.querySelector('.thumb').textContent = g.thumb;
+      el.querySelector('h2').textContent = g.title;
+      el.querySelector('p').textContent = g.blurb;
+      el.querySelector('.verbs').textContent = g.verbs.join(' ');
+      el.querySelector('.badge').textContent = g.ready ? `≈${g.secs} s` : 'coming soon';
+      el.querySelector('.best').textContent = best ? `🏆 best ${formatTime(best)}` : '';
+      cards.append(el);
+    }
+    window.arcade = { cards: cards.children.length, ready: GAMES.filter((g) => g.ready).length };
+  </script>
+</body>
+</html>
