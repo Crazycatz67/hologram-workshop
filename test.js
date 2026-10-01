@@ -2480,17 +2480,55 @@ async function main() {
         const step = (y) => m.update([hand(0.35, 0.5, 0, 'fist'), hand(0.65, y, 0, 'open')], 1.78, (t += FR));
         for (let i = 0; i < 8; i++) step(0.6);
         for (let i = 1; i <= 10; i++) step(0.6 + (dy * i) / 10);
-        for (let i = 0; i < 15; i++) step(0.6 + dy);
+        for (let i = 0; i < 3; i++) step(0.6 + dy);
         const qa = object.quaternion.clone();
-        for (let i = 0; i < 15; i++) step(0.6 + dy);
-        return object.quaternion.angleTo(qa); // turned during 0.5 s of holding still
+        for (let i = 0; i < 6; i++) step(0.6 + dy);
+        return object.quaternion.angleTo(qa); // turned during 0.2 s of holding still
       };
+      // Offsets kept small enough that the model is still short of TILT_LIMIT (#G3b): -0.24
+      // is ~43° by position alone, already past the rate cap (0.08 + 0.15).
       const inZone = tiltRun(-0.06);
-      const beyond = tiltRun(-0.15);
-      const far = tiltRun(-0.5);
+      const beyond = tiltRun(-0.12);
+      const far = tiltRun(-0.24);
       checkTrue('#G3 tilt: still inside ±0.08 = position only (no drift); held beyond it keeps turning; speed capped',
-        inZone < 0.01 && beyond > 0.2 && far <= mn.TILT_RATE_MAX * 0.5 + 0.05 && far > beyond,
-        `0.5 s held: in-zone ${inZone.toFixed(3)} · 0.15 out ${beyond.toFixed(3)} · 0.5 out ${far.toFixed(3)} rad (cap ${(mn.TILT_RATE_MAX * 0.5).toFixed(2)})`);
+        inZone < 0.01 && beyond > 0.04 && far <= mn.TILT_RATE_MAX * 0.2 + 0.02 && far > beyond,
+        `0.2 s held: in-zone ${inZone.toFixed(3)} · 0.12 out ${beyond.toFixed(3)} · 0.24 out ${far.toFixed(3)} rad (cap ${(mn.TILT_RATE_MAX * 0.2).toFixed(2)})`);
+    }
+    // 3b. Tilt limit (Timmy pass 4: gesture-lab tilt read p-79/r180 + "spin 180" = a real
+    // -101° pitch, the rate zone kept tilting past 90°). A long full-rate hold stays within
+    // ±TILT_LIMIT of the grab start, eases in (no hard stop), never rolls or spins, and lowering
+    // the hand tilts back at once. Run at 10, 30 and 60 fps.
+    {
+      const results = [10, 30, 60].map((fps) => {
+        const fr = 1000 / fps;
+        object.position.set(0, 0, 0); object.quaternion.identity(); object.scale.set(1, 1, 1);
+        const m = createManipulator(object, camera);
+        m.reset();
+        m.configure({ channels: ['move', 'spin', 'tilt', 'push'], sensitivity: 1, momentum: false, triggerFrames: 3 });
+        let t = 1000;
+        const step = (y) => { m.update([hand(0.35, 0.5, 0, 'fist'), hand(0.65, y, 0, 'open')], 1.78, (t += fr)); m.tick?.(t); };
+        const q0 = () => object.quaternion.angleTo(new THREE.Quaternion());
+        for (let i = 0; i < fps * 0.3; i++) step(0.6);
+        for (let i = 1; i <= fps * 0.3; i++) step(0.6 - (0.24 * i) / (fps * 0.3)); // hand up 0.24: past the rate cap, ~43° by position
+        let maxA = 0, rateMid = 0, rateNear = 0, prev = q0();
+        for (let i = 0; i < fps * 10; i++) {
+          step(0.36);
+          const a = q0(), r = (a - prev) * fps; prev = a;
+          maxA = Math.max(maxA, a);
+          if (a > 0.95 && a < 1.05) rateMid = Math.max(rateMid, r); // ~55-60°: easing has begun
+          if (a > 1.22) rateNear = Math.max(rateNear, r);
+        }
+        const e = new THREE.Euler().setFromQuaternion(object.quaternion, 'YXZ');
+        const held = q0();
+        for (let i = 1; i <= fps * 0.2; i++) step(0.36 + (0.19 * i) / (fps * 0.2)); // lower the hand over 0.2 s: tilts back promptly
+        return { fps, maxDeg: (maxA * 180) / Math.PI, pitchDeg: (e.x * 180) / Math.PI, rollDeg: (e.z * 180) / Math.PI, spinDeg: (e.y * 180) / Math.PI,
+          rateMid, rateNear, backDeg: ((held - q0()) * 180) / Math.PI };
+      });
+      const lim = (mn.TILT_LIMIT * 180) / Math.PI;
+      checkTrue('#G3b tilt limit: 10 s full-rate hold stays within the limit (eased), roll/spin ≈0, lowering tilts back',
+        results.every((r) => r.maxDeg <= lim + 0.5 && r.maxDeg > lim - 5 && Math.abs(r.rollDeg) < 1 && Math.abs(r.spinDeg) < 1 && r.pitchDeg < 0
+          && r.rateMid > 0.4 && r.rateNear < r.rateMid * 0.5 && r.backDeg > 5),
+        results.map((r) => `${r.fps}fps max ${r.maxDeg.toFixed(1)}° (p${r.pitchDeg.toFixed(1)} r${r.rollDeg.toFixed(1)} s${r.spinDeg.toFixed(1)}) rate mid ${r.rateMid.toFixed(2)} near-limit ${r.rateNear.toFixed(2)} rad/s, back ${r.backDeg.toFixed(1)}°`).join(' · '));
     }
     // 4. Scale: vertical gives the same range (direction gain), still uniform.
     {

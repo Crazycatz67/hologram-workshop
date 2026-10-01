@@ -98,7 +98,7 @@ const isItemKey = (k) => typeof k === 'string' && k.startsWith('item:');
 export function createPlatformHands({
   scene, camera, renderer, controls, objectMode, getItems,
   button = null, setStatus = () => {}, busy = () => false, expose = null,
-  ring = () => null, polygon = () => null, resetView = null, helpEl = null,
+  ring = () => null, polygon = () => null, resetView = null, helpEl = null, toolWheel = null,
   loadRuntime = () => import('../handsRuntime.js' + V).then((m) => m.createHandsRuntime)
 }) {
   let runtime = null;
@@ -526,6 +526,7 @@ export function createPlatformHands({
         holdOn: () => (busy() || ringOpen() || lens() ? null : 'surface'),
         handUI: true,
         cursorSpace: 'page',
+        toolWheel,
         onAction
       });
       lastResets = manip?.resetCount ?? 0;

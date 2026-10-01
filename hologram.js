@@ -168,12 +168,29 @@ const runtime = createHandsRuntime({
   // panel) and works its buttons and sliders; over them, no 3D pick fires.
   handUI: true,
   cursorSpace: 'page',
+  // The ✌ tool wheel (toolWheel.js, HANDS-UX-SPEC section 4): same directions as the Platform.
+  toolWheel: () => [
+    { dir: 'up', icon: '↶', label: 'Undo', run: () => undoReset() },
+    { dir: 'down', icon: '⟲', label: 'Reset view', run: () => { manipulator?.reset(); setStatus('⟲ Reset · ✌ wheel ↑ Undo brings it back'); } },
+    { dir: 'upRight', icon: '📏', label: 'Tape', run: () => currentMeasurePanel?.toggleMode('tape'), enabled: () => !!currentMeasurePanel },
+    { dir: 'downRight', icon: '💥', label: 'Explode', run: () => {
+      if (!manipulator) return;
+      const on = manipulator.explodeAmount > 0.5;
+      manipulator.setExplode(on ? 0 : 1);
+      setStatus(on ? 'Parts back together' : '💥 Exploded · point at a part and pinch your other hand to pick it');
+    }, enabled: () => !!manipulator?.explodeIsLiteral },
+    { dir: 'downLeft', icon: '🔁', label: 'Next model', run: () => stepModel(1) },
+    { dir: 'upLeft', icon: '🎯', label: 'Practice', run: () => (runtime.practice?.active ? stopSelectionPractice() : startSelectionPractice()) },
+    { dir: 'center', icon: '?', label: 'Help', run: () => toggleHelp() }
+  ],
   onAction: (type, detail) => {
     if (type === 'click') act(detail);
     else if (type === 'practice') finishPractice(detail);
     else if (type === 'practice-start') syncPracticeButton();
     else if (type === 'frame') onCameraFrame(detail.mode);
     else if (type === 'hint') showHint(detail);
+    else if (type === 'wheel' && detail.type === 'open') setStatus('✌ Tool wheel · ☝ aim at a tool, 🤏 pinch your other hand · ✌ again closes');
+    else if (type === 'wheel' && detail.type === 'pick') setStatus(`✌ ${detail.label}`);
     else if (type === 'reset') {
       setStatus(`Tracking reset · ${detail.why}`);
       showToast('↻ Tracking reset', `${detail.why[0].toUpperCase()}${detail.why.slice(1)}. Raise a hand to carry on. ✓ Success looks like: the ghost hand reappears.`);
@@ -495,6 +512,8 @@ window.addEventListener('keydown', (e) => {
   if (key === 'escape' && !helpEl.hidden) return toggleHelp(false);
   if (key === '?') toggleHelp();
   if (key === 'c') startCalibration();
+  // W: the ✌ tool wheel at the screen centre (keyboard / mouse users; click a slot).
+  if (key === 'w' && !e.repeat) { runtime.wheel?.isOpen ? runtime.wheel.close('api') : runtime.wheel?.open(); return; }
   if (key === 'r') manipulator?.reset();
   if (key === 'u') undoReset();
   if (key === 'd') document.body.classList.toggle('debug-camera');

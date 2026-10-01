@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Tool wheel test</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="theme.css" />
+<style>
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  #out { position: absolute; right: 10px; top: 10px; width: 520px; max-height: 95vh; overflow: auto; margin: 0; white-space: pre-wrap; font: 11px ui-monospace, monospace; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<pre id="out"></pre>
+<script type="module">
+  // Test recorder: saves this run to docs/testing/runs/ on localhost (docs/testing/README.md).
+  const rec = await import('./testrec.js').then((m) => m.startRun({ page: 'toolwheel-test', title: document.title })).catch(() => null);
+  import('./toolwheel-test.js?v=' + Date.now()).then(() => {
+    const r = window.toolWheelResults;
+    for (const x of r?.results ?? []) rec?.result(x.name, x.detail ?? '', { pass: !!x.ok });
+    rec?.end();
+  }).catch((e) => {
+    document.getElementById('out').textContent += '\nERROR ' + (e.stack || e);
+    console.error(e);
+    rec?.end('crashed');
+  });
+</script>
+</body></html>

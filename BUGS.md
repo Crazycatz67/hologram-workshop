@@ -717,3 +717,13 @@ new tracker on every start and `stop()` never closed it.
 ## 55. [A-v1] Pointer pose loses hand tracking
 
 **Status: OPEN** (2026-10-01, owner guided runs GD3/GD4). Open hand tracks well; switching to the pointer pose (index out, three curled) makes the hand drop out of tracking, hurting accuracy. Clap reset sometimes needs several claps (GD10); fast model switching stutters (GD12).
+
+## 56. [A-v1] Holding the tilt hand up tips the model past 90° (lab read "spin 180")
+
+**Status: FIXED (needs live confirm)** (2026-10-01). Found by Timmy's commit-gate pass 4 (gesture-lab tilt row).
+- **Symptom:** gesture-lab tilt read p−79.3°/r180° and "also fired spin 180°" (p−42.3°/r0 at ad941bc). In fact this is one pure −100.7° pitch (the quaternions are 0.000° apart), so the Euler readout flipped. An 8 s hold reached ~180°.
+- **Reproduction:** `docs/lab/gestures/gesture-lab.html?only=tilt`; test.js #G3b without the limit: max 177–180° at 10/30/60 fps.
+- **Root cause:** manipulator.js commandGrab, hybrid tilt rate term (`rate()` → `s.ch.pitch.cmd +=`). It had no bound, so it kept turning while the hand stayed beyond TILT_RATE_ZONE. Spin was never driven.
+- **Fix:** manipulator.js `TILT_LIMIT` 75°/`easeTilt`. Pitch and roll are each held within ±75° of the grab start, easing from 45° (exponential approach, low-fps safe). Moving back is never slowed.
+- **Regression check:** test.js #G3b (10 s full-rate hold at 10/30/60 fps: max 75.0°, roll/spin 0.0, eased, tilts back). #G3 windows moved below the limit.
+- **Still to confirm:** live webcam check that the 45–75° ease feels smooth, not sticky. Momentum coast after release is not limited (small near the limit).

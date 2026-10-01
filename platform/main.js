@@ -1433,7 +1433,24 @@ const { createPlatformHands } = await import('./hands.js' + V);
 window.hologram.hands = createPlatformHands({
   scene, camera, renderer, controls, objectMode, getItems: readyItems, setStatus,
   button: $('handsBtn'), expose: window.hologram,
-  ring: () => lib.ring, polygon: () => polygon, resetView: () => frameAll(), helpEl: $('guide')
+  ring: () => lib.ring, polygon: () => polygon, resetView: () => frameAll(), helpEl: $('guide'),
+  // The ✌ tool wheel (toolWheel.js, HANDS-UX-SPEC section 4): same directions as hologram.html.
+  toolWheel: () => [
+    { dir: 'up', icon: '↶', label: 'Undo', run: () => { objectMode.undo(); syncLibrary(); } },
+    { dir: 'down', icon: '⟲', label: 'Reset view', run: () => frameAll() },
+    { dir: 'upRight', icon: '📏', label: 'Measure', run: () => $('measureBtn').click() },
+    { dir: 'downRight', icon: '🔷', label: 'Polygon', run: () => togglePolygon(), enabled: () => !polyBtn.disabled },
+    { dir: 'downLeft', icon: '🎠', label: 'Library', run: () => { if (lib.ring) refreshRing().then(() => lib.ring.open()); }, enabled: () => !!lib.ring },
+    { dir: 'upLeft', icon: '📌', label: 'Pin', run: () => objectMode.togglePin() },
+    { dir: 'center', icon: '?', label: 'Help', run: () => $('help').click() }
+  ]
+});
+// W: the ✌ tool wheel at the screen centre for mouse / keyboard users (click a slot).
+document.addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() !== 'w' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName ?? '')) return;
+  const w = window.hologram.hands.runtime?.wheel;
+  if (w) (w.isOpen ? w.close('api') : w.open());
 });
 // Not in tests (?db=...): a test page must never turn a real camera on by itself.
 if (!params.get('db')) lib.ready.then(() => window.hologram.hands.autoStart()).catch((err) => console.warn('hands: auto-start', err));

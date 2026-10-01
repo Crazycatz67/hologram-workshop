@@ -151,7 +151,8 @@ itemsShown = true;
 // The BVH trees build one geometry per macrotask once the runtime exists; the hits must match
 // a plain three raycast face for face (indirect BVH: the index is never reordered).
 for (const p of [...itemA.parts, ...itemB.parts]) probePart(p.mesh);
-for (let i = 0; i < 50 && hands.stats.bvhBuilt < 4; i++) await wait(20);
+// Up to 5 s: on a cold browser profile the three-mesh-bvh CDN module can take > 1 s to arrive.
+for (let i = 0; i < 250 && hands.stats.bvhBuilt < 4; i++) await wait(20);
 const plainRc = new THREE.Raycaster();
 const same = [...itemA.parts, ...itemB.parts].every((p) => {
   const n = ndcOf(p.mesh);

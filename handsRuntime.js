@@ -87,6 +87,12 @@
 //     runtime.ui (handUI | null), runtime.pinchHeld (the clicking hand is still pinched; for
 //       pinch-hold drags), runtime.cursorPx ({ x, y } page px of the hand cursor | null),
 //       runtime.overUi. The 'aim' event detail also carries { px, ui } (page px, over the UI).
+//   TOOL WHEEL (HANDS-UX-SPEC section 4; default off):
+//     toolWheel: items | () => items   toolWheel.js items ({ dir, icon, label, run, enabled? }).
+//       ✌ held 650 ms opens the wheel at the hand cursor; while it is open the other hand's pinch
+//       picks the lit slot (never a 3D pick or a page click) and hold-select stands down. Closed
+//       during calibration and selection practice. runtime.wheel (toolWheel | null);
+//       events 'wheel' { type: 'open' | 'close' | 'pick', ...detail }.
 //   Not built yet (P1 step 2+): a per-hand 'rest' event and multiple pick roots.
 const V = new URL(import.meta.url).search;
 
@@ -101,6 +107,7 @@ const { createPointer, createEngagement, createResetGate, createTrackingMonitor,
 const { createReticle, probe, createPartHighlight, SELECTED_OUTLINE } = await import('./reticle.js' + V);
 const { createCalibration, loadProfile, applyProfile, createSelectionPractice } = await import('./calibrate.js' + V);
 const { createHandUI } = await import('./handUI.js' + V);
+const { createToolWheel } = await import('./toolWheel.js' + V);
 
 // A drag is an orbit, not a click (same 5 px rule as the measure panel).
 const CLICK_TOLERANCE_PX = 5;
@@ -108,7 +115,8 @@ const CLICK_TOLERANCE_PX = 5;
 export function createHandsRuntime({
   scene, camera, renderer, canvas = renderer.domElement, overlay, video,
   pickTargets = () => null, ghostAnchor = pickTargets, manipulator = () => null, onAction = null,
-  holdSelect = true, holdOn = () => 'parts', handUI = false, cursorSpace = 'canvas'
+  holdSelect = true, holdOn = () => 'parts', handUI = false, cursorSpace = 'canvas',
+  toolWheel = null
 }) {
   const overlayCtx = overlay.getContext('2d');
   const listeners = new Map();
@@ -132,6 +140,9 @@ export function createHandsRuntime({
     canvas, ...(handUI === true ? {} : handUI),
     onAction: (type, d) => { if (type === 'type') emit('ui-type', d); }
   }) : null;
+  // The ✌ tool wheel (toolWheel.js): opt-in, like handUI.
+  const wheel = toolWheel ? createToolWheel({ items: typeof toolWheel === 'function' ? toolWheel() : toolWheel }) : null;
+  if (wheel) for (const type of ['open', 'close', 'pick']) wheel.on(type, (d) => emit('wheel', { type, ...d }));
   let pinchHeld = false;     // the non-aiming raised hand is pinched (camera frames)
   let cursorPx = null;       // page px of the hand cursor this display frame
   let overUi = false;
@@ -285,6 +296,11 @@ export function createHandsRuntime({
     if (practice?.active && click.source === 'hand') {
       practice.onClick(click);
       return;
+    }
+    // The open tool wheel takes every hand click (runs the lit slot); a mouse click elsewhere closes it.
+    if (wheel?.isOpen) {
+      if (click.source === 'hand' && wheel.click()) return;
+      if (click.source === 'mouse') { wheel.close('api'); return; }
     }
     // Over the page UI: the click is the page's (a button, slider, list), never a 3D pick.
     if (ui && click.source === 'hand' && click.via !== 'hold') {
@@ -500,7 +516,8 @@ export function createHandsRuntime({
       hold: shown ? holdShown : 0
     });
     snappedVertex = result?.vertex ?? null;
-    updateSelection(overUi ? { ...st, mode: 'off' } : st, result, nowMs);
+    wheel?.point(cursorPx, nowMs);
+    updateSelection(overUi || wheel?.isOpen ? { ...st, mode: 'off' } : st, result, nowMs);
     highlight.update({ part: target?.part ?? null, nowMs });
     selectedHighlight.update({ part: manipulator()?.activePart ?? null, nowMs });
     emit('aim', { state: st, hit: overUi ? null : result ?? null, px: cursorPx, ui: overUi });
@@ -520,6 +537,10 @@ export function createHandsRuntime({
     // raised hand other than the aiming one, still pinched.
     const aimHand = pointer.state.aimHand;
     pinchHeld = hands.some((h) => h !== aimHand && h.engaged !== false && h.pinch?.pinching === true);
+    if (wheel) {
+      if (calibrating || practice?.active) wheel.close('api');
+      else wheel.feed(hands, now);
+    }
     if (calibrating) {
       calibration.onClick(click);
       calibration.onFrame(hands, now);
@@ -592,6 +613,7 @@ export function createHandsRuntime({
     highlight.dispose();
     selectedHighlight.dispose();
     ui?.dispose();
+    wheel?.dispose();
     listeners.clear();
   }
 
@@ -645,6 +667,7 @@ export function createHandsRuntime({
     get ui() { return ui; },
     get pinchHeld() { return pinchHeld; },
     get cursorPx() { return cursorPx; },
+    get wheel() { return wheel; },
     get overUi() { return overUi; },
     startPractice,
     get selector() { return selector; }

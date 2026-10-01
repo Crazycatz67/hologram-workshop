@@ -114,6 +114,24 @@ const ROLL_SENSITIVITY = Math.PI;
 export const TILT_RATE_ZONE = 0.08;
 const TILT_RATE_GAIN = 10;
 export const TILT_RATE_MAX = 1.5;   // rad/s (~86°/s)
+// Pitch/roll limit per grab (Debbie, 2026-10-01): rate control kept tilting while the hand was
+// held up, so a long hold tipped the model past 90° (upside down mid-demo). Each axis is held to
+// ±TILT_LIMIT from where the grab started; beyond TILT_EASE_START the outward step shrinks
+// linearly to 0 at the limit, so it eases in (no hard stop). Moving back is never slowed.
+export const TILT_LIMIT = (75 * Math.PI) / 180;
+const TILT_EASE_START = (45 * Math.PI) / 180;
+function easeTilt(rel, d) {
+  // Exact integral of "outward step scaled by remaining room", so one big step (low fps, fast
+  // hand) still can't jump the limit: past the knee, rel approaches the limit exponentially.
+  if (d === 0 || (rel !== 0 && Math.sign(d) !== Math.sign(rel))) return d;
+  const sg = Math.sign(d), w = TILT_LIMIT - TILT_EASE_START;
+  const a = Math.abs(rel), want = a + Math.abs(d);
+  if (want <= TILT_EASE_START) return d;
+  const from = Math.max(a, TILT_EASE_START);
+  const excess = want - from + (a > TILT_EASE_START ? -w * Math.log(Math.max(1e-9, (TILT_LIMIT - a) / w)) : 0);
+  const end = TILT_LIMIT - w * Math.exp(-excess / w);
+  return sg * (Math.max(a, end) - a);
+}
 
 // Coasting after release: real seconds for the release speed to halve.
 const DAMPING_HALFLIFE = 0.42;
@@ -1236,6 +1254,7 @@ export function createManipulator(object, camera) {
       if (logPalm !== null) os.sig.palm = newSignal(logPalm);
       for (const k of GRAB_CHANNELS) { s.ch[k].coast = 0; os.ch[k].coast = 0; }
       s.lastWrist = { x: wrist.x, y: wrist.y };
+      s.tiltBase = { pitch: s.ch.pitch.cmd, roll: s.ch.roll.cmd };
     }
 
     const sens = settings.sensitivity;
@@ -1279,8 +1298,9 @@ export function createManipulator(object, camera) {
           // screen and its top tips away from the camera (negative pitch about world X).
           // Owner request after the 2026-10-01 webcam test; it used to tilt down. Moving the
           // hand right in the image rolls positive about Z (unchanged).
-          s.ch.pitch.cmd += ty * PITCH_SENSITIVITY * sens;
-          s.ch.roll.cmd += tx * ROLL_SENSITIVITY * sens;
+          const base = s.tiltBase || (s.tiltBase = { pitch: s.ch.pitch.cmd, roll: s.ch.roll.cmd });
+          s.ch.pitch.cmd += easeTilt(s.ch.pitch.cmd - base.pitch, ty * PITCH_SENSITIVITY * sens);
+          s.ch.roll.cmd += easeTilt(s.ch.roll.cmd - base.roll, tx * ROLL_SENSITIVITY * sens);
         }
       }
       s.lastPitchWrist = { x: pw.x, y: pw.y };
