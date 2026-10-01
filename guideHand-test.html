@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Guide hand test</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
+<style>
+  html,body{margin:0;background:#05080c;color:#cfe;font:12px ui-monospace,monospace}
+  #wrap{padding:10px}
+  pre{white-space:pre-wrap;margin:8px 0}
+  #gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:8px}
+  #gallery figure{margin:0;border:1px solid #234;background:#0a1118}
+  #gallery canvas{display:block;width:100%;aspect-ratio:16/10}
+  #gallery figcaption{padding:4px 6px;color:#8ab}
+  #scratch{position:absolute;left:-9999px;top:0}
+</style></head>
+<body><div id="wrap">
+<b>Guide hand (guideHand/): the ASL mannequin hand acting out every hologram gesture</b>
+Poses read as themselves (fist / pointer / ✌ / pinch shape checks + a fist pixel check), the
+anatomical interpolator keeps fingers on the palm side, every gesture renders and loops without
+a jump, ≤ 3 flashes/s, and the player API (play / pause / setGesture / dispose, reduced motion,
+30 fps cap). <code>?rec=off</code> skips the test recorder.
+<pre id="out">running…</pre>
+<div id="gallery"></div>
+<canvas id="scratch"></canvas>
+</div>
+<script type="module">
+  // Test recorder: saves this run to docs/testing/runs/ on localhost (docs/testing/README.md).
+  const off = new URLSearchParams(location.search).get('rec') === 'off';
+  const rec = off ? null : await import('./testrec.js').then((m) => m.startRun({ page: 'guidehand-test' })).catch(() => null);
+  import('./guideHand-test.js?v=' + Date.now()).then(async (m) => {
+    const r = await m.done;
+    for (const x of r?.results ?? []) rec?.result(x.name, x.detail ?? '', { pass: !!x.ok });
+    for (const [k, v] of Object.entries(r?.metrics ?? {})) rec?.metric(k, v);
+    rec?.end();
+  }).catch((e) => {
+    document.getElementById('out').textContent += '\nERROR ' + (e.stack || e);
+    console.error(e);
+    rec?.end('crashed');
+  });
+</script>
+</body></html>
