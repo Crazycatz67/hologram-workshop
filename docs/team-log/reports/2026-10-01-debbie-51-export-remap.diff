@@ -1,0 +1,18 @@
+--- export.js	2026-10-01 13:38:31
++++ platform/export.js	2026-10-01 14:08:25
+@@ -179,6 +179,15 @@
+   };
+   const out = [];
+   for (const e of list) {
++    // Face-level ops (polygon.js polyHide / polyInfer, BUGS #51) carry no transform states:
++    // their item and each polys[].part are remapped instead.
++    if (Array.isArray(e.polys)) {
++      const item = mapItem(e.item);
++      const polys = e.polys.map((p) => ({ ...p, part: mapPart(e.item, p.part) }));
++      if (item == null || polys.some((p) => p.part == null)) return null;
++      out.push({ ...JSON.parse(JSON.stringify(e)), item, polys });
++      continue;
++    }
+     const ch = e.changes ?? (e.before && e.after ? [{ item: e.item, part: e.part ?? null, before: e.before, after: e.after }] : null);
+     if (!ch) return null;
+     const mapped = [];
