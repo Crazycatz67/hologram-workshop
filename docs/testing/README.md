@@ -89,6 +89,19 @@ session can also arrive a second time as `crashed` (the deletion of its checkpoi
 Agents: sessions from automated tabs are recorded too (a background tab shows `hidden-tab`);
 use `?rec=off` when a session record would only be noise.
 
+### What a shadow session captures (2026-10-01)
+- **Gesture demo:** fps; camera time; gesture mode timeline; pointer on-time, entries and cursor
+  travel; what each other-hand pinch click did (tape point / part select / miss); tape
+  distances; raised vs rested time per hand; tilt direction and whether it followed the hand;
+  scale start→end factor and reversals; explode bursts; resets (clap / R / button) and undos.
+- **Platform:** ring open/close/choose (and whether it was the landing screen); Save version
+  (Cmd+S vs button); autosave writes; reloads that restored a project; versions per project;
+  photo vs scan uploads.
+- **Checklist evidence:** each step of the live checklist in `LEDGER.md` is marked seen /
+  partial / not-seen / problem / manual, so a normal test session answers "did step N work?".
+- **Extra flags:** `possible accidental explode` (3 explodes under 1.5 s within 10 s) and
+  "mostly in background" when the tab was hidden over half the session.
+
 ## Reading FLAGS.md
 
 `docs/testing/runs/FLAGS.md`, newest first, one line per flag:

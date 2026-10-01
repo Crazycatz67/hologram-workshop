@@ -3,6 +3,9 @@
 Newest first. Rounds live in `YYYY-MM-DD.md`; longer write-ups in `reports/`.
 
 ## Rounds
+- 2026-10-01 — Round 5, Owner live feedback → selection, UI, polygon, Platform hands, Track B real data; session close — [2026-10-01.md](2026-10-01.md)
+- 2026-10-01 — Round 4, Owner's first live test; photo → 3D + pointer fixes — [2026-10-01.md](2026-10-01.md)
+- 2026-10-01 — Round 3, Test recorder, shadow site, library ring + store, depth pre-pass — [2026-10-01.md](2026-10-01.md)
 - 2026-09-30 — Round 2, Gesture fixes + probe + P5 + ring + selector research — [2026-09-30.md](2026-09-30.md)
 - 2026-09-30 — Round 1, B1 beyond the chair (Track B) + side requests — [2026-09-30.md](2026-09-30.md)
 

@@ -42,8 +42,10 @@ Electron-as-node (see the bottom of this file).
 | Page loads, 0 console errors: `index.html`, `hologram.html`, `hands.html`, `platform/index.html` | load each, read console errors; hologram.html: arrow-key swap ×5; platform: landing ring, load a sample. **Never click "start camera"** | srv, tab | 0 console errors on index, hologram (+5 arrow swaps), hands, platform/index (Timmy) | 2026-10-01 commit gate |
 | `completion/benchmark.py` (Track B object chain) | `.venv/bin/python completion/benchmark.py` (smoke: `--methods none thickness --scenarios holes`, ~3 s) | cpu (full run minutes; sofa ~277 s) | chair `complete`: underside 98%/96%, wall 99%/96%, holes 100%/100% (coverage@2cm / added-real) | 2026-09-30 (e8c50f4) |
 | `completion/benchmark.py --truth completion/out/truths/sofa.obj --methods none` (BUGS #21 regression) | as written | cpu | must print `added 0.000 m2` on every row | 2026-09-30 |
+| `completion/photo3d.py` (photo → real 3D via TripoSR, Track B contract, all `inferred`) | `.venv/bin/python completion/photo3d.py completion/out/chess-photos/IMG_1979.JPG --height-cm 7`, then load `/platform/index.html?model=/completion/out/photo3d/IMG_1979.obj&db=<test>` | cpu + `.models/triposr` env (~5.6 GB peak) | chess IMG_1979: 105,748 faces, 14.3 s wall warm (model 3.4 s, mesh 6.1 s), peak 5.56 GB, levelled 42°, 41×7×39 cm; Platform: hatch on, 100.0% inferred (sidecar), method shown, 0 JS errors (favicon 404 only). Flat photo preview: photo-test with a real photo 92,646 tris, part labelled "Flat photo preview (2.5D)" (Cody-T) | 2026-10-01, f439528 + dirty |
 | `completion/truths.py` (builds stool/vase/lamp/sofa truths) | `.venv/bin/python completion/truths.py [--only vase]` | cpu | built 2026-09-30 into `completion/out/truths/` | 2026-09-30 |
 | `completion/room_bench.py` (room mode, BUGS #25 regression) | `.venv/bin/python completion/room_bench.py --methods complete plane_extend --scenarios occlusion` | cpu (up to 3.5 GB for `complete`) | plane_extend occlusion 54% / 100% real; holes 100/100 | 2026-09-30 |
+| `completion/redwood.py` (Track B REAL room: Redwood Bedroom recon scored vs laser) | `.venv/bin/python completion/redwood.py` (stages cached in `completion/out/redwood/`; `--stage prep|register` to stop early) | cpu, one heavy job (prep 5.5 GB / 68 s; register 4.0 GB / 47 s; bench 6.4 GB parent / 19 min) | Registration: FPFH+RANSAC+pt-to-plane ICP + uniform scale 0.9793 (recon 2% too big; rigid-only fit@2cm 49%) -> fit@2cm 76.7%, @5cm 93.1%, inlier RMSE 9.4 mm. Occlusion (37.8% hidden), cov@2cm / real@2cm / F@5cm: none 31%/-/-; poisson FAILED (null normals; preclean variant 66%/25%/57%); plane_extend = auto (room mode) 52%/31%/69%; merged-shells prototype 50%/43%/67%. Holes: plane_extend 50%/21%/56%; merged-shells 51%/35%/61%; poisson[preclean] 58%/13%/41% (Debbie) | 2026-10-01, f439528 + dirty |
 | Python tool smoke (`clean_scan.py`, `analyze_scan.py`, `repair_scan.py`) | see `.claude/skills/hologram-livelab` step 3; outputs to a scratch folder, never `assets/`; run Poisson tools several times and check the output file exists (exit 0 proves nothing, BUGS #8/#13) | cpu (light) | chair: symmetry 164.3° / 88.3%, ~75.5k verts, manifold | 2026-09-29/30 |
 
 ## Features
@@ -66,15 +68,16 @@ Electron-as-node (see the bottom of this file).
 | Platform P5: inferred geometry ghosted, View Completed / As scanned, I key | verified-offline (p5-test 20/0, 2026-09-30) | needs-live (owner look check) | 2026-09-30 | Re-run p5-test after the library wiring in main.js lands. Overlap brightness affected by BUGS #30. |
 | Platform Library ring (landing screen, cards = scenes) | verified-offline (ring-test 71/0, overseer 2026-10-01) | needs-live (look and feel) | 2026-10-01 | Being break-tested by Debbie now; re-run after. |
 | Platform Library store (IndexedDB autosave, Save version Cmd/Ctrl+S, versions, drop your own scan) | verified-offline (library-test 55/0, overseer 2026-10-01) | needs-live | 2026-10-01 | Tests use `?db=` so the visitor's real `hologram-library` is never touched. Real OS drag-drop only exercised programmatically. |
+| Platform polygon lens (P key: whole model shows triangles, click selects a patch, Delete hides, I marks inferred, undo) | verified-offline (polygon-test 32/0) | needs-live | 2026-10-01 | Checklist steps L1–L3 below. Debbie is reworking the P-key view now, so re-run polygon-test after. |
 | Photosafety (≤ 3 flashes/s) | verified-offline (safety-test, 2026-09-29) | needs-live (not yet seen by a flicker-sensitive person) | 2026-09-29 | BUGS #14. |
 | BUGS #30 depth pre-pass wiped by background clear (layers add up) | failing (OPEN; p5-test works around it with a null background) | n/a | 2026-09-30 | Brightness stacking, not flashing (0 flashes/s). Re-run safety-test + p5-test after the fix. |
 | Scan completion, object mode (`complete.py --mode object`) | verified-offline (benchmark, chair 98–100%) | not-run (no real partial scan of the owner's yet) | 2026-09-30 | Fails on thin shells (#24) and big thick furniture (#23); synthetic, noise-free = upper bounds. |
-| Scan completion, room mode (`--mode room`, plane_extend) | verified-offline (room_bench) | not-run | 2026-09-30 | Synthetic planar room: upper bounds. #25 mitigated by auto-routing. Redwood real room still needs registration before scoring. |
+| Scan completion, room mode (`--mode room`, plane_extend) | verified-offline (room_bench) | not-run | 2026-09-30 | Synthetic planar room: upper bounds. #25 mitigated by auto-routing. **Real room (Redwood, 2026-10-01): recall holds (52% vs synthetic 54% @2cm) but precision collapses (31% vs 100%)**: non-planar real floors/walls split into parallel shell fragments that are extended room-wide. See the redwood.py row. |
 | Carousel model swap on hologram.html (BUGS #1) | verified-offline (12 swaps, agent browser run 2026-09-29) | needs-live (rAF count in a visible tab) | 2026-09-29 | |
 
 ## Owner live checklist (draft, 2026-10-01)
 
-Total if all groups run: about 15 minutes. Do the READY NOW groups first.
+Total if all groups run: about 21 minutes. Do the READY NOW groups first.
 
 ### A. Finger-gun pointer probe (gun-lab) — ~3 min — READY NOW
 (server: `python3 serve.py` in the repo; open `http://localhost:8080/docs/lab/gestures/gun-lab.html`; hard refresh Cmd+Shift+R)
@@ -110,6 +113,20 @@ Send back: pass/fail per step number, plus one line on how scale feels.
 5. Drag `completion/out/chair_underside_completed.obj` and `completion/out/chair_underside_completed.json` onto the page together, then press I twice. Expected: filled-in faces look ghosted and still, clearly different from scanned faces, and nothing flashes.
 Send back: pass/fail per step, a screenshot of step 5.
 
+### E. Platform polygon lens — ~3 min — WAIT (Debbie is reworking the P-key triangle view now)
+(open `http://localhost:8080/platform/index.html`; hard refresh; open the chair sample)
+L1. Select the chair, press P. Expected: the whole model shows its triangles.
+L2. Click a patch to select it, press Delete, then Ctrl/Cmd+Z. Expected: the patch hides, then comes back.
+L3. Select a patch, press I, press I again, then Ctrl/Cmd+Z. Expected: I marks it inferred, the second I unmarks it, undo reverses the last change.
+Send back: pass/fail per step.
+
+### F. hologram.html pointer — ~3 min — WAIT (Cody-S is rebuilding selection; Cody-U the layout)
+(open `http://localhost:8080/hologram.html`; hard refresh; start camera)
+P1. Point with the index finger out and the other three fingers curled. Expected: the pointer shows and follows your finger.
+P2. Pinch with your other hand while pointing. Expected: that counts as a click (on the model, a part is picked).
+P3. Use the tape measure: click two points on the model with pinch clicks. Expected: a measured length appears.
+Send back: pass/fail per step.
+
 ## How runs work here (for the next pass)
 - Lab self-tests that need no DOM run under Electron-as-node:
   `ELECTRON_RUN_AS_NODE=1 '/Applications/Visual Studio Code.app/Contents/MacOS/Code' script.mjs`,
@@ -138,3 +155,17 @@ GREEN. All suites run fresh in my own tab (hidden tab; perf timings may be affec
 - FLAGS.md: older lines are agent noise, not current failures: 02:18 p5 #30 fails (before the fix), 02:32 test pointer fails (Cody-P mid-edit; now 217/0), 02:43 safety "5 gone" (aborted run; rerun 5/5), session-* console-error/crashed lines (sessionrec self-checks / injected error), hidden-tab and low-fps (agent tabs). Left in place. Only live concern: perf-test tolerance flag (pr2 legacy).
 - Not run: Python Track B (no change in this diff), photo-test with a real photo, anything needing a webcam.
 - Features: pointer slice 1 (engage/aim/click, measure placement) verified-offline with synthetic hands, needs-live; Library ring needs-live; shadow recorder verified-offline (badge present, sessions recorded).
+
+### Track B re-run after BUGS #25 fix (slab_fill skips room-shell planes), 2026-10-01, c90d3e2 + dirty (Timmy)
+- Chair (benchmark.py): underside 98%/97%, wall 99%/96%, holes 100%/100% (6.5 s, ~400 MB). Unchanged.
+- Sofa `complete`: underside 24%/21%, wall 68%/33%, holes 100%/22% (18 s, ~920 MB). Identical to the post-#22 baseline.
+- Stool `complete`: 100%/100%, 100%/100%, 94%/100%. Lamp `complete`: 94%/79%, 100%/15%, 86%/83%. Within baseline.
+- room_bench `complete`: occlusion 40%@2cm / 28% real (was 13/19), holes 95%/18% (was 84/18); 75-85 s, 3.8-4.1 GB (was ~30 s, ~3 GB). plane_extend unchanged: 54%/100%, 100%/100%.
+
+### Track B benchmark of BUGS #24 fix (normal-aware keep_only_gaps; poisson density_trim=3.0 in complete), 2026-10-01, working tree (Timmy)
+- `complete`, cov@2cm / added-real (peak MB 400-925; times noisy, Debbie's job may have been running).
+- Chair: underside 98%/98%, wall 99%/96%, holes 100%/100% (7 s, 650 MB). PASS (bar >=97% cov). Baseline 98/99/100, real 96-97.
+- Vase: underside 100%/48%, wall 100%/**34%**, holes 77%/100%. Wall added-real was 15%, bar 40%, Ricky predicted 42%: improved, **bar MISSED**.
+- Lamp: underside 94%/84%, wall 100%/46%, holes 87%/85%. Wall added-real was 14%: PASS (bar 40%, predicted 55%).
+- Stool: underside 100%/100%, wall 100%/100%, holes 94%/100%. PASS (bar 97%).
+- Sofa (report only): underside 24%/32%, wall 68%/36%, holes 100%/23% (22-25 s, 925 MB). Cov identical to baseline (24/21, 68/33, 100/22); real +11/+3/+1.

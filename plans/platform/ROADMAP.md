@@ -19,6 +19,11 @@ Nobody offers free, in-browser, gesture-controlled interaction with *your own se
 
 ## Revision History
 
+- **2026-10-01 (3):** **Owner's first full live test → redesign of selection and UI** (Ricky's reports; owner decisions):
+  - Calibration "works really well"; the absolute cursor is kept.
+  - **Selection (other-hand pinch) was too hard** (needs both hands in view; distance-sensitive). New: **bubble targeting** (nearest part highlights, with hysteresis) + **hold still ~0.65 s to select** (holdGate ring, invisible for the first 200 ms) + a **quick same-hand pinch** with aim freeze and rewind for speed. Exploded parts get an outline, a name chip and "spread to fit"; **hold again to cycle** through overlapping parts. A/B'd in calibration practice.
+  - **UI declutter:** the gesture demo moves to the Platform layout (right-hand Tools panel with Practice / Measure / Look tabs, one priority coach box for every prompt, a clean top bar). Instructions follow a writing standard (icon, verb first, ≤2 lines, "✓ success looks like…"). Measure is ordered Size → Tape (toggle, key T) → Notes, with Weight & shipping and Will-it-fit folded under "Report".
+  - Built on the shared `handsRuntime.js` (P1 design step 1).
 - **2026-10-01 (2):** **Finger-gun probe run by the owner (webcam, 49 fps): the click is the OTHER HAND'S PINCH.** The aiming hand's palm moved 8 px (median) per one-hand pinch versus 13–25 px per thumb drop (max 48 px), and the thumb drop failed every shift check. Other findings:
   - **The gun pose was recognised on 0% of real frames.** `gunPose.js` thresholds came from a synthetic hand. Being re-fitted from per-check diagnostics, with the thumb condition dropped since it no longer triggers anything.
   - **Canned labels can't find it:** pointing at the camera reads as Thumb_Up 100% of the time; side-on is mostly None.

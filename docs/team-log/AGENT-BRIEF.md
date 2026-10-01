@@ -33,10 +33,19 @@ you need.
 - Bugs go in `BUGS.md` with track tags `[A]`/`[B]`/`[A-v1]`; never renumber.
 - Never commit, push or send. The overseer commits after Timmy's GREEN.
 
-## Current state (2026-10-01; update each round)
-- Last commit `f439528`. Uncommitted: tilt reversed, scale #31, gunPose calibrated + pointer veto
-  #32, Library ring + store (Debbie fixing #33–#44), test recorder (`testrec.js` + serve.py
-  endpoints; :8080 needs a restart to pick them up).
-- Owner decisions: Engage→Aim→Act gestures; pointer = index out + 3 curled (side-on or at camera);
-  click = other hand's pinch; ✌ tool wheel; pins against edits; polygon lens non-destructive;
-  Library ring is the landing screen.
+## Current state (2026-10-01)
+- Last commits: see `git log`.
+- **New modules:** `handsRuntime.js` (shared hand control: camera, tracker, pointer, calibration; runs
+  in the host loop), `platform/hands.js` (Platform adapter: Camera button, hover/select via objectMode),
+  `platform/polygon.js` (polygon lens + whole-model wireframe), `pointer.js createSelector` (bubble +
+  hold + same-hand pinch select), `calibrate.js` selection practice, `sessionrec.js` (shadow-site recorder).
+- **Shadow site** = localhost records all sessions to `docs/testing/runs/`, shows SHADOW badge, no data
+  leaves the machine. GitHub repo link records nothing. **Photo uploads** show a flat 2.5D preview;
+  real 3D via `.venv/bin/python completion/photo3d.py <photo> --height-cm N`.
+- **Open next:** #48 Poisson preclean; #49 merge parallel shell planes (real-room precision 31%);
+  #24 vase still ~66% invented; #23 parked (geodesic fallback failed the bar); P1 step 3 (grab/move via
+  objectMode + pins); ASL Read-mode G/H flip; owner live re-test of selection, layout, polygon and
+  Platform hands.
+- Owner decisions: Engage→Aim→Act gestures; pointer = index out + 3 curled; click = other
+  hand's pinch; ✌ tool wheel; pins against edits; polygon lens non-destructive; Library ring
+  is landing screen.

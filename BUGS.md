@@ -361,7 +361,7 @@ which is shared with v1 and was not in her assignment.
 
 ## 23. [B] slab_fill takes the "thickness" from a different part's edge
 
-**Status: OPEN** (2026-09-30). Found by Debbie on non-slab truths (`completion/truths.py`). A
+**Status: OPEN** (2026-09-30). Found by Debbie on non-slab truths (`completion/truths.py`). A — **2026-10-01 update: PARKED.** Geodesic-boundary fallback with an empty-probe guard tried behind `HW_SLAB_GEO=1` (default off): lamp underside 94→100%, stool 99%, vase/lamp wall real 34→40% / 46→52%, but chair underside added-real 98→93% and sofa real 32→20%. Same trade-off class as every variant; next idea if revisited: accept the geodesic drop only when its path length ≈ the straight-line distance (Ricky's 'hybc').
 design weakness rather than a crash, logged so the numbers aren't lost.
 - **Symptom:** stool: 36.9% of the seat top is never offset (Poisson happens to close it, so
   coverage still reads 100%). Lamp: 54% of the base top is never offset, underside 94%. Sofa:
@@ -379,7 +379,7 @@ design weakness rather than a crash, logged so the numbers aren't lost.
 
 ## 24. [B] Poisson balloons when one side of a thin shell is hidden
 
-**Status: OPEN** (2026-09-30). Found by Debbie on the vase and lamp truths.
+**Status: IMPROVED, partly open** (2026-10-01, overseer, from Ricky's research). Two causes: (1) Poisson balloons the open side; (2) the merge rule (`keep_only_gaps`) discarded the true outer skin, since a 5 mm wall's missing face is always within 1 cm of the scanned inner skin. Fix: normal-aware merge (a candidate is redundant only if a nearby scan sample faces the same way) in `slab_fill` + `complete`, and `poisson(density_trim=3.0)` in `complete` (drops low-density, unsupported surface; PyMeshLab density = `vertex_scalar_array`). Timmy, `complete`: vase wall added-real 15% → 34%, lamp wall 14% → 46%, sofa real +3–11 points, stool unchanged, chair 97–100% coverage. Trim 2.5 tested by the overseer: chair underside drops to 95%, so 3.0 stays (env `HW_DENSITY_TRIM` for experiments). Open: vase wall still ~66% invented; next ideas are thickness-aware shell offsetting and a per-region trim.
 - **Symptom:** lamp, wall scenario: ~0.18 m² added (the whole lamp is 0.35 m²), only 14–18%
   real, a skirt out to r ≈ 0.30 m around a 0.14 m shade. Vase underside: 0.22 m² added, 24% real.
   Also inflates the sofa: underside 3.8 m² added, 13% real.
@@ -398,7 +398,7 @@ design weakness rather than a crash, logged so the numbers aren't lost.
 
 ## 25. [B] The object pipeline invents walls on room scans (slab_fill treats walls as slabs)
 
-**Status: MITIGATED (verified offline)** (2026-09-30). Found by Cody on the synthetic room
+**Status: FIXED (verified offline)** (2026-10-01, overseer; Timmy benchmarks: chair/stool/lamp/sofa unchanged, room `complete` occlusion 13→40% and holes 84→95% coverage; that path now ~80 s vs ~30 s, but rooms use plane_extend via auto mode). `fill.slab_fill` now skips faces on shell planes (`planes.find_planes`, `shell=True`: floor, walls, ceiling), since a wall is not a slab. Room occlusion scan, slab_fill alone: **5.64 m² added at 25% real → 0.48 m² at 77% real**. Objects have no shell planes, so the chair/stool/sofa paths are unchanged (benchmarks re-run by Timmy). complete.py's room auto-mode stays the main protection; this closes the gap for a room part that includes a slice of wall.
 (`completion/room_bench.py`).
 - **Symptom:** `fill.complete()` on the room occlusion scan adds 22–27 m², only 18–21% of it real,
   in 30–34 s at up to 3.5 GB. `slab_fill` alone adds 5.64 m² by copying floor and walls to fake
@@ -624,3 +624,34 @@ new tracker on every start and `stop()` never closed it.
 - **Root cause:** `openProject` set `lib.opening = false` before the thumbnail capture (`platform/main.js`, old line ~904).
 - **Fix:** `lib.opening` stays true until the thumbnail is stored; edits made meanwhile are handed to autosave afterwards; a thumbnail failure no longer counts as a failed open (`main.js` ~905-924).
 - **Regression check:** library-test B32 (after: B refused, A opened with a thumbnail).
+
+## 45. [A-v1] With everything armed, two-hand scale never starts if the hands come up open first
+**Status: FIXED (needs live confirm)** (2026-10-01). Owner live report ("Everything on" drill: scale "really difficult").
+- **Symptom:** raise both hands, then pinch both: mode goes explode → idle and stays idle while both hands pinch; scale never changes. Owner session 03-31-18: transform 2 entries / 2.6 s vs explode 8 entries in the drills.
+- **Reproduction:** realistic synthetic hands through annotateHand → createEngagement → manipulator (30 fps): open hands 400 ms, then pinch + spread. Before: TRANSFORM 0/10 runs (76 of 90 frames both-pinching, scale 1.000); Scale-only channels: TRANSFORM at 533 ms. Same after grab → open 150 ms → pinch (0/10 at 15 fps).
+- **Root cause:** two open hands are explode's pose, so explode engages in 50 ms; pinching ends it after its 220 ms exit, which starts the #26 neutral gap (`manipulator.js` `startGap`/`updateGap`). The gap needs 100 ms of "no gesture pose", which a held pinch never gives, so `allowed(TRANSFORM)` stays false until the hands drop. Not pinch flicker (noisy pinch around 0.22 still engages at 200 ms), not the pointer, not the engage band.
+- **Fix:** `manipulator.js` `allowed`: TRANSFORM is exempt from the neutral gap (a two-hand pinch is never another gesture's leftover pose); the pointer gap and 50 ms entry still apply. After: TRANSFORM 10/10 at 733 ms (open→pinch), 10/10 at 933 ms (grab→pinch); #26 release chain still never explodes.
+- **Regression check:** test.js group "Two-hand scale starts with everything armed (BUGS #45)" (snippet in docs/team-log/reports/2026-10-01-debbie-scale-45-test-snippet.js; Cody-C to append): fails 3/4 on old code, 0/4 on new. test.html 218/0.
+- **Still to confirm:** Everything-on drill on the webcam: hands up open, pinch both, pull apart → scale within ~0.3 s; release → no explode.
+
+## 46. [A] Polygon mode looked unchanged on the sample chair: "still the original hologram"
+
+**Status: FIXED (needs live confirm)** (2026-10-01). Owner live report; session-platform 2026-10-01_04-40-04 (sample Chair, 304k tris, 8 parts; #polyBtn 4×, P 1×, 0 errors).
+- **Symptom:** with Polygon on, the hologram looked exactly the same; only a faint lens ring appeared. Real page: lens read "27,862 faces" inside a 70 px circle, but no lines were drawn. Polygon also stayed disabled until a part was selected in object mode, with no hint.
+- **Reproduction:** platform/index.html?db=…: open the sample Chair from the ring → Object mode → click seat → Polygon → hover. 100% on this chair.
+- **Root cause:** (1) `look.js` lens density fade removes lines on triangles < 4 px; the chair's real triangles are ~0.6 px (LOD: 1.4 px median), so the lens drew nothing. Depth/LOD was ruled out (depthTest off changed nothing). (2) The mode changed nothing outside the lens: no whole-model view, skin at full brightness. (3) `main.js` `syncPolygonBtn` required a selection.
+- **Fix:** `polygon.js`: a full wire over the whole target (selected item, or whole scene if nothing is selected) from a per-part simplification ladder, choosing the finest level with ~8 px triangles, capped at 120k (4.7k at the default view, 45k zoomed in, then the real triangles); it has its own depth so hidden lines stay hidden, dashed/dimmer on inferred faces, and leaves out hidden faces. The hologram eases (900 ms) to a faint skin (`look.setSkin`, 0.3×). One-line coach text + wire count in the read-out; status line on entering. The lens is unchanged and still selects patches. `look.js`: `createLensMaterial({ full })`, `createWireDepthMaterial`, `setSkin`. `main.js`/`index.html`: whole-scene entry, `getItems`/`onSkin` wiring, tooltip.
+- **Regression check:** polygon-test group F (10 checks on the real 8-part chair): pixel diff with the pointer off the model 99% of model px changed (0% with the wire disabled in a scratch copy, so the check fails on the old behaviour); faint skin + lines; every part within budget; finer when zooming in; lens hits the right part 8/8; hidden faces leave the wire; whole scene; exit restores exactly (max diff 0); on/off toggling ≤ 2 flashes/s. polygon-test 42/0.
+- **Still to confirm:** owner: open Chair, press P with nothing selected → within ~1 s the chair turns into a faint skin with a calm triangle wire; zoom in → the wire gets finer; hover → lens; click → amber patch. Say whether 0.9 s feels too slow, and whether the coarse wire at the default view reads as "its real triangle form" (it is a simplification until you zoom in; the read-out says "N of 304,000 triangles · zoom in for finer").
+
+## 47. [A-v1] A held same-hand pinch on the pointing hand could start a grab
+
+**Status: FIXED (verified offline; needs live confirm)** (2026-10-01; found by Cody-I wiring one-hand selection, fix applied by the overseer). With synthetic hands, a same-hand pinch held over ~300 ms whose hand read as a fist (index curled with the others, or MediaPipe "Closed_Fist") started a GRAB at 367 ms and moved the model up to 0.04. **Fix (manipulator.js):** an aiming hand that pinches stays latched as a pointer until the pinch opens or the hand leaves, so it never counts as a fist; the post-pointer gap starts at the release. Cody-I's patched-copy check: 0 grab frames in all 12 held-pinch cases, and pointer → fist with no pinch still grabs at 367 ms. test.html 304/0 after the fix. **Live check:** if a real fist brings the thumb within 0.25 palm lengths of the index tip, pointer → fist would stay latched until the hand opens.
+
+## 48. [B] Poisson refuses real scans with back-to-back folded faces
+
+**Status: OPEN** (2026-10-01, found by Debbie on the Redwood Bedroom reconstruction). About 109 points where two faces fold back-to-back cancel their normals and screened Poisson fails, so `poisson` and `complete` FAIL on the real room. Fix to try: `fill.poisson(..., preclean=True)` (prototype in `completion/redwood.py`: with it, occlusion recall 66% / precision 25%).
+
+## 49. [B] plane_extend over-extends small parallel shell planes on real rooms
+
+**Status: OPEN** (2026-10-01, Debbie, `completion/redwood.py`). A real floor varies by about 8 cm, so RANSAC splits it; a small piece 6.6 cm lower became a "shell" and was extended across the room (21.8 m² added from 1.8 m² measured); the same happened with a wall piece 14 cm behind the main wall. Real room: plane_extend recall 52% but only 31% of added surface real (synthetic room: 100%). Fix to try: in `planes.find_planes`, demote a shell plane when a larger parallel shell plane lies within 25 cm (redwood.py `merged_shells`: F@2cm 39→46 occlusion, 29→42 holes). Re-check the synthetic room bench after.

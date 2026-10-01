@@ -48,7 +48,7 @@ browser, and once in System Settings → Privacy & Security → Camera.
 
 Full breakdown in [plans/object-hologram/ROADMAP.md](plans/object-hologram/ROADMAP.md); working conventions in [CLAUDE.md](CLAUDE.md).
 
-**Regression tests:** open [`test.html`](test.html) locally and read the page — 153 checks covering gesture isolation, the neutral gap, tracking-noise robustness, and every measurement figure against the shipped chair scan. No framework, no build step; a run is opening the page.
+**Regression tests (as of 2026-10-01):** open [`test.html`](test.html) locally and read the page — 218 checks; also [`platform/library-test.html`](platform/library-test.html) (69 checks), [`platform/ring-test.html`](platform/ring-test.html) (73 checks), [`platform/p5-test.html`](platform/p5-test.html) (24 checks). No framework, no build step; a run is opening the page. **Shadow site** (localhost) records all sessions with a "SHADOW" badge; public GitHub link records nothing.
 
 ## Running locally
 
@@ -91,6 +91,7 @@ Then open <http://localhost:8080>.
 | `test.html`, `test.js` | Regression suite — open the page, read pass/fail. Synthetic hand geometry and the shipped chair scan; no build step, no framework |
 | `analyze_scan.py` | Suggests crop parameters for a new raw scan (see v1 roadmap) |
 | `clean_scan.py` | **Raw scan → clean object.** Detects and removes the ground plane (without deleting the object's base), rebuilds missing structure by mirroring, fills gaps, welds watertight, decimates for the web |
+| `completion/photo3d.py` | **Photo → 3D model via TripoSR** (free, local). Output always marked as inferred; takes `--height-cm` for calibration |
 | `repair_scan.py` | Lower-level mesh repair (PyMeshLab, no GUI) — see v1 roadmap for what worked and what didn't |
 | `ROADMAP.md`, `plans/` | Track index + isolation rules; one roadmap per track under `plans/` |
 | `platform/`, `completion/`, `neurotech/` *(`neurotech/` not created yet)* | Where Platform (browser), Scan Completion (Python) and Arm code live, kept apart from the v1 files above. `platform/` and `completion/` exist; `assets/benchmark/` holds the git-ignored ground-truth scans (see its `SOURCES.md`) |
