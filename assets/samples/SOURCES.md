@@ -31,3 +31,19 @@ credit shown wherever the model is shown: that is what the `credit` strings are 
 Part names follow `completion/bake_parts.py` ("noun · where", e.g. `leg · front left`).
 Where a model is one mesh, the names come from shape + position; a few were checked by eye
 or by the part's texture colour and overridden in `build_samples.py` (`names` / `rename`).
+
+## Playful demos (Hands v2 Phase 5)
+
+Built procedurally by `build_playful.py` in this folder (`.venv/bin/python
+assets/samples/build_playful.py`, about 2 s, byte-identical on every run). Nothing is
+downloaded: every shape is made from lathes, sweeps, boxes and convex hulls in that script, so
+these four are **our own work, released as CC0 1.0**. Same contract as above, except colour is
+stored as **vertex colours** (the hologram look reads a texture map or vertex colours, never a
+flat material colour).
+
+| File | Parts | Licence | Notes |
+| --- | --- | --- | --- |
+| fruit-bowl.glb | 10: bowl, apple · red, apple · inside, apple · green, orange, lemon, pear, peach, banana, grapes | CC0 1.0 (procedural, this project) | 0.29 × 0.21 × 0.31 m. `apple · inside` (flesh, core, seeds) sits just inside the red apple's skin, for slicing it open later; it explodes along with the apple. No fruit sits on the bowl's axis, so explode scatters every fruit out of the bowl |
+| gears.glb | 5: frame (base, back plate, axle pins), gear · big/small/medium/top | CC0 1.0 (procedural, this project) | 0.41 × 0.33 × 0.11 m. 36/12/24/16 teeth, meshing with 0.6 mm backlash; even tooth counts, so each gear's bounding-box centre is its axle (a twist spins it in place) |
+| layered-building.glb | 5: floor · ground/1st/2nd/3rd, roof | CC0 1.0 (procedural, this project) | 0.43 × 0.50 × 0.28 m (an architectural model, ~1:25). Floors step sideways so explode sends each one its own way (explode pushes every part the same 0.6 m from the centre, so a straight stack would move as two blocks) |
+| lowpoly-fox.glb | 1: fox | CC0 1.0 (procedural, this project) | 0.94 × 0.56 × 0.20 m, 370 faceted triangles (unshared vertices, flat normals) for the polygon lens |
