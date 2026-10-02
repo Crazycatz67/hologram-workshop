@@ -4,6 +4,7 @@
 const V = '?v=' + Date.now();
 const { createToolWheel, sectorAt, DIRS, WHEEL } = await import('./toolWheel.js' + V);
 
+const v2 = (await import('./gestures.js')).handsV2Enabled();
 const out = document.getElementById('out');
 const results = [];
 const consoleErrors = [];
@@ -54,32 +55,36 @@ wheel.on('open', (e) => events.push(['open', e]));
 wheel.on('close', (e) => events.push(['close', e.why]));
 wheel.on('pick', (e) => events.push(['pick', e.dir]));
 
+// Aim spots are relative to the viewport centre: the wheel clamps itself on screen (E2), so a
+// fixed spot like (400, 300) only fits a tall-enough window (radius 150 needs >= 490 px; a
+// default headless window is 469 px tall and read 26/5).
+const CX = Math.round(innerWidth / 2), CY = Math.round(innerHeight / 2);
 let t = 1000;
 let r = hold(wheel, [hand('Victory')], t, 300); t = r.t;
 check('B1 a ✌ passed through for 300 ms does not open the wheel', !wheel.isOpen);
 r = hold(wheel, [hand('Open_Palm')], t, 400); t = r.t;
-wheel.point({ x: 400, y: 300 }, t);
+wheel.point({ x: CX, y: CY }, t);
 r = hold(wheel, [hand('Victory')], t, 750); t = r.t;
 check('B2 ✌ held ~650 ms opens it', wheel.isOpen && events.some((e) => e[0] === 'open'));
 const box = wheel.el.getBoundingClientRect();
-check('B3 it opens where the hand cursor was', Math.abs((box.left + box.right) / 2 - 400) < 3 && Math.abs((box.top + box.bottom) / 2 - 300) < 3, `${Math.round((box.left + box.right) / 2)},${Math.round((box.top + box.bottom) / 2)}`);
+check('B3 it opens where the hand cursor was', Math.abs((box.left + box.right) / 2 - CX) < 3 && Math.abs((box.top + box.bottom) / 2 - CY) < 3, `${Math.round((box.left + box.right) / 2)},${Math.round((box.top + box.bottom) / 2)} vs ${CX},${CY} (${innerWidth}x${innerHeight})`);
 check('B4 a held ✌ does not re-fire (no instant close)', (() => { const x = hold(wheel, [hand('Victory')], t, 600); t = x.t; return wheel.isOpen; })());
 
 // ---- C. aiming and picking ------------------------------------------------------------------------------
-wheel.point({ x: 400, y: 300 - 80 }, t);
+wheel.point({ x: CX, y: CY - 80 }, t);
 check('C1 aiming up lights Undo', wheel.lit === 'up' && wheel.el.querySelector('[data-dir="up"]').classList.contains('lit'));
-wheel.point({ x: 400 + 70, y: 300 + 40 }, t + 10);
+wheel.point({ x: CX + 70, y: CY + 40 }, t + 10);
 check('C2 a disabled slot never lights', wheel.lit === null);
-wheel.point({ x: 400 + 70, y: 300 - 40 }, t + 20);
+wheel.point({ x: CX + 70, y: CY - 40 }, t + 20);
 check('C3 aiming up-right lights Tape', wheel.lit === 'upRight');
 const took = wheel.click();
 check('C4 the other-hand pinch runs the lit slot and closes', took && ran.at(-1) === 'tape' && !wheel.isOpen && events.at(-1)[0] === 'pick');
 check('C5 a click while closed is not taken', wheel.click() === false);
 
 // ---- D. closing ---------------------------------------------------------------------------------------------
-const reopen = () => { t += 2000; hold(wheel, [hand('Open_Palm')], t, 400); t += 433; wheel.point({ x: 500, y: 400 }, t); const x = hold(wheel, [hand('Victory')], t, 750); t = x.t; return wheel.isOpen; };
+const reopen = () => { t += 2000; hold(wheel, [hand('Open_Palm')], t, 400); t += 433; wheel.point({ x: CX, y: CY }, t); const x = hold(wheel, [hand('Victory')], t, 750); t = x.t; return wheel.isOpen; };
 check('D0 reopens', reopen());
-wheel.point({ x: 500, y: 400 }, t);
+wheel.point({ x: CX, y: CY }, t);
 wheel.click();
 check('D1 a pinch in the centre opens Help', ran.at(-1) === 'help' && !wheel.isOpen);
 reopen();
@@ -90,9 +95,9 @@ reopen();
 dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
 check('D3 Esc closes it', !wheel.isOpen && events.at(-1)[1] === 'esc');
 reopen();
-wheel.point({ x: 500, y: 320 }, t);
+wheel.point({ x: CX, y: CY - 80 }, t);
 for (let k = 33; k <= WHEEL.idleMs + 50; k += 500) wheel.feed([hand('Pointing_Up')], t + k);
-wheel.point({ x: 500, y: 320 }, t + WHEEL.idleMs + 50);
+wheel.point({ x: CX, y: CY - 80 }, t + WHEEL.idleMs + 50);
 check('D4 5 s with no new slot closes it', !wheel.isOpen && events.at(-1)[1] === 'idle');
 t += WHEEL.idleMs + 100;
 reopen();
@@ -162,16 +167,22 @@ check('E6 dispose removes it', !document.querySelector('.tool-wheel'));
   const OTHER = { x: 0.15, y: 0.5 };
   let tt = 900000;
   const frames = (ms, make) => { for (let k = 0; k < Math.round(ms / 33); k++) { tt += 33; rt.injectFrame(make(), { t: tt }); } };
-  const spot = { x: 700, y: 450 };
+  const spot = { x: CX, y: CY };
   frames(600, () => [rhand(palmFor(spot), { gun: true }), rhand(OTHER, { handedness: 'Left' })]);
   frames(900, () => [rhand(palmFor(spot), { gesture: 'Victory' }), rhand(OTHER, { handedness: 'Left' })]);
   check('F1 runtime: ✌ held opens the wheel at the last hand cursor', rt.wheel?.isOpen === true);
   const up = { x: spot.x, y: spot.y - 90 };
   frames(500, () => [rhand(palmFor(up), { gun: true }), rhand(OTHER, { handedness: 'Left' })]);
   check('F2 runtime: aiming up lights Undo', rt.wheel.lit === 'up', String(rt.wheel.lit));
+  if (v2) {
+    log('SKIP  F3 runtime: other-hand pinch pick is v1-only (v2 click = thumb hammer drop)');
+    rt.injectClick({ x: up.x, y: up.y, t: tt, source: 'hand' });
+    check('F3v2 runtime: a routed hand click runs the lit slot (Undo), closes; no scene click', picked.join() === 'undo' && !rt.wheel.isOpen && sceneClicks.length === 0, `${picked.join()} scene=${sceneClicks.length}`);
+  } else {
   frames(150, () => [rhand(palmFor(up), { gun: true }), rhand(OTHER, { handedness: 'Left', pinching: true })]);
   frames(200, () => [rhand(palmFor(up), { gun: true }), rhand(OTHER, { handedness: 'Left' })]);
   check('F3 runtime: the other-hand pinch runs Undo and closes; no scene click', picked.join() === 'undo' && !rt.wheel.isOpen && sceneClicks.length === 0, `${picked.join()} scene=${sceneClicks.length}`);
+  }
   rt.dispose();
   canvas.remove();
 }

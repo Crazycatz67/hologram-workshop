@@ -178,6 +178,8 @@
         <button id="nextModel" class="ghost" title="Next model (→)" aria-label="Next model">▸</button>
       </div>
       <span id="mode" class="off" role="status" aria-label="What your hands are doing">📷 Camera off</span>
+      <!-- The tool your hands are in (toolWheel.js createToolStatus): "✥ Free move" when none. -->
+      <span id="toolChip" class="tool-chip" role="status"></span>
       <div class="spacer"></div>
       <button id="helpBtn" class="ghost" title="Gestures and keys (?)" aria-controls="help" aria-expanded="false">?<span class="btn-word"> Help</span></button>
       <button id="toolsBtn" class="ghost" title="Practice, Measure and Look (P / M)" aria-controls="tools" aria-expanded="true">⚙<span class="btn-word"> Tools</span></button>
@@ -187,6 +189,8 @@
       <video id="cam" playsinline muted></video>
       <canvas id="overlay"></canvas>
       <div id="partChip" aria-hidden="true"></div>
+      <!-- Shown while a tool is on: back to free move (also Esc, the wheel centre, later the open palm). -->
+      <button id="doneBtn" class="done-btn" type="button" hidden title="Leave the tool, back to free move (Esc)">✋ Done</button>
       <div id="coach" class="empty" aria-live="polite">
         <div id="coachTitle"></div>
         <div id="coachBody"></div>

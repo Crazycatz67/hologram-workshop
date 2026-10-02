@@ -1,5 +1,9 @@
 // Clip Lab: records the owner performing each gesture of HANDS-UX-SPEC section 6 as a
 // landmark clip, so the future demo hand (tours, stuck hints) can replay real motion.
+// Since 2026-10-02 (plan Phase 0, "measure before tuning") it is also the guided ground-truth
+// recorder: "Run all" walks GROUND_TRUTH, records each gesture N times (default 5) as
+// '<gesture>-t<k>', and the owner marks each take ✓/✗. replay-lab.html scores these takes as
+// the 'owner' set; that is the acceptance number for the gesture rework.
 //
 // Privacy: only numbers are kept. The <video> is shown so the owner can see themselves, but
 // no frame, canvas or image is ever read back, stored or sent.
@@ -14,6 +18,10 @@
 //     durationMs: number,           // t of the last frame
 //     frameCount: number, fps: number (measured),
 //     mirrored: boolean,            // true when mirrorClip() was applied (an odd number of times)
+//     // ground-truth takes only (Run all):
+//     purpose: 'ground-truth', take: k (1-based), verdict: 'good'|'bad',
+//     //   name = '<gesture>-t<k>'; gesture = the CLIPS name. 'bad' = the owner pressed ✗/redo
+//     //   after it was saved; replay-lab leaves those out. A ✗ before saving saves nothing.
 //     video: { width, height },     // source camera size, to restore the aspect of `landmarks`
 //     frames: [{
 //       t: ms since capture start (first frame = 0),
@@ -34,6 +42,11 @@
 // Test seam: window.clipLab (see the bottom of this file). setHandSource(fn) replaces the
 // tracker's output with fn(nowMs) -> hands[] (same shape as handTracker.toHands), so a headless
 // run with a fake camera (which shows no hand) can still record a non-empty clip.
+// Run-all seam: runAll({ takes, names, countFirst, countNext }), accept(), reject(), skip(),
+// pause(), stopRun(); state.run holds progress.
+//
+// Run all needs localhost (off it, a take would be 100 separate downloads). Keys while it runs:
+// Enter/Y = ✓ good, X/N/R = ✗ bad + redo that take, Space = pause/resume, S = skip clip, Esc = stop.
 
 const ROOT = '../../../';
 const CLIP_DIR = `${ROOT}assets/gesture-clips/`;
@@ -62,8 +75,41 @@ export const CLIPS = [
   ['scroll', 'Right hand pinch-hold, drag up then down, release.', 4],
   ['lens', 'Aim to move the lens; then pinch-hold and drag up or down to resize; release.', 5],
   ['ring-spin', 'Right fist, drag sideways to spin; open; aim and pinch your left hand to open.', 5],
-  ['pin', 'Hold ✌ with your right hand, aim at the top-left slot, pinch your left hand.', 4]
+  ['pin', 'Hold ✌ with your right hand, aim at the top-left slot, pinch your left hand.', 4],
+  // Phase 0 ground truth: the owner's new vocabulary (2026-10-02) + near misses.
+  ['hammer-click', 'Right finger-gun: index points at the screen, thumb up. Drop the thumb once (click), lift it again.', 3],
+  ['done-palm', 'Show one open palm to the camera, fingers up, and hold it still for about a second.', 3],
+  ['tilt-any', 'Hold a left fist still. Turn your open right hand SLOWLY: roll, then pitch, then yaw, then a diagonal, each as far as your wrist comfortably goes.', 5],
+  ['tilt-ratchet', 'Hold a left fist still. Right open hand turns ~90°, closes, returns to neutral, opens, turns again: 3 ratchets.', 5],
+  ['tilt-flick', 'Hold a left fist still. Twist your right hand quickly, then open/lower it to let go.', 3],
+  ['assemble-close', 'Two open hands far apart; bring them together slowly until they nearly touch.', 4],
+  ['clap-slow', 'Two open hands apart; clap once SLOWLY (about a second to meet) and hold together.', 4],
+  ['clap-normal', 'Two open hands apart; clap once at your normal speed and hold together.', 3],
+  ['clap-fast', 'Two open hands apart; clap once QUICKLY and hold together.', 3],
+  ['swipe-left', 'Open right hand in view; flick it quickly to YOUR left, then let it rest.', 3],
+  ['swipe-right', 'Open right hand in view; flick it quickly to YOUR right, then let it rest.', 3],
+  ['swipe-up', 'Open right hand in view; flick it quickly upward, then let it rest.', 3],
+  ['stretch-vertical', 'Pinch both hands, one above the other; spread them apart top and bottom, then open.', 4],
+  ['fist-grab-tucked', 'Right fist with the thumb TUCKED inside the fingers; move it across, then open.', 3],
+  ['fist-grab-thumb-out', 'Right fist with the thumb OUTSIDE, across the fingers; move it across, then open.', 3],
+  ['null-rest', 'Not a gesture: just rest, hands relaxed on the desk or in your lap.', 3],
+  ['null-scratch-face', 'Not a gesture: scratch your cheek or nose the way you normally would.', 3],
+  ['null-wave-hi', 'Not a gesture: wave hi at the camera as if greeting someone.', 3],
+  ['null-reach-mouse', 'Not a gesture: reach for your mouse or trackpad and move it a little.', 3],
+  ['null-adjust-glasses', 'Not a gesture: adjust your glasses (or touch your temple if you wear none).', 3]
 ];
+
+// The Run-all list, in recording order (plan Phase 0: point, hammer click, pinch, fist, open,
+// clap slow/normal/fast, tilt any way, spread/close, stretch, swipe, then near misses).
+// ~78 s of gesture per round; with 5 takes and the countdowns that is about 11 minutes.
+export const GROUND_TRUTH = [
+  'aim-sweep', 'hammer-click', 'click-other', 'fist-grab-tucked', 'fist-grab-thumb-out', 'done-palm',
+  'clap-slow', 'clap-normal', 'clap-fast', 'tilt-any', 'tilt-ratchet', 'tilt-flick', 'explode', 'assemble-close', 'stretch-vertical',
+  'swipe-left', 'swipe-right', 'swipe-up',
+  'null-rest', 'null-scratch-face', 'null-wave-hi', 'null-reach-mouse', 'null-adjust-glasses'
+];
+export const DEFAULT_TAKES = 5;
+export const takeName = (gesture, k) => `${gesture}-t${k}`;
 
 const MIN_MS = 2000;
 const MAX_MS = 5000;
@@ -126,7 +172,12 @@ const state = {
   stopAt: 0,
   take: null, // unsaved clip
   play: null, // { clip, start, frame, done }
-  playedFrames: 0
+  playedFrames: 0,
+  countTimer: null,
+  recordMs: 0,
+  // Run all: { queue: [{ name, k, idx }], i, takes, paused, waiting, pending: { clip, item } | null,
+  //   lastSaved: { clip, item } | null, savedCount, rejected, countFirst, countNext, finishTimer, done }
+  run: null
 };
 
 const status = (msg) => { $('status').textContent = msg; };
@@ -145,15 +196,24 @@ function renderList() {
     if (name === state.current) li.classList.add('active');
     li.innerHTML = `<span class="name"></span><span class="saved"></span><div class="ins"></div>`;
     li.querySelector('.name').textContent = name;
-    li.querySelector('.saved').textContent = state.saved.has(name) ? '✓ saved' : '';
+    const takes = GROUND_TRUTH.includes(name) ? takesSaved(name) : 0;
+    li.querySelector('.saved').textContent = [state.saved.has(name) ? '✓ saved' : '', takes ? `${takes} take${takes > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
+    if (GROUND_TRUTH.includes(name)) li.classList.add('gt');
     li.querySelector('.ins').textContent = ins;
     li.addEventListener('click', () => select(name));
     ul.appendChild(li);
   }
 }
 
+// Saved ground-truth takes of a gesture (from index.json: any '<gesture>-t<k>').
+function takesSaved(name) {
+  let n = 0;
+  for (const s of state.saved) if (s.startsWith(`${name}-t`) && /^\d+$/.test(s.slice(name.length + 2))) n++;
+  return n;
+}
+
 function syncButtons() {
-  const busy = state.phase !== 'idle';
+  const busy = state.phase !== 'idle' || !!(state.run && !state.run.done);
   $('recBtn').disabled = busy || !state.stream;
   $('stopBtn').disabled = state.phase !== 'recording';
   $('playBtn').disabled = busy || !state.take;
@@ -162,10 +222,21 @@ function syncButtons() {
   $('discardBtn').disabled = busy || !state.take;
   $('savedBtn').disabled = busy || !state.saved.has(state.current);
   $('keepBtn').textContent = isLocal ? '✓ Keep' : '✓ Keep (download)';
+  const run = state.run;
+  const live = !!(run && !run.done);
+  $('runBtn').disabled = live || !state.stream || !isLocal;
+  $('takes').disabled = live;
+  $('pauseBtn').disabled = !live;
+  $('pauseBtn').textContent = run?.paused ? '▶ Resume' : '⏸ Pause';
+  $('goodBtn').disabled = !run?.pending;
+  $('badBtn').disabled = !(run && (run.pending || run.lastSaved));
+  $('skipBtn').disabled = !live;
+  $('stopRunBtn').disabled = !live;
+  if (!isLocal) $('runBtn').title = 'Run all saves to the repo, so it only works on localhost.';
 }
 
 function select(name) {
-  if (state.phase !== 'idle') return;
+  if (state.phase !== 'idle' || (state.run && !state.run.done && !state.run.paused)) return;
   state.current = name;
   state.take = null;
   const info = clipInfo(name);
@@ -244,33 +315,46 @@ function tick(now) {
 
 // --- recording ----------------------------------------------------------------------------
 
-function record() {
+// Countdown then record. One number per second, eased fade (photosafety: no flashing).
+// onStart runs the moment recording begins (Run all saves the previous take there).
+function record({ seconds = Number($('dur').value), countFrom = COUNT_FROM, label = '', onStart = null } = {}) {
   if (state.phase !== 'idle' || !state.stream) return;
   state.take = null;
   state.phase = 'countdown';
   syncButtons();
-  const ms = Math.min(MAX_MS, Math.max(MIN_MS, Number($('dur').value) * 1000));
+  const ms = Math.min(MAX_MS, Math.max(MIN_MS, seconds * 1000));
   const count = $('count');
-  let n = COUNT_FROM;
-  // One number per second, eased fade (photosafety: no flashing).
+  let n = Math.max(1, countFrom);
   const show = () => {
     count.textContent = String(n);
     count.classList.add('show');
-    status(`${state.current}: get ready… ${clipInfo(state.current).instruction}`);
+    status(`${label || state.current}: get ready… ${clipInfo(state.current).instruction}`);
   };
   show();
-  const timer = setInterval(() => {
+  state.countTimer = setInterval(() => {
     n -= 1;
     if (n > 0) return show();
-    clearInterval(timer);
+    clearInterval(state.countTimer);
+    state.countTimer = null;
     count.classList.remove('show');
     state.frames = [];
     state.phase = 'recording';
+    state.recordMs = ms;
     state.stopAt = performance.now() + ms;
     $('recDot').classList.add('on');
-    status(`Recording ${state.current} for ${ms / 1000} s…`);
+    status(`Recording ${label || state.current} for ${ms / 1000} s…`);
     syncButtons();
+    onStart?.();
   }, 1000);
+}
+
+// Stops a countdown or a recording without producing a take.
+function abortRecording() {
+  if (state.countTimer) { clearInterval(state.countTimer); state.countTimer = null; }
+  $('count').classList.remove('show');
+  $('recDot').classList.remove('on');
+  state.frames = [];
+  state.phase = 'idle';
 }
 
 function finishRecording() {
@@ -281,13 +365,15 @@ function finishRecording() {
   state.frames = [];
   const durationMs = frames.length ? frames[frames.length - 1].t : 0;
   if (durationMs < MIN_MS * 0.9 || frames.length < 2) {
+    // A hidden tab gets no animation frames, so a take recorded behind another window is short.
     status(`Too short (${(durationMs / 1000).toFixed(1)} s, ${frames.length} frames): record again (2–5 s).`);
+    if (state.run && !state.run.done) { state.run.paused = true; status(`Too short (${frames.length} frames): is the tab hidden? Run paused; press ▶ Resume.`); }
     syncButtons();
     return;
   }
   const info = clipInfo(state.current);
   const v = $('video');
-  state.take = {
+  const take = {
     schema: 'gesture-clip/1',
     name: info.name,
     gesture: info.name,
@@ -300,6 +386,8 @@ function finishRecording() {
     video: { width: v.videoWidth || 0, height: v.videoHeight || 0 },
     frames
   };
+  if (state.run && !state.run.done) { runTakeDone(take); return; }
+  state.take = take;
   const withHand = frames.filter((f) => f.hands.length).length;
   status(`Take ready: ${frames.length} frames, ${(durationMs / 1000).toFixed(1)} s, hands in ${withHand}. Play, then Keep or Discard.`);
   if (!withHand) status(`No hand was seen in this take (${frames.length} frames). Discard and try again.`);
@@ -354,13 +442,7 @@ async function keep() {
     return { ok: true, downloaded: true };
   }
   status(`Saving ${clip.name}…`);
-  let out;
-  try {
-    const res = await fetch('/__clip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-    out = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
-  } catch (err) {
-    out = { ok: false, error: String(err?.message || err) };
-  }
+  const out = await postClip(clip);
   if (!out.ok) {
     // An old serve.py (started before /__clip existed) answers 405.
     status(`Save failed: ${out.error}. Is serve.py up to date (restart it)?`);
@@ -371,6 +453,231 @@ async function keep() {
   describeTake(null);
   status(`Saved ${out.path}. Pick the next clip.`);
   return out;
+}
+
+// Localhost only (serve.py POST /__clip): writes assets/gesture-clips/<name>.json and index.json.
+async function postClip(clip) {
+  try {
+    const res = await fetch('/__clip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(clip) });
+    return await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}
+
+// --- Run all: guided ground-truth takes ----------------------------------------------------
+//
+// Flow per take: countdown (3 s on a gesture's first take, with the instruction; 2 s after)
+// -> record -> the take replays in the previews and waits as "pending" while the NEXT
+// countdown runs. ✗ in that window drops it (nothing saved) and re-records the same take;
+// ✓ or the next recording starting saves it as verdict 'good'. So reviewing costs no extra
+// time, and only takes the owner let through reach the repo. ✗ after a take was already
+// saved re-saves it as verdict 'bad' (replay-lab leaves it out) and re-records it.
+// A take where no hand was seen (except null-* clips, where that's a fair answer) does not
+// auto-save: the run waits for ✓/✗. The queue skips takes already in index.json, so stopping
+// and pressing Run all later resumes where it left off.
+
+const isNull = (name) => name.startsWith('null-');
+
+function runAll({ takes = Number($('takes').value) || DEFAULT_TAKES, names = GROUND_TRUTH, countFirst = 3, countNext = 2 } = {}) {
+  if (!isLocal) { status('Run all saves to the repo, so it only works on localhost (python3 serve.py).'); return null; }
+  if (!state.stream) { status('Start the camera first.'); return null; }
+  if (state.phase !== 'idle' || (state.run && !state.run.done)) return null;
+  takes = Math.max(1, Math.min(10, Math.round(takes)));
+  const queue = [];
+  for (const name of names) {
+    if (!CLIPS.some(([n]) => n === name)) continue;
+    for (let k = 1; k <= takes; k++) if (!state.saved.has(takeName(name, k))) queue.push({ name, k, idx: queue.length });
+  }
+  state.take = null;
+  state.run = { queue, i: 0, takes, paused: false, waiting: false, pending: null, lastSaved: null, savedCount: 0, rejected: 0, countFirst, countNext, finishTimer: null, done: false };
+  if (!queue.length) { state.run.done = true; status(`Nothing to record: all ${names.length} gestures already have ${takes} takes.`); syncButtons(); return state.run; }
+  runNext();
+  return state.run;
+}
+
+function progressText() {
+  const r = state.run;
+  if (!r) return '';
+  const it = r.queue[Math.min(r.i, r.queue.length - 1)];
+  const left = r.queue.slice(r.i).reduce((a, q) => a + clipInfo(q.name).seconds + (q.k === 1 ? r.countFirst : r.countNext), 0);
+  const gestures = [...new Set(r.queue.map((q) => q.name))];
+  return `${r.done ? 'Done' : `${it.name} · take ${it.k}/${r.takes} · gesture ${gestures.indexOf(it.name) + 1}/${gestures.length}`} · ` +
+    `${r.savedCount} saved, ${r.rejected} redone · ${r.queue.length - r.i} to go (~${Math.ceil(left / 60)} min)${r.paused ? ' · PAUSED' : ''}`;
+}
+
+function showRun() {
+  const r = state.run;
+  $('progress').textContent = progressText();
+  const bar = $('bar');
+  bar.style.width = r ? `${Math.round((100 * r.i) / Math.max(1, r.queue.length))}%` : '0';
+  const p = $('prompt');
+  if (!r || r.done || r.i >= r.queue.length) { p.classList.remove('show'); syncButtons(); return; }
+  const it = r.queue[r.i];
+  p.querySelector('.pname').textContent = `${it.name}  ·  take ${it.k}/${r.takes}`;
+  p.querySelector('.pins').textContent = clipInfo(it.name).instruction;
+  p.classList.add('show');
+  syncButtons();
+}
+
+function runNext() {
+  const r = state.run;
+  if (!r || r.done || r.paused || r.waiting || state.phase !== 'idle') return;
+  if (r.finishTimer) { clearTimeout(r.finishTimer); r.finishTimer = null; }
+  if (r.i >= r.queue.length) {
+    // Last take: give the owner the same review window the countdown gives every other take.
+    showRun();
+    if (r.pending) {
+      status(`Last take recorded. ✗ within ${r.countNext} s to redo it; otherwise it is saved.`);
+      r.finishTimer = setTimeout(async () => { r.finishTimer = null; if (await savePending()) finishRun(); }, r.countNext * 1000);
+    } else finishRun();
+    return;
+  }
+  const it = r.queue[r.i];
+  state.current = it.name;
+  renderList();
+  showRun();
+  record({
+    seconds: clipInfo(it.name).seconds,
+    countFrom: it.k === 1 ? r.countFirst : r.countNext,
+    label: `${it.name} take ${it.k}/${r.takes}`,
+    onStart: () => { savePending(); }
+  });
+}
+
+async function savePending(verdict = 'good') {
+  const r = state.run;
+  const p = r?.pending;
+  if (!p) return true;
+  r.pending = null;
+  const clip = { ...p.clip, verdict };
+  const out = await postClip(clip);
+  if (!out.ok) {
+    // Keep it so the owner can retry ✓; stop the run so takes don't pile up unsaved.
+    r.pending = p;
+    r.paused = true;
+    abortRecording();
+    r.i = Math.min(r.i, p.item.idx + 1);
+    status(`Save failed for ${clip.name}: ${out.error}. Is serve.py up to date? Run paused.`);
+    showRun();
+    return false;
+  }
+  state.saved.add(clip.name);
+  r.lastSaved = { clip, item: p.item };
+  r.savedCount++;
+  renderList();
+  showRun();
+  return true;
+}
+
+function runTakeDone(clip) {
+  const r = state.run;
+  const item = r.queue[r.i];
+  clip.name = takeName(item.name, item.k);
+  clip.purpose = 'ground-truth';
+  clip.take = item.k;
+  r.pending = { clip, item };
+  r.i++;
+  describeTake(clip);
+  play(clip);
+  const withHand = clip.frames.filter((f) => f.hands.length).length;
+  if (!withHand && !isNull(item.name)) {
+    r.waiting = true;
+    status(`No hand was seen in ${clip.name}. ✓ keep it anyway, or ✗ redo it.`);
+    showRun();
+    return;
+  }
+  status(`${clip.name}: ${clip.frameCount} frames, hands in ${withHand}. ✗ during the countdown if it looked wrong.`);
+  runNext();
+}
+
+// ✓: save the pending take now (also releases a run waiting on a no-hand take).
+async function accept() {
+  const r = state.run;
+  if (!r?.pending) return false;
+  if (r.finishTimer) { clearTimeout(r.finishTimer); r.finishTimer = null; }
+  r.waiting = false;
+  const ok = await savePending();
+  if (!ok) return false;
+  if (r.i >= r.queue.length && !r.done) finishRun();
+  else runNext();
+  return true;
+}
+
+// ✗ / redo: the last take was bad. Drop it if unsaved, mark it 'bad' if already saved, and
+// record that take again (whatever countdown or recording was under way is abandoned).
+async function reject() {
+  const r = state.run;
+  if (!r) return false;
+  let target = null;
+  if (r.finishTimer) { clearTimeout(r.finishTimer); r.finishTimer = null; }
+  if (r.pending) { target = r.pending.item; r.pending = null; }
+  else if (r.lastSaved) {
+    target = r.lastSaved.item;
+    const bad = { ...r.lastSaved.clip, verdict: 'bad' };
+    r.lastSaved = null;
+    const out = await postClip(bad);
+    if (!out.ok) status(`Could not mark ${bad.name} bad: ${out.error}`);
+    // Stays in index.json until the redo overwrites it, so resume would skip it: forget it here.
+    state.saved.delete(bad.name);
+    r.savedCount = Math.max(0, r.savedCount - 1);
+  }
+  if (!target) return false;
+  r.rejected++;
+  r.waiting = false;
+  renderList();
+  if (r.done) { status(`${takeName(target.name, target.k)} left out. Run all again re-records it.`); showRun(); return true; }
+  abortRecording();
+  r.i = target.idx;
+  status(`Redoing ${takeName(target.name, target.k)}.`);
+  showRun();
+  runNext();
+  return true;
+}
+
+function skip() {
+  const r = state.run;
+  if (!r || r.done) return;
+  const name = r.queue[Math.min(r.i, r.queue.length - 1)]?.name;
+  abortRecording();
+  while (r.i < r.queue.length && r.queue[r.i].name === name) r.i++;
+  status(`Skipped the rest of ${name}.`);
+  showRun();
+  runNext();
+}
+
+function pause() {
+  const r = state.run;
+  if (!r || r.done) return;
+  r.paused = !r.paused;
+  if (r.paused) {
+    // A countdown is dropped (the take restarts on resume); a recording in progress finishes.
+    if (state.phase === 'countdown') abortRecording();
+    if (r.finishTimer) { clearTimeout(r.finishTimer); r.finishTimer = null; }
+    status('Paused. ✓/✗ still work on the last take. ▶ Resume to carry on.');
+  }
+  showRun();
+  if (!r.paused) runNext();
+}
+
+// Esc: end the run. A pending take stays pending; ✓ saves it, ✗ drops it.
+function stopRun() {
+  const r = state.run;
+  if (!r || r.done) return;
+  if (state.phase !== 'idle') abortRecording();
+  if (r.finishTimer) { clearTimeout(r.finishTimer); r.finishTimer = null; }
+  r.done = true;
+  r.paused = false;
+  status(`Stopped: ${r.savedCount} takes saved this run. Run all again resumes with the missing takes.${r.pending ? ' The last take is still unsaved: ✓ or ✗.' : ''}`);
+  showRun();
+}
+
+function finishRun() {
+  const r = state.run;
+  r.done = true;
+  status(`All done: ${r.savedCount} takes saved, ${r.rejected} redone. Open replay-lab.html?sets=owner to score them.`);
+  refreshSaved();
+  showRun();
 }
 
 async function loadSaved(name = state.current) {
@@ -494,7 +801,7 @@ function stepPlayback(now) {
 // --- wiring -------------------------------------------------------------------------------
 
 $('camBtn').addEventListener('click', startCam);
-$('recBtn').addEventListener('click', record);
+$('recBtn').addEventListener('click', () => record());
 $('stopBtn').addEventListener('click', stopEarly);
 $('playBtn').addEventListener('click', () => play(state.take));
 $('mirrorBtn').addEventListener('click', mirror);
@@ -502,13 +809,40 @@ $('keepBtn').addEventListener('click', keep);
 $('discardBtn').addEventListener('click', discard);
 $('savedBtn').addEventListener('click', playSaved);
 $('dur').addEventListener('change', () => syncButtons());
+$('runBtn').addEventListener('click', () => runAll());
+$('pauseBtn').addEventListener('click', pause);
+$('goodBtn').addEventListener('click', accept);
+$('badBtn').addEventListener('click', reject);
+$('skipBtn').addEventListener('click', skip);
+$('stopRunBtn').addEventListener('click', stopRun);
+// Blur after a click so Space/Enter go to the run keys below, not the last button pressed.
+for (const b of document.querySelectorAll('button')) b.addEventListener('click', () => b.blur());
+document.addEventListener('keydown', (e) => {
+  const r = state.run;
+  if (!r || e.target.closest?.('input, select') || e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 'enter' || k === 'y') { if (r.pending) { e.preventDefault(); accept(); } }
+  else if (k === 'x' || k === 'n' || k === 'r') { e.preventDefault(); reject(); }
+  else if (k === ' ' && !r.done) { e.preventDefault(); pause(); }
+  else if (k === 's' && !r.done) { e.preventDefault(); skip(); }
+  else if (k === 'escape') stopRun();
+});
 
 window.clipLab = {
   CLIPS,
+  GROUND_TRUTH,
+  takeName,
   state,
+  runAll,
+  accept,
+  reject,
+  skip,
+  pause,
+  stopRun,
+  refreshSaved,
   select,
   startCam,
-  record,
+  record: () => record(),
   stop: stopEarly,
   keep,
   discard,

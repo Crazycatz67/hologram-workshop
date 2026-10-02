@@ -314,7 +314,45 @@ export function checklistEvidence(page, ev = {}) {
 // 'other-pinch' -> 'OtherPinch' (metric name suffixes).
 const camel = (s) => String(s).split(/[^a-z0-9]+/i).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join('');
 
+// Tool enter / exit counts and seconds per tool, from the 'hologram:tool' { tool, prev } event
+// (toolWheel.js createToolStatus; both pages). 'none' = free move, so its seconds are the time
+// spent in no tool. Evidence: toolEnters / toolExits (any tool) and tool<Id>Enters / tool<Id>S
+// per tool; data: tools { id: { enters, exits, s } }.
+function toolTracker(ctx) {
+  const tools = {}, r1 = (v) => Math.round(v * 10) / 10;
+  let cur = window.hologram?.tool ?? 'none', since = ctx.now();
+  const row = (id) => (tools[id] = tools[id] ?? { enters: 0, exits: 0, ms: 0 });
+  ctx.on(window, 'hologram:tool', (e) => {
+    const d = e?.detail || {};
+    if (typeof d.tool !== 'string' || d.tool === cur) return;
+    const t = ctx.now();
+    row(cur).ms += t - since;
+    if (cur !== 'none') row(cur).exits++;
+    if (d.tool !== 'none') row(d.tool).enters++;
+    ctx.event(t, 'tool', { tool: d.tool, prev: cur });
+    cur = d.tool; since = t;
+  });
+  const snap = (t) => {
+    const out = {};
+    for (const [id, r] of Object.entries(tools)) out[id] = { enters: r.enters, exits: r.exits, s: r1((r.ms + (id === cur ? t - since : 0)) / 1000) };
+    if (!out[cur]) out[cur] = { enters: 0, exits: 0, s: r1((t - since) / 1000) };
+    return out;
+  };
+  return {
+    evidence(t = ctx.now()) {
+      const out = { toolEnters: 0, toolExits: 0 };
+      for (const [id, r] of Object.entries(snap(t))) {
+        out.toolEnters += r.enters; out.toolExits += r.exits;
+        out['tool' + camel(id) + 'Enters'] = r.enters; out['tool' + camel(id) + 'S'] = r.s;
+      }
+      return out;
+    },
+    data(t = ctx.now()) { return snap(t); }
+  };
+}
+
 function hologramProbe(ctx) {
+  const tt = toolTracker(ctx);
   let manip = null, resets = 0, canUndo = false, model = null, prevMode = null, lastT = null;
   const recent = { r: -1e9, resetBtn: -1e9, undoKey: -1e9, canvasUp: -1e9 };
   const ev = { clapResets: 0, keyResets: 0, buttonResets: 0, undos: 0, undosByKey: 0, resetsAfterExplode: 0,
@@ -598,8 +636,8 @@ function hologramProbe(ctx) {
       }
       tapeTxt = txt;
     },
-    evidence() {
-      const out = { ...ev };
+    evidence(t) {
+      const out = { ...ev, ...tt.evidence(t) };
       for (const k of ['pointerActiveS', 'pointerPoseS', 'mouseCursorS', 'partGrabS', 'tiltUpDeg', 'tiltDownDeg', 'tiltWithHandDeg', 'tiltAgainstHandDeg']) out[k] = +out[k].toFixed(1);
       out.cursorTravelPx = Math.round(out.cursorTravelPx);
       out.accidentalExplodes = explodeWatch.episodes.length;
@@ -627,11 +665,11 @@ function hologramProbe(ctx) {
       }
       return out;
     },
-    data() {
+    data(t) {
       const hs = {};
       for (const [k, r] of Object.entries(hands)) hs[k] = { engagedS: +(r.engagedMs / 1000).toFixed(1), restedS: +(r.restedMs / 1000).toFixed(1), raises: r.raises, pointerPoseS: +(r.poseMs / 1000).toFixed(1) };
       const sel = window.hologram?.pointerStats?.selects;
-      return { hands: hs, clicks: clickList, tape, explodes, quickExplodes: explodeWatch.episodes, scale: scales, cameraFramesSeen: lastCam !== null,
+      return { tools: tt.data(t), hands: hs, clicks: clickList, tape, explodes, quickExplodes: explodeWatch.episodes, scale: scales, cameraFramesSeen: lastCam !== null,
         selects: { byVia: sel ? { ...sel } : null, misses: { ...missesByVia } }, selectionPractice: practiceSeen ?? null };
     },
     flags() {
@@ -671,6 +709,7 @@ function handsProbe(ctx) {
 // window.hologram.library; the store's three write methods are wrapped on that one instance
 // (counts and triggers only, arguments pass through untouched).
 function platformProbe(ctx) {
+  const tt = toolTracker(ctx);
   let edits = null, items = null, stats = null, project, ringOpen = null, unit = null;
   let ringClosedAt = -1e9, ringEverOpen = false, firstOpenDone = false, store = null, wasOpening = false, pendingRing = null;
   const recent = { modS: -1e9, saveBtn: -1e9 };
@@ -908,7 +947,7 @@ function platformProbe(ctx) {
     },
     evidence(t) {
       ev.polyActiveS = r1((poly.activeMs + (poly.active ? (t ?? ctx.now()) - poly.since : 0)) / 1000);
-      return { ...ev, versionCounts: Object.entries(versionCounts).map(([k, v]) => `${k}:${v}`).join(', ') };
+      return { ...ev, ...tt.evidence(t), versionCounts: Object.entries(versionCounts).map(([k, v]) => `${k}:${v}`).join(', ') };
     },
     data(t) {
       const polygon = poly.api ? {
@@ -916,7 +955,7 @@ function platformProbe(ctx) {
         radius: { adjusts: ev.polyRadiusAdjusts, min: poly.radiusMin, max: poly.radiusMax, last: poly.radius },
         selects: poly.selects.slice(), ops: poly.ops.slice(), undos: { ...poly.undos }
       } : null;
-      return { navType, versionCounts: { ...versionCounts }, autosaveByProject: { ...autosaveByProject }, uploads, polygon };
+      return { tools: tt.data(t), navType, versionCounts: { ...versionCounts }, autosaveByProject: { ...autosaveByProject }, uploads, polygon };
     },
     flags() { return []; }
   };

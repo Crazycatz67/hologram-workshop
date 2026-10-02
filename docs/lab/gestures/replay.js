@@ -24,7 +24,15 @@
 //
 // CONTRACT
 //   CLASSES                     what can fire: grab tilt scale explode clap click select wheel undo aim
-//   expectedOf(name) -> { expected, allowed[], mapped }   from the clip name (EXPECT table);
+//   PENDING                     owner-decided classes the pipeline cannot fire yet (2026-10-02:
+//                               hammer done assemble swipe stretch). A clip expecting one is scored
+//                               and shown, but its confusion row never fails the gate: it lands in
+//                               gate.pending instead (null-* clips still gate as usual). An EXPECT
+//                               entry can also be pending: true for a built class (tilt-ratchet):
+//                               its runs score in their own row '<class> (pending)'.
+//   expectedOf(name) -> { expected, allowed[], mapped, pending }   from the clip name (EXPECT
+//                               table); a '-t<k>' take suffix (clip-lab ground-truth takes) and a
+//                               '.<take>' suffix (semi-real) are stripped first;
 //                               'null-*' -> expected 'none' (must fire nothing at all).
 //   FIRE                        gesture-lab.js's "visible on screen" thresholds (copied, see below)
 //   VARIANTS                    stress runs: base, jitter ±0.003/±0.006, fps 15/30, 10%/30%
@@ -64,6 +72,9 @@ export const CLASSES = ['grab', 'tilt', 'scale', 'explode', 'clap', 'click', 'se
 export const OFF_DIAGONAL_MAX = 0.3; // ASL ci-check #13f: no pair confused in more than 30% of runs
 export const AIM_FIRE_MS = 300; // the cursor counts as "shown" after this much aim (a flicker isn't a fire)
 export const MODELLED = ['undo'];
+// Owner's new vocabulary (plan Phase 0, 2026-10-02), not built yet: recorded now so the
+// owner's clips are the ground truth the later phases are measured against.
+export const PENDING = ['hammer', 'done', 'assemble', 'swipe', 'stretch'];
 
 // Clip name -> what it should fire. Clip names are clip-lab.js CLIPS (HANDS-UX-SPEC section 6).
 // `allowed` = side effects that are part of doing the gesture (aiming before a click), never
@@ -90,13 +101,33 @@ export const EXPECT = {
   scroll: CLICKY,
   lens: CLICKY,
   'ring-spin': { expected: 'grab', allowed: ['aim', 'click', 'select'] },
-  pin: { expected: 'wheel', allowed: ['aim'] }
+  pin: { expected: 'wheel', allowed: ['aim'] },
+  // Phase 0 ground truth (clip-lab GROUND_TRUTH). Pending classes can't fire yet; the
+  // existing gestures they resemble are NOT allowed, so today's confusions stay visible.
+  'hammer-click': { expected: 'hammer', allowed: ['aim'] },
+  'done-palm': { expected: 'done', allowed: [] },
+  'tilt-any': { expected: 'tilt', allowed: ['grab'] }, // the holding fist is a grab
+  // Owner tilt decision 2026-10-02: ratchet + flick-to-release are tilt, but their behaviour
+  // isn't built, so the clips are pending even though the class exists (own matrix row).
+  'tilt-ratchet': { expected: 'tilt', allowed: ['grab'], pending: true },
+  'tilt-flick': { expected: 'tilt', allowed: ['grab'], pending: true },
+  'assemble-close': { expected: 'assemble', allowed: [] },
+  'clap-slow': { expected: 'clap', allowed: [] },
+  'clap-normal': { expected: 'clap', allowed: [] },
+  'clap-fast': { expected: 'clap', allowed: [] },
+  'swipe-left': { expected: 'swipe', allowed: [] },
+  'swipe-right': { expected: 'swipe', allowed: [] },
+  'swipe-up': { expected: 'swipe', allowed: [] },
+  'stretch-vertical': { expected: 'stretch', allowed: [] },
+  'fist-grab-tucked': { expected: 'grab', allowed: [] },
+  'fist-grab-thumb-out': { expected: 'grab', allowed: [] }
 };
 export function expectedOf(name = '') {
-  name = String(name).split('.')[0]; // '<gesture>.<take>' (semi-real takes) -> gesture
-  if (name.startsWith('null-')) return { expected: 'none', allowed: [], mapped: true };
+  // '<gesture>.<take>' (semi-real) and '<gesture>-t<k>' (clip-lab ground truth) -> gesture
+  name = String(name).split('.')[0].replace(/-t\d+$/, '');
+  if (name.startsWith('null-')) return { expected: 'none', allowed: [], mapped: true, pending: false };
   const e = EXPECT[name];
-  return e ? { ...e, allowed: [...e.allowed], mapped: true } : { expected: name, allowed: [], mapped: false };
+  return e ? { ...e, allowed: [...e.allowed], mapped: true, pending: !!e.pending || PENDING.includes(e.expected) } : { expected: name, allowed: [], mapped: false, pending: false };
 }
 
 // gesture-lab.js FIRE (2026-10-01), copied because gesture-lab.js runs its whole report on
@@ -223,6 +254,12 @@ function makeImageHand({ x, y, twist = 0, palm = 0.12, shape = 'open' }) {
     lm[8] = { x: x + 0.02, y: up(reach), z: 0 };
     lm[4] = { x: x + (closed ? 0.02 : 0.07), y: up(closed ? 0.6 : 1.0), z: 0 };
   }
+  // A thumbs-down's thumb points DOWN the image (v2 reads the direction 2->4). Only the MCP and
+  // IP move (they sat on the wrist before); the tip (4), which v1's pinch test reads, stays.
+  if (shape === 'thumbdown') {
+    lm[2] = { x: x + 0.02, y: up(1.0), z: 0 };
+    lm[3] = { x: x + 0.02, y: up(0.8), z: 0 };
+  }
   return lm;
 }
 const MCP = { index: [0.03, 0.085, 0], middle: [0.008, 0.09, 0], ring: [-0.012, 0.085, 0], pinky: [-0.03, 0.075, 0] };
@@ -241,7 +278,16 @@ function rotate([x, y, z], [rx, ry, rz]) {
   [x, y] = [x * c - y * s, x * s + y * c];
   return [x, y, z];
 }
-function buildWorldHand(flex, rot = [0, 0, 0]) {
+// Thumb per shape (Hands v2, 2026-10-02). Every shape used to share THUMB_COCKED, so the v2
+// 3D pose vote (handFeatures.js) read every fist as a thumbs-up ('none'), every pinch as an
+// open hand and every thumbs-down as 'none'. World landmarks only: v1 reads the thumb from the
+// IMAGE landmarks (gestures.js pinch), and gunPose's world thumb is diagnostic, so v1 scores
+// don't move. 'wrap' = the tip tucked against the curled index (test.js handFeatures WRAP);
+// 'pinch' = the tip PINCH_GAP palm lengths in front of the index tip.
+const THUMB_WRAP_TIP = [0.05, 0.085, -0.03];
+const PINCH_GAP = 0.1;
+const THUMB_OF = { fist: 'wrap', pinch: 'pinch' };
+function buildWorldHand(flex, rot = [0, 0, 0], thumb = 'cocked') {
   const pts = Array.from({ length: 21 }, () => [0, 0, 0]);
   for (let k = 0; k < 4; k++) pts[1 + k] = THUMB_COCKED[k].slice();
   ['index', 'middle', 'ring', 'pinky'].forEach((name, f) => {
@@ -256,6 +302,11 @@ function buildWorldHand(flex, rot = [0, 0, 0]) {
       pts[base + b + 1] = p;
     }
   });
+  if (thumb !== 'cocked') {
+    const palm = Math.hypot(...pts[9]);
+    pts[4] = thumb === 'wrap' ? THUMB_WRAP_TIP.slice() : [pts[8][0], pts[8][1], pts[8][2] - PINCH_GAP * palm];
+    pts[3] = pts[2].map((v, i) => (v + pts[4][i]) / 2);
+  }
   return pts.map((q) => rotate(q, rot));
 }
 const WORLD_FLEX = {
@@ -275,7 +326,7 @@ const SIDE_ON = [0, 90, 90]; // gun-lab: the camera sees a pointer from the thum
 export function synthHand(spec, R = null, noise = 0) {
   const n = () => (R && noise ? (R() * 2 - 1) * noise : 0);
   const shape = spec.shape ?? 'open';
-  const world = buildWorldHand(WORLD_FLEX[shape], shape === 'pointer' ? SIDE_ON : [0, 0, spec.twist ?? 0]);
+  const world = buildWorldHand(WORLD_FLEX[shape], shape === 'pointer' ? SIDE_ON : [0, 0, spec.twist ?? 0], THUMB_OF[shape]);
   let img;
   if (shape === 'pointer') {
     const k = 0.12 / 0.09, A = 16 / 9;
@@ -708,9 +759,14 @@ export function replayClip(clip, P, { settleMs = 600, wheelParent = null } = {})
 // ---- scoring -------------------------------------------------------------------------------
 const median = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.floor((s.length - 1) / 2)]; };
 
-// runs: [{ clip, synthetic, variant, expected, allowed, fired: { class: tMs } }]
+// runs: [{ clip, synthetic, variant, expected, allowed, pending?, fired: { class: tMs } }]
+// A pending run of a BUILT class gets its own row '<class> (pending)' so it never mixes into
+// (or gates) the built behaviour's row; rowOf maps a row back to the class it expects.
+const rowOf = (r) => (r.pending && !PENDING.includes(r.expected) ? `${r.expected} (pending)` : r.expected);
 export function scoreRuns(runs) {
-  const rowsSet = [...new Set(runs.map((r) => r.expected))];
+  const rowsSet = [...new Set(runs.map(rowOf))];
+  const rowClass = Object.fromEntries(runs.map((r) => [rowOf(r), r.expected]));
+  const pendingRows = new Set(runs.filter((r) => r.pending || PENDING.includes(r.expected)).map(rowOf));
   const cols = [...CLASSES, 'nothing'];
   const matrix = { rows: rowsSet, cols, counts: {}, runs: {}, rates: {} };
   const perGesture = {};
@@ -722,8 +778,9 @@ export function scoreRuns(runs) {
     const hit = r.expected === 'none' ? wrong.length === 0 : firedCls.includes(r.expected);
     r.wrong = wrong;
     r.pass = hit && wrong.length === 0;
-    const row = (matrix.counts[r.expected] ??= Object.fromEntries(cols.map((c) => [c, 0])));
-    matrix.runs[r.expected] = (matrix.runs[r.expected] ?? 0) + 1;
+    const rk = rowOf(r);
+    const row = (matrix.counts[rk] ??= Object.fromEntries(cols.map((c) => [c, 0])));
+    matrix.runs[rk] = (matrix.runs[rk] ?? 0) + 1;
     if (r.expected === 'none') { if (!wrong.length) row.nothing++; }
     else if (hit) row[r.expected]++;
     else row.nothing++;
@@ -732,7 +789,7 @@ export function scoreRuns(runs) {
       falseFires[c].runs++;
       if (!falseFires[c].clips.includes(r.clip)) falseFires[c].clips.push(r.clip);
     }
-    const g = (perGesture[r.expected] ??= { clips: [], runs: 0, fires: 0, misses: 0, falseFireRuns: 0, ttf: [] });
+    const g = (perGesture[rk] ??= { clips: [], runs: 0, fires: 0, misses: 0, falseFireRuns: 0, ttf: [] });
     if (!g.clips.includes(r.clip)) g.clips.push(r.clip);
     g.runs++;
     if (r.expected !== 'none') {
@@ -749,13 +806,14 @@ export function scoreRuns(runs) {
     delete g.ttf;
   }
   const failures = [];
+  const pendingLines = []; // confusions in a not-yet-built class's row: reported, never gating
   for (const row of matrix.rows) {
     matrix.rates[row] = {};
     for (const c of cols) {
       const rate = matrix.counts[row][c] / matrix.runs[row];
       matrix.rates[row][c] = Math.round(rate * 1000) / 1000;
-      const off = c !== row && c !== 'nothing';
-      if (off && rate > OFF_DIAGONAL_MAX) failures.push(`${row} -> ${c} in ${Math.round(rate * 100)}% of runs (> ${OFF_DIAGONAL_MAX * 100}%)`);
+      const off = c !== rowClass[row] && c !== 'nothing';
+      if (off && rate > OFF_DIAGONAL_MAX) (pendingRows.has(row) ? pendingLines : failures).push(`${row} -> ${c} in ${Math.round(rate * 100)}% of runs (> ${OFF_DIAGONAL_MAX * 100}%)`);
     }
   }
   const nulls = {}; // one gate line per null clip: which variants fired what
@@ -770,11 +828,12 @@ export function scoreRuns(runs) {
     const of = runs.filter((r) => r.clip === clip).length;
     failures.push(`null clip ${clip} fired ${[...n.fired].join(', ')} in ${n.runs}/${of} runs`);
   }
-  return { perGesture, falseFires, matrix, byVariant, gate: { pass: failures.length === 0, failures, offDiagonalMax: OFF_DIAGONAL_MAX } };
+  return { perGesture, falseFires, matrix, byVariant, gate: { pass: failures.length === 0, failures, pending: pendingLines, offDiagonalMax: OFF_DIAGONAL_MAX } };
 }
 
 // ---- compare + markdown --------------------------------------------------------------------
-// A report has one score block per clip SET ('real' owner clips, 'semi-real', 'synthetic'),
+// A report has one score block per clip SET ('owner' = clip-lab ground-truth takes, 'real' =
+// clip-lab demo-hand clips, 'semi-real', 'synthetic'),
 // so synthetic results never dilute or flatter real ones: report.sets[name] = { label,
 // perGesture, falseFires, matrix, byVariant, gate }; report.gate passes only if every set does.
 function diffSet(prefix, o = {}, c = {}, lines) {
@@ -813,7 +872,8 @@ const pct = (x) => (x == null ? '—' : `${Math.round(100 * x)}%`);
 function renderSet(md, name, S) {
   md.push(`## Set: ${name} — ${S.label}`, '', `Gate: **${S.gate.pass ? 'PASS' : 'FAIL'}** (${S.clips.length} clips, ${Object.values(S.byVariant).reduce((a, v) => a + v.runs, 0)} runs)`, '');
   for (const f of S.gate.failures) md.push(`- ${f}`);
-  if (S.gate.failures.length) md.push('');
+  for (const f of S.gate.pending ?? []) md.push(`- (pending, not gating) ${f}`);
+  if (S.gate.failures.length || S.gate.pending?.length) md.push('');
   if (S.poseReadings) {
     md.push('How the shipped gestures.annotateHand reads the source poses (still, frame centre):', '', '| pose | letters | MediaPipe label used | n | read as fist | pinch | pointer |', '|---|---|---|---|---|---|---|');
     for (const [k, r] of Object.entries(S.poseReadings)) md.push(`| ${k} | ${r.letters} | ${r.label} | ${r.n} | ${r.fist}% | ${r.pinch}% | ${r.pointer}% |`);
@@ -822,7 +882,7 @@ function renderSet(md, name, S) {
   if (S.motion) md.push(`Motion model from real video: per-frame jitter ${S.motion.jitterPalm} palm lengths (median, an upper bound), shape changes take ${S.motion.transitionFramesP50} frames median / ${S.motion.transitionFramesP90} p90 (${S.motion.transitions} transitions in ${S.motion.sequences} sequences).`, '');
   md.push('| expected | clips | runs | fires | misses | runs with a false fire | time to fire median / max |', '|---|---|---|---|---|---|---|');
   for (const [g, s] of Object.entries(S.perGesture)) {
-    md.push(`| ${g}${MODELLED.includes(g) ? ' (modelled)' : ''} | ${s.clips.length} | ${s.runs} | ${g === 'none' ? '—' : `${s.fires} (${pct(s.fires / s.runs)})`} | ${g === 'none' ? '—' : s.misses} | ${s.falseFireRuns} | ${s.ttfMedianMs ?? '—'} / ${s.ttfMaxMs ?? '—'} ms |`);
+    md.push(`| ${g}${MODELLED.includes(g) ? ' (modelled)' : ''}${PENDING.includes(g) ? ' (pending: not built)' : ''} | ${s.clips.length} | ${s.runs} | ${g === 'none' ? '—' : `${s.fires} (${pct(s.fires / s.runs)})`} | ${g === 'none' ? '—' : s.misses} | ${s.falseFireRuns} | ${s.ttfMedianMs ?? '—'} / ${s.ttfMaxMs ?? '—'} ms |`);
   }
   const ff = Object.entries(S.falseFires).filter(([, f]) => f.runs);
   md.push('', `False fires (fired where not expected or allowed): ${ff.length ? ff.map(([c, f]) => `**${c}** ${f.runs} runs (${f.clips.join(', ')})`).join('; ') : 'none'}.`, '');
@@ -830,7 +890,7 @@ function renderSet(md, name, S) {
   const cols = M.cols.filter((c) => M.rows.includes(c) || c === 'nothing' || M.rows.some((r) => M.counts[r][c]));
   md.push(`| expected \\ fired | runs | ${cols.join(' | ')} |`, `|---|---|${cols.map(() => '---').join('|')}|`);
   for (const r of M.rows) {
-    md.push(`| **${r}** | ${M.runs[r]} | ${cols.map((c) => { const v = M.counts[r][c]; const s = v ? pct(M.rates[r][c]) : '·'; return (c === r || (r === 'none' && c === 'nothing')) ? `**${s}**` : (v && c !== 'nothing' && M.rates[r][c] > OFF_DIAGONAL_MAX ? `**${s}!**` : s); }).join(' | ')} |`);
+    md.push(`| **${r}** | ${M.runs[r]} | ${cols.map((c) => { const v = M.counts[r][c]; const s = v ? pct(M.rates[r][c]) : '·'; return (c === r.replace(/ \(pending\)$/, '') || (r === 'none' && c === 'nothing')) ? `**${s}**` : (v && c !== 'nothing' && M.rates[r][c] > OFF_DIAGONAL_MAX ? `**${s}!**` : s); }).join(' | ')} |`);
   }
   md.push('', '| variant | pass | failed clips |', '|---|---|---|');
   for (const [v, s] of Object.entries(S.byVariant)) md.push(`| ${v} | ${s.pass}/${s.runs} | ${[...new Set(s.failed)].join(', ') || '—'} |`);
@@ -840,7 +900,8 @@ function renderSet(md, name, S) {
 export function renderMd(report, diff = null) {
   const md = [];
   md.push('# Gesture replay report', '');
-  if (!report.realClips) md.push('> **NO REAL CLIPS YET.** assets/gesture-clips/ is empty, so nothing below is the owner\'s hands. "semi-real" = real human hand SHAPES from the Kaggle ASL alphabet set (via the ASL project; not the owner) moved along scripted paths; "synthetic" = model hands. They prove the harness and where the code\'s thresholds sit, not how the owner\'s hands perform. Re-run after the owner records clips in clip-lab.', '');
+  if (report.ownerClips) md.push(`Owner ground-truth takes: ${report.ownerClips} scored${report.excludedTakes ? `, ${report.excludedTakes} marked bad in clip-lab and left out` : ''}. Pending classes (${PENDING.join(', ')}) are not built yet: their rows are shown but never fail the gate.`, '');
+  if (!report.realClips && !report.ownerClips) md.push('> **NO REAL CLIPS YET.** assets/gesture-clips/ is empty, so nothing below is the owner\'s hands. "semi-real" = real human hand SHAPES from the Kaggle ASL alphabet set (via the ASL project; not the owner) moved along scripted paths; "synthetic" = model hands. They prove the harness and where the code\'s thresholds sit, not how the owner\'s hands perform. Re-run after the owner records clips in clip-lab.', '');
   md.push(`Generated ${report.generated} by \`docs/lab/gestures/replay-lab.html\` (tree ${report.commit ?? '?'}${report.dirty ? '+dirty' : ''}). Seed ${report.seed}. ${report.clips.length} clips × ${report.variants.length} variants (${report.variants.join(', ')}) = ${report.runs.length} runs.`, '');
   md.push(`Pipeline: smoothLandmarks → gestures.annotateHand → engagement → manipulator.update/tick → pointer (aim, pinch, other-hand click) → toolWheel (✌ holdGate) → undo (👎 holdGate, **modelled: not wired live**) → selector (hold-select on the model centre). "Fires" = gesture-lab thresholds (move >1 cm, push >1 cm, spin/tilt >2°, scale >3% uniform, explode >3% stretch), clap = a reset, aim = cursor shown ≥${AIM_FIRE_MS} ms. Time to fire = ms from the clip's FIRST frame (includes its lead-in). A set's gate fails if any off-diagonal cell is over ${OFF_DIAGONAL_MAX * 100}% of its row's runs (ASL #13f) or any null-* clip fires anything in any run. Matrix: diagonal = expected fired, "nothing" = missed (for \`none\`: correctly nothing); rows can sum past 100%; allowed side effects (aim before a click) are not counted.`, '');
   md.push(`## Overall gate: **${report.gate.pass ? 'PASS' : 'FAIL'}** (${Object.entries(report.sets).map(([n, s]) => `${n} ${s.gate.pass ? 'PASS' : 'FAIL'}`).join(', ')})`, '');
@@ -848,7 +909,7 @@ export function renderMd(report, diff = null) {
   md.push('## Per clip', '');
   for (const c of report.clips) {
     const rs = report.runs.filter((r) => r.clip === c.name);
-    md.push(`- **${c.name}** (${c.set})${c.mapped ? '' : ' (name not in EXPECT table)'}: expect ${c.expected}${c.allowed.length ? ` (allowed ${c.allowed.join(', ')})` : ''}. ` +
+    md.push(`- **${c.name}** (${c.set})${c.mapped ? '' : ' (name not in EXPECT table)'}: expect ${c.expected}${c.pending ? ' (pending)' : ''}${c.allowed.length ? ` (allowed ${c.allowed.join(', ')})` : ''}. ` +
       rs.map((r) => `${r.variant} ${r.pass ? '✓' : '✗'}${Object.keys(r.fired).length ? ` [${Object.entries(r.fired).map(([k, t]) => `${k}@${t}`).join(' ')}]` : ' [nothing]'}`).join(' · '));
   }
   if (diff) md.push('', `## Compare (vs ${report.comparedTo ?? 'previous report'})`, '', ...diff.map((l) => `- ${l}`));

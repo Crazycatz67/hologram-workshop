@@ -29,6 +29,12 @@
 //     getItem(itemId) -> { id, name, root, parts:[{ id, mesh }] } | null
 //     materialFor(mesh) -> the base material the page would give `mesh` (plain or hologram)
 //     prepassLayer  camera layer of the single-layer depth pre-pass (lod.js PREPASS_LAYER)
+//     onUndo()   the action bar's Undo (default objectMode.undo()); onDone() its Done (default exit())
+//   Action bar (Hands v2 #20): while the mode is on, a hand-clickable bar (.poly-bar, data-role
+//     hide | infer | undo | done) sits at the top of the stage: Hide = Delete, Mark inferred = I,
+//     Undo, Done. It's docked, not glued to the lens, because the lens follows the hand cursor:
+//     a bar beside the lens would run away from the hand reaching for it. Hide / Mark are
+//     disabled until a patch is selected.
 //   api.enter(itemId|null) -> bool   null = whole scene; builds BVHs (lazily, once per mesh), shows wire + lens
 //   api.exit()                  hides the lens, keeps the edits
 //   api.active, api.itemId, api.radius (CSS px, settable; clamped to RADIUS_MIN..RADIUS_MAX).
@@ -79,7 +85,8 @@ const WIRE_FADE_MS = 900;           // wire fades in / skin fades back, eased, n
 const shown = (o) => { for (; o; o = o.parent) if (!o.visible) return false; return true; };
 const inScene = (o, scene) => { for (; o; o = o.parent) if (o === scene) return true; return false; };
 
-export function createPolygonMode({ scene, camera, canvas, objectMode, getItem, getItems = () => [], materialFor, prepassLayer = null, onChange, onSkin }) {
+export function createPolygonMode({ scene, camera, canvas, objectMode, getItem, getItems = () => [], materialFor, prepassLayer = null, onChange, onSkin,
+  onUndo = () => objectMode.undo(), onDone = null }) {
   const group = new THREE.Group();
   group.name = 'polygon-mode';
   scene.add(group);
@@ -350,15 +357,41 @@ export function createPolygonMode({ scene, camera, canvas, objectMode, getItem, 
   let sizeShownAt = -Infinity;
   stage.append(ring, readout);
 
+  // ---- action bar (Hands v2 #20): the keyboard-only edits as big hand-clickable buttons --------
+  const bar = document.createElement('div');
+  bar.className = 'poly-bar';
+  bar.setAttribute('role', 'toolbar');
+  bar.setAttribute('aria-label', 'Polygon lens actions');
+  bar.hidden = true;
+  const barBtn = (role, icon, word, title, fn) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.role = role;
+    b.dataset.hand = 'click';
+    b.title = title;
+    b.append(icon, Object.assign(document.createElement('span'), { className: 'pb-word', textContent: ' ' + word }));
+    // stopPropagation: the canvas's own click (select faces) must not see a bar press.
+    b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+    bar.append(b);
+    return b;
+  };
+  const hideBtn = barBtn('hide', '🙈', 'Hide', 'Hide the selected faces (Delete). Undo brings them back.', () => api.hidePatch());
+  const inferBtn = barBtn('infer', '◐', 'Mark inferred', 'Mark the selected faces as inferred, or unmark them (I)', () => api.toggleInferredPatch());
+  barBtn('undo', '↶', 'Undo', 'Undo the last edit (Ctrl/Cmd+Z)', () => onUndo?.());
+  barBtn('done', '✋', 'Done', 'Leave the polygon lens, edits kept (Esc)', () => (onDone ? onDone() : api.exit())).classList.add('poly-done');
+  stage.append(bar);
+
   const fmt = (S) => (S ? `${S.faces.toLocaleString()} faces · ${S.area < 0.01 ? (S.area * 1e4).toFixed(1) + ' cm²' : S.area.toFixed(3) + ' m²'} · ${S.inferredPct.toFixed(0)}% inferred` : '—');
   let lensSummary = null;
   // One line: what to do next.
-  const coach = (st) => st.patch ? 'Del hides the patch · I marks it inferred · Shift-click adds · Esc clears'
+  const coach = (st) => st.patch ? 'Hide (Del) or Mark inferred (I) in the bar above · Shift-click adds · Esc clears'
     : st.lens ? 'Click (or pinch your other hand) selects the faces in the lens · Shift-click adds · wheel, [ ] or pinch-hold + up/down sizes the lens · Esc leaves'
     : 'Point at the model: the lens shows its real triangles · Esc leaves';
   function notify() {
     const st = api.state();
     readout.style.display = active ? '' : 'none';
+    bar.hidden = !active;
+    hideBtn.disabled = inferBtn.disabled = !st.patch;
     if (active) {
       const w = st.wire;
       const wire = !w.total ? 'building…' : w.shown >= w.total ? `all ${w.total.toLocaleString()} triangles` : `${w.shown.toLocaleString()} of ${w.total.toLocaleString()} triangles · zoom in for finer`;

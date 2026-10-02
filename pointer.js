@@ -60,11 +60,14 @@
 //     selector.block(cursorPx)   a click (any kind) just landed: no hold-fire on the same
 //       target until the cursor has moved releasePx or the target changed.
 //     selector.reset()
+//   HANDS V2 (?hands=v2 / localStorage 'hands.v2'='1', or createPointer({ v2: true })): a
+//     separate cursor + thumb-hammer click with the same API; see "Hands v2 cursor" below.
 //   nextInStack(hits, current) -> the entry after `current` in the front-to-back hits (wraps),
 //     or hits[0]: "hold again on the same spot" picks the next part behind.
 
 import { createHoldGate } from './holdGate.js';
-import { gunFeatures, THUMB_COCKED_MIN, THUMB_DROPPED_MAX } from './gunPose.js';
+import { gunFeatures, THUMB_COCKED_MIN, THUMB_DROPPED_MAX, hammerAngleDeg, createHammer, HAMMER_DEFAULTS } from './gunPose.js';
+import { palmLength, handsV2Enabled } from './gestures.js';
 
 export const ENGAGE_ENTER_Y = 0.88;
 export const ENGAGE_EXIT_Y = 0.94;
@@ -307,7 +310,10 @@ function readThumbTapSetting() {
   try { return globalThis.localStorage?.getItem(THUMB_TAP_KEY) === '1'; } catch { return false; }
 }
 
-export function createPointer({ rewindMs = REWIND_MS, profile = null, sameHandPinch = true, thumbTap = readThumbTapSetting() } = {}) {
+export function createPointer({ rewindMs = REWIND_MS, profile = null, sameHandPinch = true, thumbTap = readThumbTapSetting(), v2 = handsV2Enabled(), clickAlt = readClickAltSetting() } = {}) {
+  // Hands v2 (?hands=v2 / localStorage 'hands.v2'='1'): a separate implementation, so the v1
+  // code below runs byte-for-byte as before with the switch off.
+  if (v2) return createPointerV2({ rewindMs, profile, clickAlt });
   let tapOn = thumbTap === true;
   let thumb = { cockedSince: null, leftCockedAt: null, armed: false }; // see THUMB_TAP_MAX_MS
   let reach = { ...DEFAULT_REACH };
@@ -579,6 +585,393 @@ export function createPointer({ rewindMs = REWIND_MS, profile = null, sameHandPi
       lastClickT = -Infinity;
       euro.reset();
       resetPinch();
+    }
+  };
+}
+
+// ---- Hands v2 cursor (plans/hands-v2/CONTRACT.md §3.1-3.2; numbers: Ricky's report §1-3) ----
+// CONTRACT (createPointer({ v2: true }) or the page switch). Same object API as v1, plus:
+//   pointer.v2 === true
+//   pointer.clickAlt / setClickAlt('pinch' | 'hold' | null, { persist })  (localStorage
+//     'hands.clickAlt'; default null). 'pinch' = the other hand's pinch clicks (v1 rule, no freeze);
+//     'hold' = the host's createSelector may charge (pointer.js itself does nothing for it);
+//     null = the thumb hammer is the only hand click.
+//   pointer.setView(aspect)  the cursor canvas's width/height (default: the camera aspect passed
+//     to update). Gains are px per mm on a 1460-px-wide canvas scaled by canvasWidth/1460, which
+//     makes NDC-x per mm independent of the canvas size; only the aspect is needed for y.
+//   setProfile({ reach?, cursor? }): reach's centre is the absolute anchor's centre (A0);
+//     cursor = { minCutoff, beta, dCutoff, gmin, gmax, vinf, lambda, absGain } overrides V2.
+//   state adds { v2: { phase: 'live'|'pending'|'held'|'easing', speed (m/s), gain (px/mm),
+//     offsetPx: [x, y] cursor - absolute anchor (1460-px units), hammer: { state, angleDeg,
+//     source: 'features'|'local' } } }. state.raw = the absolute anchor in NDC.
+//   click via 'hammer' (rewound to onset - 1 frame, cap 200 ms) | 'other-pinch' | 'mouse'.
+// Behaviour: aim = index MCP (landmark 5) of hand.rawLandmarks (else hand.landmarks), as metres
+// through a heavily smoothed s = palm metres / palm image length (only differences are scaled),
+// ONE One Euro stage, a sigmoid speed gain and PRISM offset recovery toward the absolute anchor.
+// No sticky hold, no pinch freeze: a frame without the gun pose holds the cursor ('clutch'); a
+// re-entry within REENTRY_KEEP_MS continues from it. Any gun pose engages (no wrist line).
+// Hammer: hand.f.hammer when present (handFeatures.js), else gunPose createHammer (local copy).
+export const CLICK_ALT_KEY = 'hands.clickAlt';
+export const V2 = Object.freeze({
+  minCutoff: 1.0,    // Hz      [Ricky §2] One Euro on the aim point in metres
+  beta: 40,          // Hz per m/s
+  dCutoff: 1.0,      // Hz
+  gmin: 1.5,         // px/mm   sigmoid CD gain (Nancel et al.) at slow speed ...
+  gmax: 6.0,         // px/mm   ... and fast
+  vinf: 0.08,        // m/s     inflection
+  lambda: 40,        // s/m     steepness
+  absGain: 5.84,     // px/mm   the absolute anchor's mapping about the calibrated centre
+  REF_W: 1460,       // px      the canvas width the gains are quoted for
+  prismV: 0.15,      // m/s     offset recovery only while moving at least this fast ...
+  prismK: 0.5,       //         ... toward the anchor, by at most this share of the step
+  sTauMs: 1000,      // ms      EMA on s (metres per image unit)
+  palmM: 0.085,      // m       assumed palm when a hand has no world landmarks
+  rewindCapMs: 200,  // ms      the hammer rewind never reaches further back than this
+  easeMs: 100,       // ms      abort / release eases the frozen cursor back to the hand
+  holdMaxMs: 1000,   // ms      after a hammer click the cursor stays on the target at most this long
+  moveV: 0.15        // m/s     ... or until the hand moves this fast (a deliberate re-aim)
+});
+
+function readClickAltSetting() {
+  try {
+    const v = globalThis.localStorage?.getItem(CLICK_ALT_KEY);
+    return v === 'pinch' || v === 'hold' ? v : null;
+  } catch { return null; }
+}
+
+const smooth01 = (k) => { const c = Math.max(0, Math.min(1, k)); return c * c * (3 - 2 * c); };
+
+function createPointerV2({ rewindMs = REWIND_MS, profile = null, clickAlt = null } = {}) {
+  let P = { ...V2 };
+  let alt = clickAlt === 'pinch' || clickAlt === 'hold' ? clickAlt : null;
+  let reach = { ...DEFAULT_REACH };
+  let viewAspect = null;
+  const euro = createOneEuro2D({ minCutoff: P.minCutoff, beta: P.beta, dCutoff: P.dCutoff });
+  const localHammer = createHammer(HAMMER_DEFAULTS);
+  const otherPinch = createPinchEdge();
+  let mode = 'off';
+  let source = null;
+  let x = 0;                   // displayed cursor, NDC
+  let y = 0;
+  let raw = null;
+  let aimHand = null;
+  let lastPalm = null;
+  let lastGunT = -Infinity;
+  let clutchSince = null;
+  let history = [];
+  let lastClickT = -Infinity;
+  // Aim tracking (metres). acc = raw aim accumulated from frame-to-frame differences; filt = its
+  // One Euro output. live = the cursor the hand drives, in 1460-px units (x right, y up).
+  let aim = null;              // { A: {x,y} image, s, acc: [x,y], filt: [x,y], t }
+  let live = [0, 0];
+  let speed = 0;
+  let gain = P.gmin;
+  let absPx = [0, 0];
+  // Freeze / ease: phase 'pending' (thumb falling, cursor held), 'held' (after a click),
+  // 'easing' (blending back to live), 'live'.
+  let phase = 'live';
+  let frozen = null;           // { x, y, since } NDC
+  let ease = null;             // { x, y, since } NDC start of the blend
+  let hammerOut = { state: 'unknown', angleDeg: null, source: null };
+  let prevHam = null;          // { deg, t } for the fall rate when reading hand.f
+
+  const halfW = () => P.REF_W / 2;
+  const halfH = (aspect) => P.REF_W / 2 / (viewAspect ?? aspect);
+
+  function setProfile(pr) {
+    const r = pr?.reach;
+    if (r && [r.x0, r.x1, r.y0, r.y1].every(Number.isFinite) && r.x1 - r.x0 > 0.05 && r.y1 - r.y0 > 0.05) {
+      reach = { x0: r.x0, x1: r.x1, y0: r.y0, y1: r.y1 };
+    }
+    const c = pr?.cursor;
+    if (c && typeof c === 'object') {
+      for (const k of ['minCutoff', 'beta', 'dCutoff', 'gmin', 'gmax', 'vinf', 'lambda', 'absGain']) {
+        if (Number.isFinite(c[k])) P[k] = c[k];
+      }
+      euro.set({ minCutoff: P.minCutoff, beta: P.beta, dCutoff: P.dCutoff });
+    }
+  }
+  if (profile) setProfile(profile);
+
+  function record(t) {
+    history.push({ t, x, y });
+    while (history.length > 2 && history[0].t < t - HISTORY_MS) history.shift();
+  }
+  function cursorAt(t) {
+    let best = history[0] ?? { x, y };
+    for (const h of history) {
+      if (h.t <= t) best = h;
+      else break;
+    }
+    return best;
+  }
+
+  function pickAimHand(guns) {
+    if (guns.length === 1 || !lastPalm) return guns[0];
+    let best = guns[0];
+    let bestD = Infinity;
+    for (const g of guns) {
+      const c = palmCentroid(g.landmarks);
+      const d = Math.hypot(c.x - lastPalm.x, c.y - lastPalm.y);
+      if (d < bestD) { bestD = d; best = g; }
+    }
+    return best;
+  }
+
+  // Metres per aspect-corrected image unit. handFeatures' smoothed s when it has one (same
+  // formula), else a local EMA (tau sTauMs) of palm metres / palm image length.
+  function sFor(hand, pts, aspect, prevS, dtMs) {
+    const fs = hand.f?.aim?.s;
+    if (Number.isFinite(fs) && fs > 0) return fs;
+    const img = palmLength(pts, aspect);
+    if (!(img > 1e-4)) return prevS ?? P.palmM / 0.15;
+    const m = hand.f?.sizeM ?? gunFeatures(hand.worldLandmarks)?.palmM ?? P.palmM;
+    const now = m / img;
+    if (!Number.isFinite(prevS) || !(dtMs > 0)) return now;
+    return prevS + (now - prevS) * (1 - Math.exp(-dtMs / P.sTauMs));
+  }
+
+  const sigmoidGain = (v) => P.gmin + (P.gmax - P.gmin) / (1 + Math.exp(-P.lambda * (v - P.vinf)));
+
+  function toNdc(px, aspect) {
+    return { x: clamp(px[0] / halfW()), y: clamp(px[1] / halfH(aspect)) };
+  }
+  function clampPx(px, aspect) {
+    return [Math.max(-halfW(), Math.min(halfW(), px[0])), Math.max(-halfH(aspect), Math.min(halfH(aspect), px[1]))];
+  }
+
+  // One aim frame: returns nothing, updates live / absPx / speed / gain.
+  function track(hand, aspect, t, fresh) {
+    const pts = Array.isArray(hand.rawLandmarks) && hand.rawLandmarks.length >= 18 ? hand.rawLandmarks : hand.landmarks;
+    const A = { x: pts[5].x, y: pts[5].y };
+    const dtMs = aim ? t - aim.t : 0;
+    const s = sFor(hand, pts, aspect, fresh ? null : aim?.s, dtMs);
+    if (fresh || !aim) {
+      euro.reset();
+      aim = { A, s, acc: [0, 0], filt: [0, 0], t };
+      euro.filter(0, 0, t);
+    } else {
+      // Only DIFFERENCES are scaled by s: an absolute position times a noisy s would turn depth
+      // noise into cursor noise (Ricky §Units).
+      const acc = [aim.acc[0] + (A.x - aim.A.x) * aspect * s, aim.acc[1] + (A.y - aim.A.y) * s];
+      const f = euro.filter(acc[0], acc[1], t);
+      const filt = [f.x, f.y];
+      const dt = Math.min(0.1, Math.max(1e-3, dtMs / 1000));
+      const d = [filt[0] - aim.filt[0], filt[1] - aim.filt[1]];
+      speed = Math.hypot(d[0], d[1]) / dt;
+      gain = sigmoidGain(speed);
+      // Image x runs opposite to the screen (mirrored like the ghost hands), image y runs down.
+      const step = [-d[0] * 1000 * gain, -d[1] * 1000 * gain];
+      live = [live[0] + step[0], live[1] + step[1]];
+      aim = { A, s, acc, filt, t };
+      absPx = anchorPx(aspect);
+      // PRISM offset recovery (Frees 2007, via Ricky §2): while moving fast TOWARD the anchor,
+      // close up to half of the step's length of the gap, so the cursor never drifts off the hand.
+      const gap = [absPx[0] - live[0], absPx[1] - live[1]];
+      const gl = Math.hypot(gap[0], gap[1]);
+      const sl = Math.hypot(step[0], step[1]);
+      if (speed > P.prismV && gl > 1e-6 && step[0] * gap[0] + step[1] * gap[1] > 0) {
+        const k = Math.min(gl, P.prismK * sl) / gl;
+        live = [live[0] + gap[0] * k, live[1] + gap[1] * k];
+      }
+      live = clampPx(live, aspect); // an edge clamp moves the offset too
+      return;
+    }
+    absPx = anchorPx(aspect);
+    live = clampPx(absPx, aspect);
+    speed = 0;
+    gain = sigmoidGain(0);
+  }
+
+  // The absolute anchor in 1460-px units: the filtered aim's metric offset from the calibrated
+  // centre (reach box centre) times absGain. (filt - acc) carries the filter's lag into it.
+  function anchorPx(aspect) {
+    const c = { x: (reach.x0 + reach.x1) / 2, y: (reach.y0 + reach.y1) / 2 };
+    const dx = (aim.A.x - c.x) * aspect * aim.s + (aim.filt[0] - aim.acc[0]);
+    const dy = (aim.A.y - c.y) * aim.s + (aim.filt[1] - aim.acc[1]);
+    return [-dx * 1000 * P.absGain, -dy * 1000 * P.absGain];
+  }
+
+  function readHammer(hand, t) {
+    const fh = hand.f?.hammer;
+    if (fh && typeof fh === 'object') {
+      return { h: fh, gap: hand.f.thumbGap, src: 'features' };
+    }
+    const gap = gunFeatures(hand.worldLandmarks)?.thumbGap;
+    return { h: localHammer.update(hammerAngleDeg(hand.worldLandmarks), gap, t), gap, src: 'local' };
+  }
+
+  function startEase(t) {
+    ease = { x, y, since: t };
+    phase = 'easing';
+    frozen = null;
+  }
+
+  function resetAll() {
+    euro.reset();
+    localHammer.reset();
+    otherPinch.reset();
+    aim = null;
+    phase = 'live';
+    frozen = null;
+    ease = null;
+    prevHam = null;
+  }
+
+  return {
+    v2: true,
+    get state() {
+      return {
+        mode, source, x, y, aimHand, raw, frozen: phase === 'pending' || phase === 'held',
+        v2: { phase, speed, gain, offsetPx: [live[0] - absPx[0], live[1] - absPx[1]], hammer: { ...hammerOut } }
+      };
+    },
+    get profile() {
+      const { minCutoff, beta, dCutoff, gmin, gmax, vinf, lambda, absGain } = P;
+      return { reach: { ...reach }, smoothing: euro.params, cursor: { minCutoff, beta, dCutoff, gmin, gmax, vinf, lambda, absGain } };
+    },
+    setProfile,
+    // v1's thumb-tap trial has no meaning in v2 (the hammer is always on).
+    get thumbTap() { return false; },
+    setThumbTap() {},
+    get clickAlt() { return alt; },
+    setClickAlt(v, { persist = false } = {}) {
+      alt = v === 'pinch' || v === 'hold' ? v : null;
+      otherPinch.reset();
+      if (persist) { try { globalThis.localStorage?.setItem(CLICK_ALT_KEY, alt ?? ''); } catch { /* storage blocked */ } }
+    },
+    setView(aspect) { viewAspect = Number.isFinite(aspect) && aspect > 0 ? aspect : null; },
+
+    update(hands, aspect = 1, t = performance.now()) {
+      const guns = hands.filter((h) => hasLandmarks(h) && h.pointer?.gun === true);
+      if (!guns.length) {
+        if (mode === 'aim' && source === 'hand') {
+          mode = 'clutch';
+          clutchSince = t;
+          aimHand = null;
+        }
+        if (mode !== 'aim') otherPinch.reset();
+        return null;
+      }
+      const hand = pickAimHand(guns);
+      const quick = source === 'hand' && t - lastGunT < REENTRY_KEEP_MS && aim !== null;
+      if (mode !== 'aim' || source !== 'hand') {
+        mode = 'aim';
+        source = 'hand';
+        clutchSince = null;
+        if (!quick) resetAll();
+      }
+      // A different hand took over (both pointing, the old one left): start it fresh.
+      const swapped = aimHand && hand !== aimHand && lastPalm &&
+        Math.hypot(palmCentroid(hand.landmarks).x - lastPalm.x, palmCentroid(hand.landmarks).y - lastPalm.y) > SAME_HAND_MATCH * 2;
+      if (swapped) resetAll();
+      track(hand, aspect, t, aim === null);
+      lastGunT = t;
+      lastPalm = palmCentroid(hand.landmarks);
+      aimHand = hand;
+      raw = toNdc(absPx, aspect);
+      const liveNdc = toNdc(live, aspect);
+
+      // Hammer (§3.2): freeze from the onset, click at the drop, rewind to onset - 1 frame.
+      let click = null;
+      const { h, gap, src } = readHammer(hand, t);
+      const deg = h.angleDeg;
+      const rate = prevHam && deg != null && t > prevHam.t ? ((deg - prevHam.deg) * 1000) / (t - prevHam.t) : 0;
+      const frameMs = prevHam ? t - prevHam.t : 20;
+      prevHam = deg == null ? null : { deg, t };
+      hammerOut = { state: h.state, angleDeg: deg, source: src };
+      const T = HAMMER_DEFAULTS;
+      const inCock = deg != null && (deg > T.COCK_DEG || gap > T.COCK_GAP);
+      if (h.edge && t - lastClickT >= CLICK_REFRACTORY_MS) {
+        const onset = Number.isFinite(h.fallT) ? h.fallT : frozen?.since ?? t;
+        const at = cursorAt(Math.max(onset - frameMs, t - P.rewindCapMs));
+        lastClickT = t;
+        x = at.x;
+        y = at.y;
+        frozen = { x, y, since: t };
+        phase = 'held';
+        record(t);
+        click = { type: 'click', x, y, t, source: 'hand', via: 'hammer' };
+      } else if (phase === 'live' || phase === 'easing') {
+        if (h.state === 'cocked' && deg != null && (!inCock || rate < T.FALL_RATE_DPS)) {
+          // The thumb started to fall: hold the cursor where it was on the previous frame.
+          const prev = history[history.length - 1] ?? { x, y };
+          frozen = { x: prev.x, y: prev.y, since: t };
+          phase = 'pending';
+          ease = null;
+        }
+      } else if (phase === 'pending') {
+        const aborted = h.state !== 'cocked' || t - frozen.since > T.DROP_WINDOW_MS || (inCock && rate >= 0);
+        if (aborted) startEase(t);
+      } else if (phase === 'held') {
+        // Stay on the target while the thumb is down; the lift reverses the drop's palm shift,
+        // so the live cursor comes back near the click point by itself.
+        const lifted = h.state !== 'dropped' || inCock;
+        if (lifted || speed > P.moveV || t - frozen.since > P.holdMaxMs) startEase(t);
+      }
+      if (!click) {
+        if (phase === 'pending' || phase === 'held') { x = frozen.x; y = frozen.y; }
+        else if (phase === 'easing') {
+          const k = smooth01((t - ease.since) / P.easeMs);
+          x = ease.x + (liveNdc.x - ease.x) * k;
+          y = ease.y + (liveNdc.y - ease.y) * k;
+          if (k >= 1) { phase = 'live'; ease = null; }
+        } else { x = liveNdc.x; y = liveNdc.y; }
+        record(t);
+      }
+
+      // Other-hand pinch, only when the setting asks for it (CONTRACT §3.2).
+      if (alt !== 'pinch') return click;
+      const clicker = hands.find((o) => o !== hand && hasLandmarks(o) && o.engaged !== false && o.pointer?.gun !== true) ?? null;
+      if (!clicker) { otherPinch.reset(); return click; }
+      const onset = otherPinch.update(clicker.pinch?.pinching === true, clicker.pinch?.ratio, t);
+      if (click || !onset || t - lastClickT < CLICK_REFRACTORY_MS) return click;
+      lastClickT = t;
+      const at = cursorAt(t - rewindMs);
+      x = at.x;
+      y = at.y;
+      record(t);
+      return { type: 'click', x, y, t, source: 'hand', via: 'other-pinch' };
+    },
+
+    mouseMove(ndcX, ndcY, t = performance.now()) {
+      mode = 'aim';
+      source = 'mouse';
+      aimHand = null;
+      raw = null;
+      clutchSince = null;
+      x = clamp(ndcX);
+      y = clamp(ndcY);
+      record(t);
+    },
+    mouseLeave() {
+      if (source === 'mouse') mode = 'off';
+    },
+    mouseClick(ndcX, ndcY, t = performance.now()) {
+      this.mouseMove(ndcX, ndcY, t);
+      return { type: 'click', x, y, t, source: 'mouse', via: 'mouse' };
+    },
+    tick(t = performance.now()) {
+      if (mode === 'clutch' && clutchSince !== null && t - clutchSince >= CLUTCH_SHOW_MS) {
+        mode = 'off';
+        clutchSince = null;
+      }
+    },
+    reset() {
+      mode = 'off';
+      source = null;
+      x = 0;
+      y = 0;
+      raw = null;
+      aimHand = null;
+      lastPalm = null;
+      clutchSince = null;
+      history = [];
+      lastGunT = -Infinity;
+      lastClickT = -Infinity;
+      live = [0, 0];
+      absPx = [0, 0];
+      resetAll();
     }
   };
 }

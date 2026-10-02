@@ -93,19 +93,32 @@
 //       picks the lit slot (never a 3D pick or a page click) and hold-select stands down. Closed
 //       during calibration and selection practice. runtime.wheel (toolWheel | null);
 //       events 'wheel' { type: 'open' | 'close' | 'pick', ...detail }.
+//   HANDS V2 (plans/hands-v2/CONTRACT.md §0/§2; only with gestures.handsV2Enabled(), i.e. ?hands=v2
+//   or localStorage['hands.v2']='1'; switch off = the v1 path above, unchanged):
+//     each camera frame: handFeatures.update on the RAW hands (before smoothLandmarks) -> annotate
+//     -> engagement -> inputArbiter.update -> manipulator.update(route.manip), pointer.update(
+//     route.pointer), wheel.feed(route.wheel); a hand click passes arbiter.click() first.
+//     runtime.arbiter (inputArbiter | null when v2 is off); runtime.setScope(name, { allow }?)
+//     (no-op when v2 is off). injectFrame runs handFeatures on hands that have no hand.f yet.
+//     Extra events: 'intent' arbiter.state every camera frame (owner, scope, poses, arming:
+//     the Done / undo ring); 'done' { t, hand }, 'undo' { t, hand }, 'swipe' { t, hand, dir,
+//     dxPalms, peakSpeed } (the host acts; a 'done' also closes an open tool wheel).
+//     Hold-to-select only runs when pointer.clickAlt === 'hold' (v2 click = the hammer drop).
 //   Not built yet (P1 step 2+): a per-hand 'rest' event and multiple pick roots.
 const V = new URL(import.meta.url).search;
 
 const { startCamera, stopCamera } = await import('./camera.js' + V);
 const { createHandTracker, HAND_CONNECTIONS } = await import('./handTracker.js' + V);
-const { annotateHand } = await import('./gestures.js' + V);
+const { annotateHand, handsV2Enabled } = await import('./gestures.js' + V);
+const { createHandFeatures } = await import('./handFeatures.js' + V);
+const { createInputArbiter } = await import('./inputArbiter.js' + V);
 const { drawHands, sizeOverlayTo } = await import('./overlay.js' + V);
 const { MODE } = await import('./manipulator.js' + V);
 const { createHandModel } = await import('./handModel.js' + V);
 const { smoothHandLandmarks, resetLandmarkSmoothing } = await import('./smoothLandmarks.js' + V);
 const { createPointer, createEngagement, createResetGate, createTrackingMonitor, createSelector, nextInStack, BUBBLE_PX } = await import('./pointer.js' + V);
 const { createReticle, probe, createPartHighlight, SELECTED_OUTLINE } = await import('./reticle.js' + V);
-const { createCalibration, loadProfile, applyProfile, createSelectionPractice } = await import('./calibrate.js' + V);
+const { createCalibration, loadProfile, loadProfileV2, applyProfile, createSelectionPractice } = await import('./calibrate.js' + V);
 const { createHandUI } = await import('./handUI.js' + V);
 const { createToolWheel } = await import('./toolWheel.js' + V);
 
@@ -153,6 +166,11 @@ export function createHandsRuntime({
   // count only while raised (createEngagement): lowered = at rest, drawn hand dimmed.
   const engagement = createEngagement();
   const pointer = createPointer();
+  // Hands v2: read once, like gestures.js (switching mid-session would mix the two pipelines).
+  const v2 = handsV2Enabled();
+  const features = v2 ? createHandFeatures() : null;
+  const arbiter = v2 ? createInputArbiter() : null;
+  let lastManipMode = null; // the manipulator's previous-frame mode: arbiter ownership hint
   const reticle = createReticle(scene);
   const highlight = createPartHighlight(scene); // the hovered exploded part's outline
   // The SELECTED part's outline (Debbie-G #7): steady, brighter, drawn whether or not you aim.
@@ -178,11 +196,13 @@ export function createHandsRuntime({
 
   // Calibration (calibrate.js): first camera use with no saved profile, then C / Recalibrate.
   // While it runs, gestures don't drive the model and hand clicks go to the targets.
-  let profile = loadProfile();
-  applyProfile(profile, { pointer, engagement });
+  let profile = (v2 && loadProfileV2()) || loadProfile();
+  applyProfile(profile, { pointer, engagement, features });
   const calibration = createCalibration({
     pointer,
     engagement,
+    v2,
+    features,
     rect: () => canvas.getBoundingClientRect(),
     video,
     onDone: (p) => finishCalibration(p),
@@ -190,13 +210,14 @@ export function createHandsRuntime({
   });
   function finishCalibration(p) {
     profile = p;
+    thresholdsFor = null; // re-push the new clap thresholds on the next v2 frame
     emit('calibrated', p);
   }
-  function calibrate() {
+  function calibrate(opts) {
     if (!tracking) return 'not-tracking';
     if (calibration.active) return 'busy';
     pointer.reset();
-    calibration.start(performance.now());
+    calibration.start(performance.now(), opts);
     return 'started';
   }
 
@@ -343,7 +364,8 @@ export function createHandsRuntime({
       candidates,
       cursorPx: aiming ? cursorPxOf(st) : null,
       t: nowMs,
-      canHold: st.source === 'hand' && !st.frozen
+      // v2: the hammer drop is the click; hold-to-select is an opt-in alternative (pointer.clickAlt).
+      canHold: st.source === 'hand' && !st.frozen && (!v2 || pointer.clickAlt === 'hold')
     });
     holdShown = s.visibleProgress;
     target = s.target ? { part: s.target.part ?? null, hit: !!s.target.hit, distPx: s.target.distPx ?? 0, progress: s.visibleProgress } : null;
@@ -462,6 +484,9 @@ export function createHandsRuntime({
     resetLandmarkSmoothing();
     engagement.reset();
     pointer.reset();
+    features?.reset();
+    arbiter?.reset();
+    lastManipMode = null;
     resetGate.reset();
     trackingMonitor.reset();
     selector.reset();
@@ -530,6 +555,7 @@ export function createHandsRuntime({
     // Raised hands only (hand.engaged); the manipulator and pointer both ignore lowered ones.
     engagement.update(hands);
     const calibrating = calibration.active;
+    if (v2) return processFrameV2(aspect, now, manip, calibrating);
 
     const mode = calibrating ? MODE.IDLE : manip?.update(hands, aspect, now) ?? MODE.IDLE;
     const click = pointer.update(hands, aspect, now);
@@ -548,6 +574,57 @@ export function createHandsRuntime({
     } else {
       route(placeClick(click));
     }
+    if (resetGate.update(hands, now) && !calibrating) trackingReset();
+    const hint = trackingMonitor.update(hands, pointer.state, now);
+    stats.hint = hint?.key ?? null;
+    setHint(hint);
+    emit('frame', { mode, hands, calibrating, now });
+    return mode;
+  }
+
+  // v2 twin of processFrame (CONTRACT §0): the arbiter decides which consumer sees the hands.
+  // Kept separate so the v1 path above stays byte-for-byte what it was.
+  // Per-person clap thresholds from the calibration v2 profile, pushed once per manipulator
+  // (hosts swap the manipulator on model load) and again after each calibration.
+  let thresholdsFor = null;
+  function applyManipThresholds(manip) {
+    if (!manip?.setThresholds || manip === thresholdsFor) return;
+    thresholdsFor = manip;
+    const t = profile?.v === 2 ? profile.thresholds : null;
+    if (!t) return;
+    const patch = {};
+    for (const k of ['CLAP_ARM_SPAN', 'CLAP_CONTACT_SPAN', 'CLAP_V_MIN']) if (Number.isFinite(t[k])) patch[k] = t[k];
+    manip.setThresholds(patch);
+  }
+
+  function processFrameV2(aspect, now, manip, calibrating) {
+    applyManipThresholds(manip);
+    // Calibration owns the hands outright: it needs the pointer, never the arbiter's routing.
+    const arb = arbiter.update(hands, now, { wheelOpen: !!wheel?.isOpen, manipMode: lastManipMode, aspect });
+    const to = calibrating ? { pointer: hands, manip: [], wheel: [] } : arb.route;
+    const mode = calibrating ? MODE.IDLE : manip?.update(to.manip, aspect, now) ?? MODE.IDLE;
+    lastManipMode = mode;
+    const vp = pageSpace() ? { width: window.innerWidth || 1, height: window.innerHeight || 1 } : viewportSize();
+    pointer.setView?.(vp.width / vp.height);
+    const click = pointer.update(to.pointer, aspect, now);
+    const aimHand = pointer.state.aimHand;
+    pinchHeld = to.pointer.some((h) => h !== aimHand && h.engaged !== false && h.pinch?.pinching === true);
+    if (wheel) {
+      if (calibrating || practice?.active) wheel.close('api');
+      else wheel.feed(to.wheel, now);
+    }
+    if (calibrating) {
+      calibration.onClick(click);
+      calibration.onFrame(hands, now);
+      if (click) reticle.pulse();
+    } else {
+      route(arbiter.click(placeClick(click)));
+      for (const ev of arb.events) {
+        if (ev.type === 'done' && wheel?.isOpen) wheel.close('done');
+        emit(ev.type, ev);
+      }
+    }
+    emit('intent', arb.state);
     if (resetGate.update(hands, now) && !calibrating) trackingReset();
     const hint = trackingMonitor.update(hands, pointer.state, now);
     stats.hint = hint?.key ?? null;
@@ -577,6 +654,8 @@ export function createHandsRuntime({
       // nextFrameTime).
       const now = frameTime;
       hands = tracker.read(video, now);
+      // v2: features from the RAW landmarks (velocity, hammer and aim must not see the filter).
+      if (v2) features.update(hands, now, { aspect });
       smoothHandLandmarks(hands, now);
       // Pointer first, once per hand per frame (gestures.js annotateHand): a pointer is never
       // read as a grabbing fist and never blocks a pinch (BUGS #32). hand.pointer is
@@ -644,6 +723,7 @@ export function createHandsRuntime({
     // manipulator, pointer, clicks incl. handUI, pinchHeld), then a display frame. No camera.
     injectFrame(frameHands, { aspect = 16 / 9, t = performance.now() } = {}) {
       const manip = manipulator();
+      if (v2 && frameHands?.some((h) => h && h.f === undefined)) features.update(frameHands, t, { aspect });
       const mode = processFrame(frameHands, aspect, t, manip);
       manip?.tick(t);
       updatePointerVisuals(t);
@@ -668,6 +748,8 @@ export function createHandsRuntime({
     get pinchHeld() { return pinchHeld; },
     get cursorPx() { return cursorPx; },
     get wheel() { return wheel; },
+    get arbiter() { return arbiter; },
+    setScope(name, opts) { arbiter?.setScope(name, opts); },
     get overUi() { return overUi; },
     startPractice,
     get selector() { return selector; }

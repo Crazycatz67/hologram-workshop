@@ -36,11 +36,25 @@
     #previews figcaption { color: #7f93a6; margin-bottom: 4px; }
     canvas.pv { background: #0a0f15; border-radius: 8px; width: 320px; height: 240px; }
     #take { color: #9fb3c6; white-space: pre-wrap; }
+    #clips li.gt .name::after { content: ' · GT'; color: #7f93a6; }
+    #gt { border: 1px solid #16222e; border-radius: 8px; padding: 6px 10px; margin: 10px 0; max-width: 620px; }
+    #gt h2 { font-size: 12px; margin: 0; color: #4fd1ff; }
+    #gt .keys { color: #7f93a6; }
+    #gt input { font: inherit; width: 3em; background: #0f1b26; color: #c9dcec; border: 1px solid #2a4459; border-radius: 6px; padding: 4px; }
+    #progress { color: #e6f3ff; min-height: 1.4em; }
+    #barWrap { height: 4px; background: #16222e; border-radius: 2px; overflow: hidden; }
+    #bar { height: 100%; width: 0; background: #4fd1ff; transition: width 300ms ease; }
+    /* Instruction card over the selfie view during Run all; eased in/out (photosafety). */
+    #prompt { position: absolute; left: 0; right: 0; bottom: 0; padding: 8px 12px; background: rgba(5, 7, 10, 0.78);
+              opacity: 0; transition: opacity 250ms ease; pointer-events: none; }
+    #prompt.show { opacity: 1; }
+    #prompt .pname { color: #4fd1ff; font-size: 14px; }
+    #prompt .pins { color: #e6f3ff; font-size: 15px; margin-top: 2px; }
   </style>
 </head>
 <body>
   <h1>Clip Lab</h1>
-  <div class="sub">Record each gesture as a clip for the demo hand. Numbers only: landmarks, never camera frames.
+  <div class="sub">Record each gesture as a clip for the demo hand, or use Run all to record ground-truth takes for the replay lab. Numbers only: landmarks, never camera frames.
     Saves to assets/gesture-clips/ on localhost; elsewhere Keep downloads the file.</div>
   <div id="wrap">
     <ul id="clips"></ul>
@@ -50,7 +64,24 @@
         <canvas id="live"></canvas>
         <div id="count"></div>
         <div id="recDot">● REC</div>
+        <div id="prompt"><div class="pname"></div><div class="pins"></div></div>
       </div>
+      <section id="gt">
+        <h2>Ground truth (Run all, ~10 min)</h2>
+        <div class="row">
+          <label>Takes <input id="takes" type="number" min="1" max="10" value="5" /></label>
+          <button id="runBtn" class="primary" disabled>▶ Run all</button>
+          <button id="pauseBtn" disabled>⏸ Pause</button>
+          <button id="goodBtn" disabled>✓ Good</button>
+          <button id="badBtn" disabled>✗ Bad · redo</button>
+          <button id="skipBtn" disabled>⏭ Skip gesture</button>
+          <button id="stopRunBtn" disabled>■ Stop</button>
+        </div>
+        <div id="barWrap"><div id="bar"></div></div>
+        <div id="progress"></div>
+        <div class="keys">Each take replays during the next countdown: press X if it looked wrong (it is re-recorded), Enter to save it now.
+          Space pause · S skip gesture · Esc stop. Already-saved takes are skipped, so Run all resumes.</div>
+      </section>
       <div class="row">
         <button id="camBtn" class="primary">📷 Camera</button>
         <label>Length <select id="dur"><option>2</option><option>3</option><option selected>4</option><option>5</option></select> s</label>

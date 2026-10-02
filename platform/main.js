@@ -10,6 +10,7 @@ const { groupFiles, parseGroup, countTriangles, sha256Hex, filesFromDrop, ACCEPT
 const { createLibrary } = await import('./library.js' + V);
 const exporter = await import('./export.js' + V);
 const { splitComponents } = await import('./segment.js' + V);
+const { createToolStatus, slot, TOOLS } = await import('../toolWheel.js' + V);
 // meshoptimizer for the part splitter's proxy on dense scans; loads in the background.
 import('./parts.js').then((m) => m.loadSimplifier());   // same specifier as segment.js's import -> same module instance
 const { createObjectMode } = await import('./objectmode.js' + V);
@@ -51,6 +52,9 @@ const edits = [];
 const polyBtn = $('polyBtn');
 let polygon = null;
 let polyHome = null;   // the item polygon mode was entered from, reselected on the way out
+// The tool chip + Done button (toolWheel.js createToolStatus), built further down; the render
+// loop starts before this module finishes loading, so it reads this through a null check.
+let toolStatus = null;
 let polyWasActive = false;
 let library = null; // created below; object-mode callbacks may run before it exists
 let measurements = null;
@@ -91,6 +95,7 @@ startRenderLoop({
     window.hologram.hands?.update(now);   // hands on the Platform (hands.js): runs in THIS loop, no second rAF
     lib.ring?.update(Math.min(100, now - (lib.lastTick ?? now)));
     lib.lastTick = now;
+    updateTool();
   }
 });
 
@@ -209,6 +214,8 @@ const polygonLoaded = import('./polygon.js' + V).then(({ createPolygonMode }) =>
     onSkin: (k) => look.setSkin(k),   // the hologram eases to a faint skin under the wire
     materialFor: (m) => (plain ? (look.plainFor(m) ?? plainMaterial) : look.materialFor(m, 'base')),
     prepassLayer: PREPASS_LAYER,
+    // The lens action bar's Undo: the same path as the top bar's Undo button.
+    onUndo: () => { if (!undoBtn.disabled) { objectMode.undo(); syncLibrary(); } else setStatus('Nothing to undo'); },
     onChange: (st) => {
       if (!st.active && polyHome != null && polyWasActive) {   // left (Esc, button, P, item removed): back where we were
         const id = polyHome; polyHome = null;
@@ -1336,7 +1343,7 @@ async function landing() {
     const p = await lib.store.getProject(last).catch(() => null);
     if (p && !p.deletedAt && await openProject(last, null, { fallback: false })) return;
   }
-  if (lib.ring) { await refreshRing(); lib.ring.open(); }
+  if (lib.ring) { await refreshRing(); lib.landingRing = true; lib.ring.open(); }
 }
 
 async function initLibrary() {
@@ -1406,7 +1413,11 @@ for (const p of [picker, folderPicker]) {
   p.addEventListener('change', () => { if (p.files.length) loadFiles([...p.files]); p.value = ''; });
 }
 // The sample is a library project (3 versions); without storage it still loads directly.
-$('sample').addEventListener('click', () => (lib.store ? openProject(SAMPLE_ID) : loadUrl('../assets/chair/chair_detail.glb')));
+// The landing ring closes like any other way into a model (onRingChoose, loadFiles do the same).
+$('sample').addEventListener('click', () => {
+  lib.ring?.close();
+  return lib.store ? openProject(SAMPLE_ID) : loadUrl('../assets/chair/chair_detail.glb');
+});
 // ?model=<url> loads a model on open (e.g. a completed scan and its sidecar for a live check).
 const startModel = params.get('model');
 if (startModel) loadUrl(startModel, { project: false });
@@ -1415,6 +1426,8 @@ window.addEventListener('keydown', (e) => {
   if (e.target.matches?.('input, textarea')) return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
+  // Esc = the Done button (the polygon lens and the ring take their own Esc first).
+  if (k === 'escape') { if (exitTool()) e.preventDefault(); return; }
   if (k === 'r') controls.autoRotate = !controls.autoRotate;
   else if (k === 'p') togglePolygon();   // P: polygon lens on the selected item
   else if (k === 'i' && hasInferred()) setShowInferred(!look.showInferred);   // I: inferred on/off
@@ -1423,6 +1436,39 @@ window.addEventListener('keydown', (e) => {
 
 lib.ready = initLibrary();
 window.hologram.library.ready = lib.ready;
+
+// ---- the active tool: which one you're in, and how to get out (Hands v2 #12, #13) --------------
+// One answer for the chip, the Done button, the wheel's centre and Esc. Pin is a one-step action
+// on the selection (📌 chip / K / wheel ↖), never a mode, so it has no Done.
+function activeTool() {
+  if (polygon?.active) return 'polygon';
+  if (lib.ring?.isOpen?.()) return 'ring';
+  return 'none';
+}
+// exitTool() -> what it left ('polygon' | 'ring' | 'wheel') or null when already in free move.
+// The one host function the Done buttons, Esc and the wheel centre call; the open-palm "done"
+// gesture (inputArbiter.js, CONTRACT section 2.2) will call it too.
+function exitTool() {
+  let left = null;
+  const w = window.hologram.hands?.runtime?.wheel;
+  if (w?.isOpen) { w.close('api'); left = 'wheel'; }
+  const tool = activeTool();
+  if (tool === 'polygon') polygon.exit();
+  else if (tool === 'ring') lib.ring.close();
+  if (tool !== 'none') { left = tool; setStatus(`✋ Done · ${TOOLS[tool].name} off · free move`); }
+  return left;
+}
+window.hologram.exitTool = exitTool;
+window.hologram.activeTool = activeTool;
+toolStatus = createToolStatus({ chip: $('toolChip'), done: $('doneBtn'), onDone: () => exitTool() });
+function updateTool() {
+  const tool = activeTool();
+  // The ring on the landing screen is where you start, not a tool you can leave: no Done there.
+  // Once it closes the flag is spent, so a ring opened later (wheel, button) gets its Done.
+  if (tool !== 'ring') lib.landingRing = false;
+  // The polygon lens carries its own Done in its action bar: one Done on screen, not two.
+  toolStatus?.set(tool, { done: tool !== 'polygon' && !lib.landingRing });
+}
 
 // ---- Hands (hands.js, P1 step 2) ---------------------------------------------------------------
 // The Camera button; the shared hands runtime loads on first press (or on load, when the camera
@@ -1434,15 +1480,31 @@ window.hologram.hands = createPlatformHands({
   scene, camera, renderer, controls, objectMode, getItems: readyItems, setStatus,
   button: $('handsBtn'), expose: window.hologram,
   ring: () => lib.ring, polygon: () => polygon, resetView: () => frameAll(), helpEl: $('guide'),
-  // The ✌ tool wheel (toolWheel.js, HANDS-UX-SPEC section 4): same directions as hologram.html.
+  // Hands v2 (?hands=v2 only; hands.js wireHandsV2): the tool sets the arbiter's scope, the
+  // open-palm Done is the Done button, thumbs-down is the Undo button.
+  activeTool: () => activeTool(), chipAfter: $('toolChip'),
+  onDone: () => {
+    // The landing ring is where you start, not a tool to leave (no Done button there either).
+    if (activeTool() === 'ring' && lib.landingRing) { setStatus('✋ Pick a project first · swipe to browse, aim + click (or a fist) opens one'); return; }
+    // Nothing to leave: furniture is always upright on the Platform, so there's nothing to snap.
+    if (!exitTool()) setStatus('✋ Done · free move');
+  },
+  onUndo: () => {
+    if (undoBtn.disabled) { setStatus('Nothing to undo'); return; }
+    objectMode.undo(); syncLibrary(); setStatus('↶ Undone · 👎 again undoes the step before');
+  },
+  // The ✌ tool wheel (toolWheel.js, HANDS-UX-SPEC section 4): the same slot meanings as
+  // hologram.html (toolWheel.js SLOTS). Centre = Done while a tool is on, else Help.
   toolWheel: () => [
-    { dir: 'up', icon: '↶', label: 'Undo', run: () => { objectMode.undo(); syncLibrary(); } },
-    { dir: 'down', icon: '⟲', label: 'Reset view', run: () => frameAll() },
-    { dir: 'upRight', icon: '📏', label: 'Measure', run: () => $('measureBtn').click() },
-    { dir: 'downRight', icon: '🔷', label: 'Polygon', run: () => togglePolygon(), enabled: () => !polyBtn.disabled },
-    { dir: 'downLeft', icon: '🎠', label: 'Library', run: () => { if (lib.ring) refreshRing().then(() => lib.ring.open()); }, enabled: () => !!lib.ring },
-    { dir: 'upLeft', icon: '📌', label: 'Pin', run: () => objectMode.togglePin() },
-    { dir: 'center', icon: '?', label: 'Help', run: () => $('help').click() }
+    { dir: 'up', ...slot('up'), run: () => { objectMode.undo(); syncLibrary(); } },
+    { dir: 'down', ...slot('down'), run: () => frameAll() },
+    { dir: 'upRight', ...slot('upRight', 'platform'), run: () => $('measureBtn').click() },
+    { dir: 'downRight', ...slot('downRight', 'platform'), run: () => togglePolygon(), enabled: () => !polyBtn.disabled },
+    { dir: 'downLeft', ...slot('downLeft', 'platform'), run: () => { if (lib.ring) refreshRing().then(() => lib.ring.open()); }, enabled: () => !!lib.ring },
+    { dir: 'upLeft', ...slot('upLeft', 'platform'), run: () => objectMode.togglePin() },
+    { dir: 'center', icon: () => slot('center', activeTool() === 'none' ? 'none' : 'tool').icon,
+      label: () => slot('center', activeTool() === 'none' ? 'none' : 'tool').label,
+      run: () => (activeTool() === 'none' ? $('help').click() : exitTool()) }
   ]
 });
 // W: the ✌ tool wheel at the screen centre for mouse / keyboard users (click a slot).

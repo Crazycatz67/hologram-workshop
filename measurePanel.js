@@ -21,6 +21,13 @@
 //     the tape/note mode changes ('off' | 'tape' | 'note').
 //   panel.mode, panel.tapePoints, panel.placeAtNdc(x, y, point?), panel.report(),
 //   panel.toggleMode('tape' | 'note') -> the new mode, panel.dispose().
+//   Live tape (Hands v2 Phase 2): panel.tapePreview(target) -> { metres, text } | null, once per
+//     frame from the host. target = { point: Vector3 (world, e.g. the reticle's snapped hit) } |
+//     { ndc: { x, y } } (raycast here) | null. With point A placed and B not yet, it draws a faint
+//     line A -> target and returns that distance; with both placed it returns the final one;
+//     otherwise (or target null / a miss) it hides the line and returns null (final if any).
+//     metres are on the real object (calibrated, independent of on-screen scale).
+//   panel.tapeDistance -> { metres, text } | null   the placed A-B distance.
 //   Stable hooks: the tape toggle's text starts "pick two points" (test.js) and carries
 //   data-role="tape"; the readout is .measure-tape "<distance> apart on the real object"
 //   (sessionrec.js parses it).
@@ -166,7 +173,7 @@ export function createMeasurePanel({
   }
   const tapeLabel = tapeBtn.firstChild; // the text node setMode() rewrites
   const tapeHow = el('div', 'measure-stats',
-    `📏 Click two points on the ${displayName}, or aim and pinch your other hand. ✓ The distance shows below.`);
+    `📏 Aim at the ${displayName}, click point A, then point B (mouse, or pinch your other hand). The model holds still while the tape is on. ✓ The distance shows live as you aim.`);
   const tapeOut = el('div', 'measure-tape', 'measures the real object, whatever the model is scaled to');
   tapeBody.append(tapeBtn, tapeHow, tapeOut);
 
@@ -354,7 +361,7 @@ export function createMeasurePanel({
   function renderNotes() {
     noteList.innerHTML = '';
     if (!annotations.all.length) {
-      noteList.append(el('div', 'measure-stats', `📌 Turn on "pin a note", then click the ${displayName} to mark a fault or a spot. ✓ The note appears here and on the model.`));
+      noteList.append(el('div', 'measure-stats', `📝 Turn on "pin a note", then click the ${displayName} to mark a fault or a spot. ✓ The note appears here and on the model.`));
       return;
     }
     for (const note of annotations.all) {
@@ -503,6 +510,39 @@ export function createMeasurePanel({
   renderer.domElement.addEventListener('pointerdown', onDown);
   renderer.domElement.addEventListener('pointerup', onUp);
 
+  // ---- live distance (Hands v2 #18): a faint line from A to wherever you aim -------------------
+  let preview = null;
+  const previewEnd = new THREE.Vector3();
+  function hidePreview() { if (preview) preview.visible = false; }
+  function tapeDistance() {
+    if (picks.length < 2) return null;
+    const metres = picks[0].distanceTo(picks[1]) * factor;
+    return { metres, text: formatLength(metres, unit) };
+  }
+  function tapePreview(target) {
+    if (mode !== 'tape' || picks.length !== 1 || !target) { hidePreview(); return tapeDistance(); }
+    let world = target.point ?? null;
+    if (!world && target.ndc) world = pickAtNdc(target.ndc.x, target.ndc.y)?.point ?? null;
+    if (!world) { hidePreview(); return null; }
+    const a = object.localToWorld(picks[0].clone());
+    if (!preview) {
+      preview = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: MARKER_COLOR, transparent: true, opacity: 0.45 }));
+      preview.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+      preview.frustumCulled = false;
+      preview.name = 'tape-preview';
+      scene.add(preview);
+    }
+    const pos = preview.geometry.attributes.position;
+    pos.setXYZ(0, a.x, a.y, a.z);
+    pos.setXYZ(1, world.x, world.y, world.z);
+    pos.needsUpdate = true;
+    preview.visible = true;
+    // Same rule as the placed tape: the distance in the object's LOCAL space is the real one.
+    previewEnd.copy(world);
+    const metres = picks[0].distanceTo(object.worldToLocal(previewEnd)) * factor;
+    return { metres, text: formatLength(metres, unit) };
+  }
+
   function reportTape() {
     if (picks.length < 2) {
       tapeOut.textContent = `point ${picks.length} of 2 placed`;
@@ -520,7 +560,7 @@ export function createMeasurePanel({
     tapeBtn.classList.toggle('active', mode === 'tape');
     noteBtn.textContent = `pin a note: ${mode === 'note' ? 'on' : 'off'}`;
     noteBtn.classList.toggle('active', mode === 'note');
-    if (mode !== 'tape') clearTape();
+    if (mode !== 'tape') { clearTape(); hidePreview(); }
     if (mode !== before) onModeChange(mode);
     return mode;
   }
@@ -634,6 +674,10 @@ export function createMeasurePanel({
     placeAtNdc(ndcX, ndcY, point = null) {
       return placeHit(pickAtNdc(ndcX, ndcY), point);
     },
+    tapePreview,
+    get tapeDistance() {
+      return tapeDistance();
+    },
     dispose() {
       // Without this the panel's own animation frame kept running after disposal, holding
       // the object, scene and every note alive with it.
@@ -641,6 +685,7 @@ export function createMeasurePanel({
       renderer.domElement.removeEventListener('pointerdown', onDown);
       renderer.domElement.removeEventListener('pointerup', onUp);
       clearTape();
+      if (preview) { scene.remove(preview); preview.geometry.dispose(); preview.material.dispose(); preview = null; }
       annotations.clear();
       labelLayer.remove();
     }

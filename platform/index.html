@@ -347,6 +347,8 @@
       </div>
       <div class="spacer"></div>
       <button id="handsBtn" aria-pressed="false" aria-label="Camera off: turn it on" title="Camera on / off: point at items with your hand (C calibrates)">📷</button>
+      <!-- The tool your hands are in (toolWheel.js createToolStatus): "✥ Free move" when none. -->
+      <span id="toolChip" class="tool-chip" role="status"></span>
       <button id="mode" data-icon="✥" title="Tab: switch between moving the camera and editing objects">Scene mode</button>
       <button id="polyBtn" data-icon="◇" disabled aria-pressed="false" title="P: Polygon mode: the selected item (or the whole scene) turns into its triangles; a lens under the mouse picks faces. Click selects, Shift-click adds, wheel sizes the lens, Delete hides, I marks inferred, Esc leaves">Polygon</button>
       <button id="undo" data-icon="↶" disabled title="Undo (Ctrl/Cmd+Z)">Undo</button>
@@ -380,6 +382,8 @@
       <div id="libraryRing" role="region" aria-label="Library" hidden>
         <div id="libraryList"></div>
       </div>
+      <!-- Shown while a tool is on (the polygon lens has its own bar with Done): back to free move (also Esc). -->
+      <button id="doneBtn" class="done-btn" type="button" hidden title="Leave the tool, back to free move (Esc)">✋ Done</button>
     </main>
 
     <aside id="right" class="side" aria-label="Inspector">

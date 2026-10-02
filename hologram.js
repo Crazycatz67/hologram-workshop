@@ -23,6 +23,10 @@ const { partLabel } = await import('./reticle.js' + V);
 const { createHandsRuntime } = await import('./handsRuntime.js' + V);
 const { autoStartCamera, mountRememberToggle, setRememberCamera } = await import('./handUI.js' + V);
 const { createOrbitGuard } = await import('./orbitGuard.js' + V);
+const { createToolStatus, slot, TOOLS } = await import('./toolWheel.js' + V);
+// Hands v2 host wiring (chip colour, hand tint, Done / undo ring, scopes), shared with the
+// Platform; that module's only static import is three.
+const { wireHandsV2 } = await import('./platform/hands.js' + V);
 
 const video = document.getElementById('cam');
 const overlay = document.getElementById('overlay');
@@ -56,6 +60,7 @@ let manipulator = null;
 let currentMeasurePanel = null;
 let currentModelId = null;
 let swapping = false;
+let triedTape = false;   // #try=tape (landing link) handled once
 let seenResets = 0; // manipulator.resetCount already announced (see noticeResets)
 // The loaded model's own words for the instructions: "Chair" from "Chair (raw scan)", and how
 // it explodes (literal parts vs stretch). Filled in by loadModelById.
@@ -159,7 +164,9 @@ function showError(title, body) {
 const runtime = createHandsRuntime({
   scene, camera, renderer, overlay, video,
   pickTargets: () => window.hologram.model,
-  manipulator: () => manipulator,
+  // Tape on = the model is frozen (Hands v2 #18): the runtime gets a manipulator that sees no
+  // hands, so grab / tilt / scale / explode can't reach it (manipulator.js untouched).
+  manipulator: () => gatedManipulator(),
   // What a held cursor or a pointing-hand pinch selects: with the tape or notes on, a point on
   // the surface (the click goes to the measure panel); otherwise an exploded part.
   // Tape and notes take the other hand's pinch only (Ricky (b), Debbie-G): no hold-to-place.
@@ -168,20 +175,23 @@ const runtime = createHandsRuntime({
   // panel) and works its buttons and sliders; over them, no 3D pick fires.
   handUI: true,
   cursorSpace: 'page',
-  // The ✌ tool wheel (toolWheel.js, HANDS-UX-SPEC section 4): same directions as the Platform.
+  // The ✌ tool wheel (toolWheel.js, HANDS-UX-SPEC section 4): the same slot meanings as the
+  // Platform (toolWheel.js SLOTS). Centre = Done while a tool is on, else Help.
   toolWheel: () => [
-    { dir: 'up', icon: '↶', label: 'Undo', run: () => undoReset() },
-    { dir: 'down', icon: '⟲', label: 'Reset view', run: () => { manipulator?.reset(); setStatus('⟲ Reset · ✌ wheel ↑ Undo brings it back'); } },
-    { dir: 'upRight', icon: '📏', label: 'Tape', run: () => currentMeasurePanel?.toggleMode('tape'), enabled: () => !!currentMeasurePanel },
-    { dir: 'downRight', icon: '💥', label: 'Explode', run: () => {
+    { dir: 'up', ...slot('up'), run: () => undoReset() },
+    { dir: 'down', ...slot('down'), run: () => { manipulator?.reset(); setStatus('⟲ Reset · ✌ wheel ↑ Undo brings it back'); } },
+    { dir: 'upRight', ...slot('upRight', 'hologram'), run: () => currentMeasurePanel?.toggleMode('tape'), enabled: () => !!currentMeasurePanel },
+    { dir: 'downRight', ...slot('downRight', 'hologram'), run: () => {
       if (!manipulator) return;
       const on = manipulator.explodeAmount > 0.5;
       manipulator.setExplode(on ? 0 : 1);
-      setStatus(on ? 'Parts back together' : '💥 Exploded · point at a part and pinch your other hand to pick it');
-    }, enabled: () => !!manipulator?.explodeIsLiteral },
-    { dir: 'downLeft', icon: '🔁', label: 'Next model', run: () => stepModel(1) },
-    { dir: 'upLeft', icon: '🎯', label: 'Practice', run: () => (runtime.practice?.active ? stopSelectionPractice() : startSelectionPractice()) },
-    { dir: 'center', icon: '?', label: 'Help', run: () => toggleHelp() }
+      setStatus(on ? 'Parts back together' : '💥 Exploded · point at a part and pinch your other hand to pick it · ✋ Done puts it back');
+    }, enabled: () => !!manipulator?.explodeIsLiteral && !modelFrozen() },
+    { dir: 'downLeft', ...slot('downLeft', 'hologram'), run: () => stepModel(1) },
+    { dir: 'upLeft', ...slot('upLeft', 'hologram'), run: () => currentMeasurePanel?.toggleMode('note'), enabled: () => !!currentMeasurePanel },
+    { dir: 'center', icon: () => slot('center', activeTool() === 'none' ? 'none' : 'tool').icon,
+      label: () => slot('center', activeTool() === 'none' ? 'none' : 'tool').label,
+      run: () => (activeTool() === 'none' ? toggleHelp() : exitTool()) }
   ],
   onAction: (type, detail) => {
     if (type === 'click') act(detail);
@@ -190,7 +200,7 @@ const runtime = createHandsRuntime({
     else if (type === 'frame') onCameraFrame(detail.mode);
     else if (type === 'hint') showHint(detail);
     else if (type === 'wheel' && detail.type === 'open') setStatus('✌ Tool wheel · ☝ aim at a tool, 🤏 pinch your other hand · ✌ again closes');
-    else if (type === 'wheel' && detail.type === 'pick') setStatus(`✌ ${detail.label}`);
+    else if (type === 'wheel' && detail.type === 'pick' && detail.dir !== 'center') setStatus(`✌ ${detail.label}`);
     else if (type === 'reset') {
       setStatus(`Tracking reset · ${detail.why}`);
       showToast('↻ Tracking reset', `${detail.why[0].toUpperCase()}${detail.why.slice(1)}. Raise a hand to carry on. ✓ Success looks like: the ghost hand reappears.`);
@@ -398,12 +408,12 @@ async function loadModelById(id) {
     onModeChange: (mode) => {
       if (mode !== 'off') stopSelectionPractice();
       if (mode === 'tape') {
-        setStatus('📏 Tape on · click two points');
-        showToast('📏 Click two points on ' + the(), 'Or aim and pinch your other hand. ✓ Success looks like: the distance in the Measure tab.');
+        setStatus('📏 Tape on · the model holds still · aim, click point A, click point B');
+        showToast('📏 Aim at ' + the() + ', click point A, then point B', 'Mouse click, or pinch your other hand. ✓ Success looks like: the distance next to the tool chip.');
       } else if (mode === 'note') {
-        setStatus('📌 Notes on · click to pin one');
-        showToast('📌 Click ' + the() + ' to pin a note', 'Then type it in the Measure tab. ✓ Success looks like: a label on the model.');
-      } else setStatus('Tape and notes off');
+        setStatus('📝 Notes on · click to add one');
+        showToast('📝 Click ' + the() + ' to add a note', 'Then type it in the Measure tab. ✓ Success looks like: a label on the model.');
+      } else setStatus('Free move · tape and notes off');
     }
   });
 
@@ -416,6 +426,11 @@ async function loadModelById(id) {
   const creditEl = document.getElementById('credit');
   if (creditEl) { creditEl.textContent = entry.credit ? `Model: ${entry.credit}` : ''; creditEl.title = creditEl.textContent; }
   startBtn.disabled = false;
+  // Landing "Try it" link (index.html #try=tape): open on the tape, once.
+  if (location.hash === '#try=tape' && !triedTape && currentMeasurePanel) {
+    triedTape = true;
+    currentMeasurePanel.toggleMode('tape');
+  }
 }
 
 const carousel = createCarousel({
@@ -510,6 +525,8 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (key === 'escape' && !helpEl.hidden) return toggleHelp(false);
+  // Esc = the Done button: leave the tool (tape, notes, explode), back to free move.
+  if (key === 'escape' && exitTool()) return;
   if (key === '?') toggleHelp();
   if (key === 'c') startCalibration();
   // W: the ✌ tool wheel at the screen centre (keyboard / mouse users; click a slot).
@@ -551,8 +568,8 @@ function act(click) {
     const placed = currentMeasurePanel.placeAtNdc(click.x, click.y, hit?.vertex ? hit.point : null);
     if (!placed) clickOutcome('miss', click, `Missed ${the()} · aim at it and pinch again`);
     else if (panelMode === 'tape') {
-      clickOutcome('tape-point', click, currentMeasurePanel.tapePoints === 1 ? '📏 Point A placed · aim at B and pinch' : '📏 Point B placed · distance in Measure');
-    } else clickOutcome('note', click, '📌 Note pinned · type it in Measure');
+      clickOutcome('tape-point', click, currentMeasurePanel.tapePoints === 1 ? '📏 Point A placed · aim at B and pinch' : `📏 Point B placed · ${currentMeasurePanel.tapeDistance?.text ?? ''} apart`);
+    } else clickOutcome('note', click, '📝 Note added · type it in Measure');
     return;
   }
   if (click.source === 'hand') runtime.pulse();
@@ -581,6 +598,98 @@ function clickOutcome(outcome, click, text) {
   setStatus(text);
 }
 
+// ---- the active tool: which one you're in, and how to get out (Hands v2 #12, #13) --------------
+// One answer for the chip, the Done button, the wheel's centre and Esc. Tape and notes are the
+// measure panel's modes; an exploded model (literal parts, past half-way) counts as the Explode
+// tool, and Done puts the parts back (edits kept, like a slow close).
+function activeTool() {
+  const m = currentMeasurePanel?.mode ?? 'off';
+  if (m === 'tape' || m === 'note') return m;
+  if (manipulator?.explodeIsLiteral && manipulator.explodeAmount > 0.5) return 'explode';
+  return 'none';
+}
+// exitTool() -> what it left ('tape' | 'note' | 'explode' | 'wheel') or null when already in
+// free move. The one host function the Done button, Esc and the wheel centre call; the open-palm
+// "done" gesture (inputArbiter.js, CONTRACT section 2.2) will call it too.
+function exitTool() {
+  let left = null;
+  if (runtime.wheel?.isOpen) { runtime.wheel.close('api'); left = 'wheel'; }
+  const tool = activeTool();
+  if (tool === 'tape' || tool === 'note') currentMeasurePanel.toggleMode(tool);
+  else if (tool === 'explode') manipulator.setExplode(0);
+  if (tool !== 'none') {
+    left = tool;
+    setStatus(`✋ Done · ${TOOLS[tool].name} off · free move`);
+  }
+  return left;
+}
+window.hologram.exitTool = exitTool;
+window.hologram.activeTool = activeTool;
+
+// Hands v2 (?hands=v2 only; null otherwise, v1 untouched): the open-palm Done is the Done
+// button (or, with no tool on, snaps the model upright), thumbs-down is U, the tool sets the
+// arbiter's scope (tape: aim + click, the model frozen) and the mode chip takes the owner colour.
+window.hologram.handsV2 = wireHandsV2(runtime, {
+  camera, canvas: renderer.domElement, chip: modeEl,
+  activeTool: () => activeTool(),
+  onDone: () => {
+    if (exitTool()) return;
+    // Snap upright needs the manipulator (manipulator.js, Debbie): used once it exists.
+    if (typeof manipulator?.snapUpright === 'function') { manipulator.snapUpright(); setStatus(`✋ Done · ${the()} upright`); }
+    else setStatus('✋ Done · free move');
+  },
+  // Still the one-step undo of the last reset (manipulator.undo): no multi-step history here yet.
+  onUndo: () => { if (manipulator?.canUndo) undoReset(); else setStatus('Nothing to undo · 👎 undoes the last reset'); }
+});
+
+// Frozen model while the tape is on: the manipulator is fed no hands (it releases a grab the
+// same way as when the hands drop, and its follow springs still settle), so nothing a hand does
+// can move, turn, scale or explode the thing being measured.
+const modelFrozen = () => (currentMeasurePanel?.mode ?? 'off') === 'tape';
+const frozenViews = new WeakMap();
+function gatedManipulator() {
+  if (!manipulator || !modelFrozen()) return manipulator;
+  let view = frozenViews.get(manipulator);
+  if (!view) {
+    const real = manipulator;
+    view = new Proxy(real, {
+      get(t, k) {
+        if (k === 'update') return (hands, aspect, ts) => t.update([], aspect, ts);
+        const v = Reflect.get(t, k, t);
+        return typeof v === 'function' ? v.bind(t) : v;
+      }
+    });
+    frozenViews.set(real, view);
+  }
+  return view;
+}
+
+// The aim, for the live tape distance: the reticle's (snapped) surface hit from the hands
+// runtime, or the mouse over the canvas.
+let aimHit = null, mouseNdc = null;
+runtime.on('aim', (d) => { aimHit = d?.hit?.point ? d.hit : null; });
+renderer.domElement.addEventListener('pointermove', (e) => {
+  const r = renderer.domElement.getBoundingClientRect();
+  mouseNdc = { x: ((e.clientX - r.left) / r.width) * 2 - 1, y: -((e.clientY - r.top) / r.height) * 2 + 1 };
+});
+renderer.domElement.addEventListener('pointerleave', () => { mouseNdc = null; });
+
+const toolStatus = createToolStatus({
+  chip: document.getElementById('toolChip'),
+  done: document.getElementById('doneBtn'),
+  onDone: () => exitTool()
+});
+function updateTool() {
+  const tool = activeTool();
+  let detail = '';
+  if (tool === 'tape') {
+    const live = currentMeasurePanel.tapePreview(aimHit ? { point: aimHit.point } : mouseNdc ? { ndc: mouseNdc } : null);
+    const n = currentMeasurePanel.tapePoints;
+    detail = live ? live.text : n === 0 ? 'click point A' : 'click point B';
+  }
+  toolStatus.set(tool, { detail });
+}
+
 // Once per camera frame, after the runtime has routed this frame's click, reset and hint.
 function onCameraFrame(mode) {
   renderChip(mode);
@@ -607,6 +716,7 @@ startRenderLoop({
     // debug skeleton and reticle: handsRuntime.js, inside this one render loop.
     runtime.update(tickNow);
     updateHover(tickNow);
+    updateTool();
   }
 });
 
@@ -877,7 +987,9 @@ function renderHelp() {
     row('Pick a part', 'click it once exploded'),
     h('h4', 'Keys'),
     row('R / U', 'reset / undo reset'),
-    row('T', 'tape on / off'),
+    row('T', 'tape on / off (the model holds still)'),
+    row('Esc / ✋ Done', 'leave the tool (tape, notes, explode)'),
+    row('W', 'the ✌ tool wheel'),
     row('P / M', 'Practice / Measure tab (P or Esc also stops selection practice)'),
     row('← →', 'switch model'),
     row('C / Esc', 'calibrate pointer / skip'),

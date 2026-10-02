@@ -130,3 +130,40 @@ button.note-del { height: 28px; padding: 0 8px; }
 
 
 .note-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+
+/* Active-tool chip + Done button (toolWheel.js createToolStatus; hologram.html and the Platform).
+   The chip always names the tool your hands are in; the Done button is the way back. Colour
+   eases on change, never blinks (BUGS #14). Phones keep the icon only. */
+.tool-chip {
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; flex: none;
+  border: 1px solid var(--line-2); border-radius: 13px; color: var(--muted); font-size: 12px; white-space: nowrap;
+  max-width: 260px; overflow: hidden; transition: color .2s ease, border-color .2s ease, background .2s ease;
+}
+.tool-chip.on { color: var(--select); border-color: rgba(255,176,64,.6); background: rgba(255,176,64,.08); }
+.tool-chip .tool-detail { color: var(--text); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; }
+.tool-chip .tool-detail::before { content: '· '; color: var(--faint); }
+.done-btn {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 40;
+  height: 56px; min-width: 150px; padding: 0 26px; border-radius: 28px; font-size: 18px; font-weight: 600;
+  color: #06131a; background: var(--warm); border: 2px solid rgba(255,255,255,.35);
+  box-shadow: 0 4px 18px rgba(0,0,0,.45);
+}
+.done-btn:hover:not(:disabled) { background: #ffe199; border-color: rgba(255,255,255,.6); color: #06131a; }
+/* Polygon lens action bar (platform/polygon.js): Hide, Mark inferred, Undo, Done, all big enough
+   for the hand cursor (>= 48 px tall). */
+.poly-bar {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 40;
+  display: flex; gap: 8px; padding: 6px; border-radius: 12px;
+  background: rgba(8,14,20,.82); border: 1px solid var(--line-2);
+}
+.poly-bar button { height: 48px; min-width: 64px; padding: 0 14px; font-size: 14px; }
+.poly-bar button.poly-done { color: #06131a; background: var(--warm); border-color: var(--warm); font-weight: 600; }
+.poly-bar button.poly-done:hover:not(:disabled) { background: #ffe199; color: #06131a; }
+@media (max-width: 640px) {
+  .tool-chip { padding: 0 6px; max-width: 120px; }
+  .tool-chip .tool-name { display: none; }
+  .tool-chip.on .tool-name { display: none; }
+  .poly-bar { gap: 4px; padding: 4px; }
+  .poly-bar button { min-width: 48px; padding: 0 8px; font-size: 13px; }
+  .poly-bar .pb-word { display: none; }
+}

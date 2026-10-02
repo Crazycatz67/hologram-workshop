@@ -562,10 +562,28 @@ check('H10 edit log back to the pre-gesture length after the undos (nothing leak
   camera.position.fromArray(camZ.slice(0, 3)); controls.update();
 
   // Clap from rest: resetView once, status says so, no edit; not while the ring is open.
+  // ?hands=v2: the v2 clap needs the palms to face EACH OTHER (world landmarks; palms to the
+  // camera never clap, test-v2-manip.js), which these image-only hands can't show. Same image
+  // motion, plus test-v2-manip's canonical world hand turned ±90° about y, as its pair() does
+  // (right hand on the low-x side). v1 hands are unchanged.
+  const HV2 = params.get('hands') === 'v2';
+  const CANON = HV2 ? (await import('../test-v2-manip.js' + V)).CANON : null;
+  const clapPair = (xl, xr) => {
+    if (!HV2) return [synthHand(xl, 0.6, 'open', { handedness: 'Left' }), synthHand(xr, 0.6, 'open')];
+    const v = new THREE.Vector3();
+    const world = (side, mirror) => {
+      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), side * Math.PI / 2);
+      return CANON.map(([x, y, z]) => { v.set(mirror ? -x : x, y, z).applyQuaternion(q); return { x: v.x, y: v.y, z: v.z }; });
+    };
+    return [
+      { ...synthHand(xl, 0.6, 'open', { handedness: 'Right' }), worldLandmarks: world(1, false) },
+      { ...synthHand(xr, 0.6, 'open', { handedness: 'Left' }), worldLandmarks: world(-1, true) }
+    ];
+  };
   const clap = () => {
     rest(800);
-    drive(200, () => [synthHand(0.2, 0.6, 'open', { handedness: 'Left' }), synthHand(0.8, 0.6, 'open')]);
-    drive(230, (k) => [synthHand(lerp(0.2, 0.47, k), 0.6, 'open', { handedness: 'Left' }), synthHand(lerp(0.8, 0.53, k), 0.6, 'open')]);
+    drive(200, () => clapPair(0.2, 0.8));
+    drive(230, (k) => clapPair(lerp(0.2, 0.47, k), lerp(0.8, 0.53, k)));
     rest(300);
   };
   n0 = edits.length;

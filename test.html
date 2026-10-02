@@ -27,6 +27,8 @@
     .case .name { flex: none; width: 260px; color: #c9dcec; }
     .case .detail { color: #6b7d94; }
     .case.fail .detail { color: #ff8a65; }
+    .case.skip .mark { color: #e0c060; }
+    .case.skip .detail { color: #8a7d50; }
     #raw { margin-top: 20px; color: #444; font-size: 11px; }
   </style>
   <script type="importmap">
@@ -51,7 +53,11 @@
     const rec = await import('./testrec.js').then((m) => m.startRun({ page: 'test' })).catch(() => null);
     import(`./test.js?v=${stamp}`).then((m) => m.finished).then((out) => {
       if (!out) return rec?.end('crashed');
-      for (const g of out.groups) for (const c of g.cases) rec?.result(`${g.name} › ${c.name}`, c.detail ?? '', { pass: !!c.pass });
+      // A v1-only check skipped under ?hands=v2 is an info row (no pass field), not a pass or a fail.
+      for (const g of out.groups) for (const c of g.cases) {
+        if (c.skip) rec?.result(`${g.name} › ${c.name}`, `SKIPPED ${c.detail ?? ''}`);
+        else rec?.result(`${g.name} › ${c.name}`, c.detail ?? '', { pass: !!c.pass });
+      }
       rec?.end();
     }).catch((err) => { console.error(err); rec?.end('crashed'); });
   </script>

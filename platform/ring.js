@@ -60,6 +60,18 @@
 //   ring.spinBy(cards) / ring.spinEnd()   a hand fist-drag (platform/hands.js): moves the ring
 //                             like a pointer drag (same LEAD slip and speed cap), then on the
 //                             release coasts by the flick and snaps to a card. No-op when closed.
+//   ring.swipe(dir, { peakSpeed? }) -> boolean   a Hands v2 swipe (handsRuntime 'swipe' event;
+//                             dir in the USER's view). 'left' / 'right': the ring is flung the
+//                             way the hand went (like a drag) and coasts with momentum, no LEAD
+//                             and no MAX_CARDS_PER_S cap (owner brief 2026-10-02; bounded by
+//                             SWIPE.MAX_CARDS_PER_S), then snaps to a card. A second swipe the
+//                             same way adds speed; the other way reverses. 'up' / 'down': the
+//                             previous / next version (like ArrowUp / ArrowDown). Reduced motion:
+//                             one card per swipe, through the capped path. peakSpeed (palm/s)
+//                             scales the fling. false when closed, empty or dir unknown.
+//   ring.pick({ x, y }?) -> projectId | null   a hand "pick up" (fist on a card): the card under
+//                             page point x, y (else the centre card) is chosen at once, as a
+//                             click on the centre card would ('choose' / 'action' new).
 //   ring.dispose()            removes every listener, mesh, material and texture it made.
 //   Extras (tests, later wiring): setFilter(name), setView('ring'|'grid'), _state().
 //
@@ -85,6 +97,12 @@ const THROW_S = 0.35;              // release velocity x this = the coast before
 const NOTCH_PX = 100;              // one wheel notch = one card
 const FILTER_MIN = 12;             // filter chips appear above this many projects
 const DOUBLE_CHOOSE_MS = 500;      // a dblclick's first click already chose; don't emit twice
+// Hands v2 swipe momentum. A swipe at the arbiter's threshold (6 palm/s) flings at V0 cards/s,
+// which coasts V0 x TAU_MS / 1000 = 2 cards; a hard one (15 palm/s) ~5 cards. The fling stops
+// (and the ring snaps to the nearest card) under STOP cards/s. MAX_CARDS_PER_S bounds a stack of
+// same-way swipes; it is NOT the photosafe 2.8 cap the drag and wheel keep (owner brief: swipe
+// scrolls freely).
+export const SWIPE = Object.freeze({ V0: 5, REF_PALMS_PER_S: 6, MIN_CARDS_PER_S: 4, MAX_CARDS_PER_S: 14, TAU_MS: 400, STOP: 1.2 });
 const FILTERS = [['recent', 'Recent'], ['rooms', 'Rooms'], ['objects', 'Objects'], ['edited', 'Edited'], ['samples', 'Samples'], ['all', 'All']];
 
 // Layout, in units of u = the half-height visible at the centre card's distance, so the ring
@@ -152,6 +170,7 @@ export function createRing({
   let pos = 0;             // unwrapped ring position on screen (speed-capped)
   let presence = 0;        // 0..1 fade of the whole ring + dim
   let lastJumpAt = -Infinity;   // reduced motion: time of the last card jump
+  let fling = null;        // Hands v2 swipe coast: { v } cards/s, signed like target (swipe())
   let clock = 0;           // ms, advanced by update()
   let lastChoose = -Infinity;
   let saved = null;        // controls state while open
@@ -456,6 +475,7 @@ export function createRing({
   }
   function setActive(i, { glide = true, versionId } = {}) {
     if (!shown.length) return;
+    fling = null;   // keys, clicks and focus() take over from a coasting swipe
     const n = shown.length;
     const next = mod(i, n);
     const changed = next !== active;
@@ -471,6 +491,7 @@ export function createRing({
   }
   function step(dir) {
     if (!shown.length) return;
+    fling = null;
     // Key repeat / wheel spam may not run the ring more than 2 cards ahead of what is shown.
     if (Math.abs(target + dir - pos) > 2) return;
     target = Math.round(target) + dir;
@@ -621,7 +642,7 @@ export function createRing({
     if (!open) return;
     open = false;
     cancelHold(); endRename(); setActionsOpen(false);
-    drag = null;
+    drag = null; fling = null;
     root.hidden = true;
     if (controls && saved) { controls.enabled = saved.enabled; controls.autoRotate = saved.autoRotate; }
     saved = null;
@@ -713,6 +734,7 @@ export function createRing({
     if (!open || (e.pointerType === 'mouse' && e.button !== 0)) return;
     try { surface.setPointerCapture(e.pointerId); } catch { /* synthetic or already-ended pointer */ }
     if (document.activeElement !== list) list.focus({ preventScroll: true });   // keys keep working
+    fling = null;
     drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, target0: target, moved: false, samples: [{ t: performance.now(), target }] };
   });
   listen(surface, 'pointermove', (e) => {
@@ -751,6 +773,7 @@ export function createRing({
   let spin = null;   // { samples:[{t, target}] }
   function spinBy(cards) {
     if (!open || !shown.length || !Number.isFinite(cards)) return;
+    fling = null;   // a hand on the ring stops a coasting swipe
     spin ??= { samples: [{ t: performance.now(), target }] };
     let t = target + cards;
     if (Math.abs(t - pos) > LEAD) t = pos + Math.sign(t - pos) * LEAD;
@@ -768,6 +791,30 @@ export function createRing({
     const a = sp.samples[0], b = sp.samples[sp.samples.length - 1];
     const v = b.t > a.t ? clamp((b.target - a.target) / ((b.t - a.t) / 1000), -MAX_CARDS_PER_S, MAX_CARDS_PER_S) : 0;
     setActive(Math.round(target + v * THROW_S));
+  }
+  // Hands v2 swipe: a fling with momentum (update() moves pos directly while it coasts).
+  function swipe(dir, { peakSpeed = SWIPE.REF_PALMS_PER_S } = {}) {
+    if (!open || !shown.length) return false;
+    if (dir === 'up' || dir === 'down') { setVersion(versionIdx + (dir === 'up' ? -1 : 1)); return true; }
+    if (dir !== 'left' && dir !== 'right') return false;
+    // Hand right = the ring follows right, as a drag does (target falls).
+    const sgn = dir === 'right' ? -1 : 1;
+    if (calm) { step(sgn); return true; }
+    const speed = Number.isFinite(peakSpeed) && peakSpeed > 0 ? peakSpeed : SWIPE.REF_PALMS_PER_S;
+    const v0 = clamp(SWIPE.V0 * speed / SWIPE.REF_PALMS_PER_S, SWIPE.MIN_CARDS_PER_S, SWIPE.MAX_CARDS_PER_S);
+    const carry = fling && Math.sign(fling.v) === sgn ? fling.v : 0;
+    fling = { v: clamp(carry + sgn * v0, -SWIPE.MAX_CARDS_PER_S, SWIPE.MAX_CARDS_PER_S) };
+    drag = null; spin = null;
+    return true;
+  }
+  function pick({ x, y } = {}) {
+    if (!open || !shown.length) return null;
+    const hit = Number.isFinite(x) && Number.isFinite(y) ? hitTest(x, y) : null;
+    if (hit && hit.idx !== active) setActive(hit.idx, { glide: false });
+    fling = null;
+    const id = cur()?.id ?? null;
+    choose();
+    return id;
   }
   listen(surface, 'pointerup', (e) => endDrag(e, false));
   listen(surface, 'pointercancel', (e) => endDrag(e, true));
@@ -814,6 +861,14 @@ export function createRing({
       // Reduced motion: whole-card jumps, at most one per 1/MAX_CARDS_PER_S.
       const goal = Math.round(target);
       if (goal !== pos && clock - lastJumpAt >= 1000 / MAX_CARDS_PER_S) { pos = Math.round(pos) + Math.sign(goal - Math.round(pos)); lastJumpAt = clock; }
+    } else if (fling) {
+      // Swipe coast: uncapped, friction TAU_MS; the active card follows the ring as it passes.
+      pos += fling.v * dt / 1000;
+      target = pos;
+      fling.v *= Math.exp(-dt / SWIPE.TAU_MS);
+      const i = mod(Math.round(pos), shown.length || 1);
+      if (i !== active && shown.length) { active = i; versionIdx = versionIndexFor(cur()); syncActive(); }
+      if (Math.abs(fling.v) < SWIPE.STOP) { fling = null; setActive(Math.round(pos)); }
     } else {
       const d = target - pos;
       let move = d * (1 - Math.exp(-dt / EASE_MS));
@@ -970,13 +1025,13 @@ export function createRing({
 
   return {
     setProjects, open: openRing, close: () => closeRing(false), toggle, isOpen: () => open,
-    focus, update, spinBy, spinEnd,
+    focus, update, spinBy, spinEnd, swipe, pick,
     on(event, cb) {
       if (!handlers[event]) throw new TypeError(`ring.on: unknown event '${event}'`);
       handlers[event].add(cb);
       return () => handlers[event].delete(cb);
     },
     dispose, setFilter, setView,
-    _state: () => ({ pos, target, active, versionIdx, view, filter, presence, open, shown: shown.map((c) => c.id), pxPerCard, rects: rects.map((r) => ({ ...r })), calm }),
+    _state: () => ({ pos, target, active, versionIdx, view, filter, presence, open, shown: shown.map((c) => c.id), pxPerCard, rects: rects.map((r) => ({ ...r })), calm, fling: fling ? fling.v : 0 }),
   };
 }

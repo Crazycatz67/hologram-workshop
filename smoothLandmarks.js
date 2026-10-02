@@ -84,6 +84,7 @@ function filterPoint(prev, d, p, dt) {
   };
 }
 
+// Sets hand.rawLandmarks = the unfiltered input array on every hand it smooths.
 // timestampMs: the frame's time (hologram.js passes the camera frame time). Defaults to
 // performance.now() so a caller without one keeps working.
 export function smoothHandLandmarks(hands, timestampMs = performance.now()) {
@@ -129,6 +130,10 @@ export function smoothHandLandmarks(hands, timestampMs = performance.now()) {
       }
     }
     track.missed = false;
+    // Keep the tracker's own points (Hands v2, CONTRACT §3.1): the v2 cursor runs exactly one
+    // One Euro stage on them, instead of a second filter on already-filtered data. The incoming
+    // array is replaced below, never mutated, so a reference is a faithful raw copy.
+    hand.rawLandmarks = hand.landmarks;
     hand.landmarks = track.landmarks.map((p) => ({ x: p.x, y: p.y, z: p.z }));
     next.push(track);
   }

@@ -14,6 +14,18 @@ import { gunFeatures, isGun } from './gunPose.js';
 //     pointer/worldLandmarks are passed through to isFistLike, so a pointer never blocks a pinch.
 //   annotateHand(hand, aspect) -> hand, with hand.pointer, hand.pinch, hand.fistLike set.
 //     The per-frame hand building hologram.js does; exported so test.js replays the same code.
+//
+// HANDS V2 back-compat (plans/hands-v2/CONTRACT.md §1.4, added 2026-10-02). Off by default.
+//   handsV2Enabled() -> boolean   true when the page URL has ?hands=v2 or
+//     localStorage['hands.v2'] === '1' (read once, at import; false in Node / without a window).
+//   setHandsV2(on | null)         tests only: force the switch (null = back to the URL/storage value).
+//   With the switch on AND hand.f set (handFeatures.js update() ran first this frame),
+//   annotateHand fills the legacy fields from hand.f instead of re-measuring:
+//     hand.pointer  = { gun: pose.label === 'gun', rejectedBy: null | 'pose:<label>' }
+//     hand.pinch    = { ratio: f.pinch.ratio (3D, |w4-w8| / sizeM), pinching: f.pinch.on and not a
+//                       fist, rejectedBy: 'fist' | null }
+//     hand.fistLike = pose.label === 'fist'
+//   Switch off, or no hand.f: exactly the v1 code below, unchanged.
 
 export const LANDMARK = {
   WRIST: 0,
@@ -166,9 +178,39 @@ export function pointerState(worldLandmarks, gesture = null) {
 // comes from handTracker.js toHands(); landmarks should already be smoothed (the pointer uses
 // the raw world landmarks, which smoothLandmarks.js does not filter, as the calibration did).
 export function annotateHand(hand, aspect = 1) {
+  if (v2On && hand.f) return annotateFromFeatures(hand);
   hand.pointer = pointerState(hand.worldLandmarks, hand.gesture);
   hand.pinch = pinch(hand.landmarks, aspect, { gesture: hand.gesture, pointer: hand.pointer });
   hand.fistLike = isFistLike(hand.gesture, hand.landmarks, aspect, { pointer: hand.pointer });
+  return hand;
+}
+
+// Read once at import, like the rest of the page's switches: flipping v2 mid-session would mix
+// two pipelines' histories. The try covers Node (no window) and storage-blocked iframes.
+function readV2Switch() {
+  try {
+    if (typeof window === 'undefined') return false;
+    if (new URLSearchParams(window.location?.search ?? '').get('hands') === 'v2') return true;
+    return window.localStorage?.getItem('hands.v2') === '1';
+  } catch {
+    return false;
+  }
+}
+const v2FromPage = readV2Switch();
+let v2On = v2FromPage;
+export function handsV2Enabled() { return v2On; }
+export function setHandsV2(on) { v2On = on == null ? v2FromPage : !!on; }
+
+// v2: one voted pose decides all three legacy verdicts, so they can no longer disagree (v1's
+// pointer, pinch and fist each had their own rule and debounce).
+function annotateFromFeatures(hand) {
+  const { pose, pinch: p } = hand.f;
+  const fist = pose.label === 'fist';
+  const gun = pose.label === 'gun';
+  hand.pointer = { gun, rejectedBy: gun ? null : `pose:${pose.label}` };
+  // A fist's thumb rests near the index, so its pinch gap can close; v1 rejected that as 'fist' too.
+  hand.pinch = { ratio: p.ratio, pinching: p.on && !fist, rejectedBy: fist ? 'fist' : null };
+  hand.fistLike = fist;
   return hand;
 }
 

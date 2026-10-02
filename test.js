@@ -24,6 +24,70 @@ const groups = [];
 let currentGroup = null;
 let passCount = 0;
 let failCount = 0;
+let skipCount = 0;
+
+// Hands v2 (plans/hands-v2/CONTRACT.md): the page runs with v2 on under ?hands=v2 (or the
+// 'hands.v2' storage switch), read from gestures.js once main() has imported it. Checks that
+// assert v1 behaviour v2 deliberately replaces (sticky/pinch freeze, rate tilt, explode 'pulled',
+// clap speed floor, pinch/hold clicks...) are wrapped in v1Only(): with v2 on they still RUN (so
+// later checks see the same state) but are recorded as skipped with the reason, never as passes,
+// so a v2 regression can't hide behind a v1 expectation and the skipped count stays visible.
+// With v2 off v1Only() is a plain call: the v1 run is byte-for-byte the old suite.
+let HANDS_V2 = false;
+let skipReason = null;
+
+// Why each v1-only check is skipped under hands v2 (shown on its SKIP row).
+const V1 = {
+  tilt: "v2 tilt follows the 2nd hand's 3D palm rotation (CONTRACT §3.3), not its position; v1 rate tilt replaced, see 'v2 manipulator'",
+  clap: "v2 clap also needs palms facing each other (3D palm normals, Ricky §5); flat 2D test hands never face, see 'v2 manipulator'",
+  gain: 'v2 cursor = speed gain + slow re-centring (CONTRACT §3.1), not the strict absolute reach map',
+  sticky: "v2 pointer has no sticky or pinch freeze (CONTRACT §3.1); the arbiter's RELEASE_MS owns pose grace",
+  pinchClick: 'v2 click = thumb-hammer drop; off-hand pinch / hold / same-hand pinch only via hands.clickAlt, default null (CONTRACT §3.2)',
+  smoothing: 'v2 pointer has exactly one One Euro stage, no smoothing presets (CONTRACT §3.1)',
+  stretch: 'v2 vertical two-hand spread stretches height only (owner 2026-10-02, CONTRACT §3.3), not a uniform zoom',
+  thumbTap: 'v2 click = thumb-hammer drop (gunPose createHammer); the v1 thumb-tap trial is not in the v2 pointer (CONTRACT §3.2)',
+  runtimeSelect: "v2 runtime: hold / same-hand pinch select only via hands.clickAlt (default null, CONTRACT §3.2), and the v2 relative cursor doesn't sit on the v1 absolute target spots"
+};
+
+function v1Only(reason, fn) {
+  const prev = skipReason;
+  if (HANDS_V2) skipReason = reason;
+  const restore = () => { skipReason = prev; };
+  // A v1-only block may throw under v2 (e.g. it reads a v1 click that v2 never makes): that ends
+  // the block, and is shown as a skip, not a failure. With v2 off a throw propagates as before.
+  const threw = (err) => {
+    restore();
+    if (!HANDS_V2) throw err;
+    currentGroup.cases.push({ name: '(rest of block skipped: threw under hands v2)', skip: true, detail: `v1-only: ${reason} · ${String(err)}` });
+    skipCount++;
+  };
+  let out;
+  try { out = fn(); } catch (err) { return threw(err); }
+  if (out && typeof out.then === 'function') return out.then((v) => { restore(); return v; }, threw);
+  restore();
+  return out;
+}
+
+// True when the current check is v1-only and v2 is on: record it as skipped (keeping the measured
+// detail, so the v2 number is still readable) instead of passing or failing it.
+function skipped(name, detail) {
+  if (!skipReason) return false;
+  currentGroup.cases.push({ name, skip: true, detail: `v1-only: ${skipReason} · ${detail}` });
+  skipCount++;
+  return true;
+}
+
+// group() for an async body (the Hands v2 group modules import their code lazily).
+async function asyncGroup(name, fn) {
+  currentGroup = { name, cases: [] };
+  groups.push(currentGroup);
+  try {
+    await fn();
+  } catch (err) {
+    currentGroup.cases.push({ name: '(group threw)', pass: false, detail: String(err) });
+    failCount++;
+  }
+}
 
 function group(name, fn) {
   currentGroup = { name, cases: [] };
@@ -41,6 +105,7 @@ function group(name, fn) {
 function check(name, actual, expected, within = 0) {
   const tolerance = within * Math.abs(expected);
   const pass = Math.abs(actual - expected) <= (tolerance || 1e-9);
+  if (skipped(name, fmt(actual))) return;
   currentGroup.cases.push({
     name, pass,
     detail: pass
@@ -55,6 +120,7 @@ function check(name, actual, expected, within = 0) {
 // check passes, which the first version of this file did for two of its own checks
 // ("a dominant surface is found: OK ... no surfaces detected").
 function checkTrue(name, condition, detail = '') {
+  if (skipped(name, detail)) return;
   currentGroup.cases.push({ name, pass: !!condition, detail });
   condition ? passCount++ : failCount++;
 }
@@ -74,16 +140,18 @@ function render() {
     wrap.appendChild(title);
     for (const c of g.cases) {
       const row = document.createElement('div');
-      row.className = `case ${c.pass ? 'pass' : 'fail'}`;
+      row.className = `case ${c.skip ? 'skip' : c.pass ? 'pass' : 'fail'}`;
       row.innerHTML =
-        `<span class="mark">${c.pass ? 'OK' : 'FAIL'}</span>` +
+        `<span class="mark">${c.skip ? 'SKIP' : c.pass ? 'OK' : 'FAIL'}</span>` +
         `<span class="name">${c.name}</span>` +
         `<span class="detail">${c.detail}</span>`;
       wrap.appendChild(row);
     }
     resultsEl.appendChild(wrap);
   }
-  summaryEl.textContent = `${passCount} passed, ${failCount} failed`;
+  // v1 text unchanged ("N passed, M failed"); the skip tail only appears when something skipped.
+  summaryEl.textContent = `${passCount} passed, ${failCount} failed` +
+    (skipCount ? `, ${skipCount} skipped (v1-only checks; hands v2 is on)` : '');
   summaryEl.className = failCount === 0 ? 'pass' : 'fail';
 }
 
@@ -128,6 +196,7 @@ async function main() {
   const mn = await import(`./manipulator.js${V}`);
   const measure = await import(`./measure.js${V}`);
   const gestures = await import(`./gestures.js${V}`);
+  HANDS_V2 = gestures.handsV2Enabled();
   const { gunFeatures } = await import(`./gunPose.js${V}`);
 
   // A bare mesh and camera, not a full scene — the manipulator only needs an Object3D with
@@ -297,8 +366,8 @@ async function main() {
     for (let i = 0; i < 10; i++) { m.update([hand(0.35, 0.5, 0, 'fist'), hand(0.65, 0.5, 0, 'open')], 1.78, t); t += 16.7; }
     const q0 = object.quaternion.clone();
     for (let i = 1; i <= 40; i++) { m.update([hand(0.35, 0.5, 0, 'fist'), hand(0.65, 0.5 - 0.006 * i, 0, 'open')], 1.78, t); t += 16.7; }
-    checkTrue('raising the second hand tilts the object', object.quaternion.angleTo(q0) > 0.2,
-      `${(object.quaternion.angleTo(q0) * 180 / Math.PI).toFixed(1)}°`);
+    v1Only(V1.tilt, () => checkTrue('raising the second hand tilts the object', object.quaternion.angleTo(q0) > 0.2,
+      `${(object.quaternion.angleTo(q0) * 180 / Math.PI).toFixed(1)}°`));
 
     // Clap: verified against the actual palm-length units handSpan() uses (see gestures.js),
     // not a 0-1 screen fraction — that unit mismatch was a real bug found this session.
@@ -313,8 +382,10 @@ async function main() {
       m.update([hand(0.5 - sep / 2, 0.5, 0, 'open'), hand(0.5 + sep / 2, 0.5, 0, 'open')], 1.78, t);
       t += 16.7;
     }
-    check('a fast clap resets scale to 1', object.scale.x, 1, 0.02);
-    check('a fast clap resets position to origin', object.position.length(), 0, 0);
+    v1Only(V1.clap, () => {
+      check('a fast clap resets scale to 1', object.scale.x, 1, 0.02);
+      check('a fast clap resets position to origin', object.position.length(), 0, 0);
+    });
 
     // and a slow bring-together must NOT be mistaken for a clap. Channels restricted to
     // just clap: the same open hands also satisfy explode's trigger, and explode
@@ -372,8 +443,8 @@ async function main() {
       t += 16.7;
       if (Math.abs(object.scale.x - 1) < 1e-6) reset = true; else minX = Math.min(minX, object.scale.x);
     }
-    checkTrue('a clap resets a stretched model without squashing it first', reset && minX > x0 * 0.97,
-      `reset=${reset}, lowest scale.x before reset ${minX.toFixed(3)} of ${x0.toFixed(3)}`);
+    v1Only(V1.clap, () => checkTrue('a clap resets a stretched model without squashing it first', reset && minX > x0 * 0.97,
+      `reset=${reset}, lowest scale.x before reset ${minX.toFixed(3)} of ${x0.toFixed(3)}`));
 
     // Talking hands: two raised, loosely open hands wandering (±6% of the frame, ~1 Hz) for 3 s.
     // The old code stretched the model to 1.26 here.
@@ -442,7 +513,7 @@ async function main() {
     m.reset();
   });
 
-  group('Tilt — roll (second hand left/right), added after live feedback', () => {
+  group('Tilt — roll (second hand left/right), added after live feedback', () => v1Only(V1.tilt, () => {
     const m = createManipulator(object, camera);
     m.reset();
     m.configure({ channels: ['tilt'], sensitivity: 1, momentum: false, triggerFrames: 3 });
@@ -454,12 +525,12 @@ async function main() {
     checkTrue('moving the second hand left/right also tilts the object', object.quaternion.angleTo(q0) > 0.2,
       `${(object.quaternion.angleTo(q0) * 180 / Math.PI).toFixed(1)}°`);
     m.reset();
-  });
+  }));
 
   // Owner request after the 2026-10-01 webcam test: raising the second hand must tilt the
   // model UP (its front edge rises on screen, its top tips away from the camera); it used to
   // tilt down. Roll keeps its old sign. The front point faces the camera (+z) at home.
-  group('Tilt direction — second hand up tilts the model up (owner, 2026-10-01)', () => {
+  group('Tilt direction — second hand up tilts the model up (owner, 2026-10-01)', () => v1Only(V1.tilt, () => {
     const m = createManipulator(object, camera);
     const tiltBy = (dy, dx = 0) => {
       m.reset();
@@ -487,7 +558,7 @@ async function main() {
     checkTrue('roll sign unchanged: second hand right in the image rolls positive about Z', right.roll > 0.2 && Math.abs(right.pitch) < 1e-6,
       `roll ${(right.roll * 180 / Math.PI).toFixed(1)}°, pitch ${(right.pitch * 180 / Math.PI).toFixed(2)}°`);
     m.reset();
-  });
+  }));
 
   group('Frame-rate independence — the cause behind "gets stuck" and "janky"', () => {
     // Real webcam tracking does not call update() at a fixed interval; it drops frames
@@ -530,7 +601,7 @@ async function main() {
       `60fps=${(at60 * 100).toFixed(1)}cm, 24fps=${(at24 * 100).toFixed(1)}cm`);
   });
 
-  group('Clap survives a transient pinch misread mid-close', () => {
+  group('Clap survives a transient pinch misread mid-close', () => v1Only(V1.clap, () => {
     // Reported live: clap "barely registered, had to try many times". Reproduced directly:
     // a real clap's closing speed clears the threshold easily on its own (measured through
     // landmark smoothing too -- that damps it only ~6%, nowhere near enough to explain the
@@ -589,7 +660,7 @@ async function main() {
     }
     checkTrue('a genuinely sustained pinch still blocks a clap entirely', !clapFiredWhilePinching);
     m2.reset();
-  });
+  }));
 
   group('handSpan units — the bug that made clap impossible', () => {
     // handSpan returns wrist separation in PALM LENGTHS, not a 0-1 screen fraction. This
@@ -858,7 +929,7 @@ async function main() {
     RS();
   });
 
-  group('Clap at low camera frame rates, through the landmark filter (BUGS #12)', () => {
+  group('Clap at low camera frame rates, through the landmark filter (BUGS #12)', () => v1Only(V1.clap, () => {
     const clapAt = (fps, phase, durS = 0.2) => {
       const m = createManipulator(object, camera);
       m.configure({ channels: ['clap'], sensitivity: 1, momentum: false, triggerFrames: 3 });
@@ -890,7 +961,7 @@ async function main() {
     }, { fps: 30, totalS: 2.6 });
     check('a slow 2s bring-together still does not reset', object.scale.x, 1.3, 0.001);
     m.reset();
-  });
+  }));
 
   group('Model follow — a still hand holds the model exactly still (BUGS #11)', () => {
     const cases = {
@@ -1160,8 +1231,10 @@ async function main() {
     // Superseded 2026-10-01 by the owner-approved clap E2 (Ricky gesture feedback): a clap
     // during an explode, pulled apart or not, resets. This close (0.72 -> 0.04 apart in 200 ms)
     // is a physical clap, so it now resets; a slow un-explode still never does (below).
-    check('#27 → E2: a fast close (a clap) during a pulled-apart explode now resets', m.resetCount - resets0, 1);
-    check('#27 → E2: ... so the model goes home', object.position.x, 0, 1e-9);
+    v1Only(V1.clap, () => {
+      check('#27 → E2: a fast close (a clap) during a pulled-apart explode now resets', m.resetCount - resets0, 1);
+      check('#27 → E2: ... so the model goes home', object.position.x, 0, 1e-9);
+    });
     m = fresh();
     t = 1000;
     t = drive(m, 8, () => [[0.45, 0.5, 'open'], [0.55, 0.5, 'open']], t);
@@ -1187,14 +1260,14 @@ async function main() {
     object.position.set(0.3, 0, 0);
     t = drive(m, 5, () => [[0.2, 0.5, 'open'], [0.8, 0.5, 'open']], t);
     t = drive(m, 6, (i) => { const s = 0.6 - 0.56 * (i + 1) / 6; return [[0.5 - s / 2, 0.5, 'open'], [0.5 + s / 2, 0.5, 'open']]; }, t);
-    check('a clap from rest (everything armed, 30fps) still resets', object.position.x, 0, 0);
+    v1Only(V1.clap, () => check('a clap from rest (everything armed, 30fps) still resets', object.position.x, 0, 0));
 
     // After the clap the hands are together and open -- explode's pose. Separating them must
     // not explode the model that was just reset.
     seen = new Set();
     t = drive(m, 15, (i) => [[0.48 - 0.02 * i, 0.5, 'open'], [0.52 + 0.02 * i, 0.5, 'open']], t, seen);
-    checkTrue('separating the hands after a clap does not explode the fresh reset', !seen.has(MODE.EXPLODE) && object.scale.x === 1,
-      `modes ${[...seen].join(',')}, scale.x ${object.scale.x.toFixed(3)}`);
+    v1Only(V1.clap, () => checkTrue('separating the hands after a clap does not explode the fresh reset', !seen.has(MODE.EXPLODE) && object.scale.x === 1,
+      `modes ${[...seen].join(',')}, scale.x ${object.scale.x.toFixed(3)}`));
 
     // Found while fixing #27: hands that leave the frame apart and come back close together
     // 0.5s later used to read as a fast close (the last two-hand sample was kept across the
@@ -1489,9 +1562,11 @@ async function main() {
     for (let i = 0; i < 20; i++) { m.update([], 1.78, t); t += 33.3; }
     for (let i = 0; i < 5; i++) { m.update([hand(0.2, 0.5, 0, 'open'), hand(0.8, 0.5, 0, 'open')], 1.78, t); t += 33.3; }
     for (let i = 1; i <= 6; i++) { const s = 0.6 - 0.56 * i / 6; m.update([hand(0.5 - s / 2, 0.5, 0, 'open'), hand(0.5 + s / 2, 0.5, 0, 'open')], 1.78, t); t += 33.3; }
-    checkTrue('the clap fired', g.position.x === 0, `x=${g.position.x}`);
-    m.undo();
-    check('undo after a clap restores the pose', g.position.x, 0.25, 0);
+    v1Only(V1.clap, () => {
+      checkTrue('the clap fired', g.position.x === 0, `x=${g.position.x}`);
+      m.undo();
+      check('undo after a clap restores the pose', g.position.x, 0.25, 0); // vacuous under v2: no clap fired
+    });
   });
 
   const om = await import(`./platform/objectmode.js${V}`);
@@ -1711,8 +1786,10 @@ async function main() {
       const want = (-0.1 * 2) / (ptr.DEFAULT_REACH.x1 - ptr.DEFAULT_REACH.x0);
       const slow = move(200);
       const fast = move(5);
-      check('slow move: cursor moves 0.1 x 2 / reach width, mirrored', slow, want, 0.01);
-      check('fast move: the same distance (no speed gain, nothing to drift)', fast, want, 0.01);
+      v1Only(V1.gain, () => {
+        check('slow move: cursor moves 0.1 x 2 / reach width, mirrored', slow, want, 0.01);
+        check('fast move: the same distance (no speed gain, nothing to drift)', fast, want, 0.01);
+      });
     }
 
     // 5. Pose lost: the cursor holds still; re-entering goes straight to where the hand is; hides.
@@ -1721,7 +1798,7 @@ async function main() {
       for (let i = 0; i < 30; i++) step(rig, [gun(0.5, 0.55, { jitter: 0 })]);
       const held = rig.p.state.x;
       const blip = step(rig, [frame('open', 'palm', 'None', { cx: 0.5, jitter: 0 })]);
-      checkTrue('one-frame pose dropout: cursor held, still aiming', blip.state.mode === 'aim' && blip.state.x === held, blip.state.mode);
+      v1Only(V1.sticky, () => checkTrue('one-frame pose dropout: cursor held, still aiming', blip.state.mode === 'aim' && blip.state.x === held, blip.state.mode));
       let holding = true;
       for (let i = 1; i <= 25; i++) {
         const r = step(rig, [frame('open', 'palm', 'None', { cx: 0.5 - 0.004 * i, jitter: 0 })]);
@@ -1732,7 +1809,7 @@ async function main() {
       let r;
       for (let i = 0; i < 10; i++) r = step(rig, [gun(0.4, 0.55, { jitter: 0 })]);
       const at = ptr.mapReach(ptr.palmCentroid(r.hands[0].landmarks));
-      check('re-entering the pose elsewhere: cursor is where the hand is (absolute)', rig.p.state.x, at.x, 0.005);
+      v1Only(V1.gain, () => check('re-entering the pose elsewhere: cursor is where the hand is (absolute)', rig.p.state.x, at.x, 0.005));
       const hideLog = [];
       // STICKY_MS of held aim, then CLUTCH_SHOW_MS visible-held: 1.85 s; 100 frames @ 50 fps = 2 s.
       for (let i = 0; i < 100; i++) { step(rig, []); if (i % 10 === 0) hideLog.push(rig.p.state.mode); }
@@ -1740,7 +1817,7 @@ async function main() {
     }
 
     // 6. Click = the other hand's pinch: one click per pinch, held pinches don't repeat.
-    {
+    v1Only(V1.pinchClick, () => {
       const rig = fresh();
       const clicks = [];
       const modes = new Set();
@@ -1755,10 +1832,10 @@ async function main() {
       check('two pinches (one held 1 s) = exactly two clicks', clicks.length, 2);
       checkTrue('clicks are hand clicks with a cursor position', clicks.every((c) => c.source === 'hand' && Number.isFinite(c.x)), JSON.stringify(clicks[0]));
       checkTrue('pointing + other hand pinching never grabs, scales or explodes', [...modes].every((m) => m === MODE.IDLE), [...modes].join());
-    }
+    });
 
     // 7. Rewind: the click lands where the cursor was 120 ms before the pinch was seen.
-    {
+    v1Only(V1.pinchClick, () => {
       const rig = fresh();
       const xs = [];
       let click = null;
@@ -1771,7 +1848,7 @@ async function main() {
       checkTrue('click while the aim is drifting lands at the rewound cursor (t - 120 ms)',
         click && want && Math.abs(click.x - want.x) < 1e-9 && Math.abs(click.x - xs[xs.length - 1].x) > 1e-4,
         click ? `click x ${click.x.toFixed(4)}, cursor 120 ms earlier ${want?.x.toFixed(4)}, at the pinch ${xs[xs.length - 1].x.toFixed(4)}` : 'no click');
-    }
+    });
 
     // 8. No accidental clicks: a hand that arrives already pinching, or a lowered hand.
     {
@@ -1793,7 +1870,7 @@ async function main() {
       const r = step(rig, [gun(0.5, 0.55, { jitter: 0 })]);
       checkTrue('mouse drives the cursor and clicks (source mouse)', ms.mode === 'aim' && ms.source === 'mouse' && mc.source === 'mouse' && mc.x === 0.31, JSON.stringify({ mode: ms.mode, src: mc.source }));
       const want = ptr.mapReach(ptr.palmCentroid(r.hands[0].landmarks));
-      checkTrue('the pointer pose takes over from the mouse at the hand\'s absolute position', r.state.source === 'hand' && Math.abs(r.state.x - want.x) < 1e-9 && Math.abs(r.state.y - want.y) < 1e-9, `${r.state.source} ${r.state.x.toFixed(3)},${r.state.y.toFixed(3)}`);
+      v1Only(V1.gain, () => checkTrue('the pointer pose takes over from the mouse at the hand\'s absolute position', r.state.source === 'hand' && Math.abs(r.state.x - want.x) < 1e-9 && Math.abs(r.state.y - want.y) < 1e-9, `${r.state.source} ${r.state.x.toFixed(3)},${r.state.y.toFixed(3)}`));
       rig.p.mouseLeave();
       checkTrue('mouse leaving the canvas does not hide a hand cursor', rig.p.state.mode === 'aim', rig.p.state.mode);
     }
@@ -1894,7 +1971,7 @@ async function main() {
       Math.abs(narrow - 0.2) < 1e-9 && Math.abs(p.profile.reach.x1 - p.profile.reach.x0 - 0.2) < 1e-9 && Number.isFinite(p.profile.smoothing.minCutoff),
       JSON.stringify(p.profile.reach));
     p.setProfile({ smoothing: ptr.SMOOTHING.steady });
-    checkTrue('setProfile switches the smoothing preset', p.profile.smoothing.minCutoff === ptr.SMOOTHING.steady.minCutoff, String(p.profile.smoothing.minCutoff));
+    v1Only(V1.smoothing, () => checkTrue('setProfile switches the smoothing preset', p.profile.smoothing.minCutoff === ptr.SMOOTHING.steady.minCutoff, String(p.profile.smoothing.minCutoff)));
 
     // Beam line-up: shift a side-on pointer by ghostOffset; its tip + BEAM_LEN along wrist->tip
     // lands exactly on the cursor, in screen space, for cursors all over the canvas.
@@ -2111,7 +2188,7 @@ async function main() {
         }
       }
       const saved = cal.loadProfile(st);
-      checkTrue('two rounds use the two smoothing presets', smoothSeen[0] === ptr.SMOOTHING.responsive.minCutoff && smoothSeen[1] === ptr.SMOOTHING.steady.minCutoff, smoothSeen.join());
+      v1Only(V1.smoothing, () => checkTrue('two rounds use the two smoothing presets', smoothSeen[0] === ptr.SMOOTHING.responsive.minCutoff && smoothSeen[1] === ptr.SMOOTHING.steady.minCutoff, smoothSeen.join()));
       checkTrue('finished: profile saved (v1), better round kept (responsive), 16 clicks scored, cursor uses it',
         done && saved && saved.v === 1 && !saved.skipped && saved.smoothing.name === 'responsive' && saved.score.n === 8 &&
         saved.score.perSetting.steady.n === 8 && saved.score.errMedianPx === 3 && !c.active && p.profile.smoothing.minCutoff === ptr.SMOOTHING.responsive.minCutoff,
@@ -2284,7 +2361,7 @@ async function main() {
     }
   });
 
-  group('One-hand selection — same-hand quick pinch (pointer.js)', () => {
+  group('One-hand selection — same-hand quick pinch (pointer.js)', () => v1Only(V1.pinchClick, () => {
     const FR = 1000 / 50;
     let now = 90000;
     const rig = (o) => ({ eng: ptr.createEngagement(), p: ptr.createPointer(o) });
@@ -2350,7 +2427,7 @@ async function main() {
       const clicks = rows.filter((x) => x.click);
       checkTrue('other hand\'s pinch still clicks, via "other-pinch"', clicks.length === 1 && clicks[0].click.via === 'other-pinch', clicks.map((x) => x.click.via).join());
     }
-  });
+  }));
 
   group('Exploded parts — spread to fit, hover outline (manipulator, reticle.js)', () => {
     // Two overlapping parts side by side: explode pulls them apart along x.
@@ -2469,7 +2546,7 @@ async function main() {
       return h;
     };
     // 1. Sticky pointer.
-    {
+    v1Only(V1.sticky, () => {
       const p = ptr.createPointer({ thumbTap: false });
       let t = 0;
       for (let i = 0; i < 20; i++) p.update([ph(true)], 1.78, (t += FR));
@@ -2498,9 +2575,9 @@ async function main() {
       let click = null;
       for (let i = 0; i < 6; i++) click = q.update([ph(false, { cx: 0.4 }), ph(false, { cx: 0.75, ratio: i >= 4 ? 0.1 : 0.6 })], 1.78, (t += FR)) ?? click;
       checkTrue('#G1 other-hand pinch 170 ms into a wobble still clicks (was lost after 100 ms)', click?.via === 'other-pinch', JSON.stringify(click));
-    }
+    });
     // 2. Clap.
-    {
+    v1Only(V1.clap, () => {
       const fresh = (channels = ALL_CHANNELS) => {
         object.position.set(0, 0, 0); object.quaternion.identity(); object.scale.set(1, 1, 1);
         const m = createManipulator(object, camera);
@@ -2543,9 +2620,9 @@ async function main() {
       const r3 = m.resetCount;
       for (const sep of [0.4, 0.3, 0.2, 0.1, 0.05]) m.update(two(sep), 1.78, (t += FR));
       checkTrue('#G2 clap E2: a clap during a pulled-apart explode resets', exploding && m.resetCount - r3 === 1, `exploding ${exploding}, resets ${m.resetCount - r3}`);
-    }
+    });
     // 3. Tilt: hybrid position/rate.
-    {
+    v1Only(V1.tilt, () => {
       const tiltRun = (dy) => {
         object.position.set(0, 0, 0); object.quaternion.identity(); object.scale.set(1, 1, 1);
         const m = createManipulator(object, camera);
@@ -2568,12 +2645,12 @@ async function main() {
       checkTrue('#G3 tilt: still inside ±0.08 = position only (no drift); held beyond it keeps turning; speed capped',
         inZone < 0.01 && beyond > 0.04 && far <= mn.TILT_RATE_MAX * 0.2 + 0.02 && far > beyond,
         `0.2 s held: in-zone ${inZone.toFixed(3)} · 0.12 out ${beyond.toFixed(3)} · 0.24 out ${far.toFixed(3)} rad (cap ${(mn.TILT_RATE_MAX * 0.2).toFixed(2)})`);
-    }
+    });
     // 3b. Tilt limit (Timmy pass 4: gesture-lab tilt read p-79/r180 + "spin 180" = a real
     // -101° pitch, the rate zone kept tilting past 90°). A long full-rate hold stays within
     // ±TILT_LIMIT of the grab start, eases in (no hard stop), never rolls or spins, and lowering
     // the hand tilts back at once. Run at 10, 30 and 60 fps.
-    {
+    v1Only(V1.tilt, () => {
       const results = [10, 30, 60].map((fps) => {
         const fr = 1000 / fps;
         object.position.set(0, 0, 0); object.quaternion.identity(); object.scale.set(1, 1, 1);
@@ -2604,9 +2681,9 @@ async function main() {
         results.every((r) => r.maxDeg <= lim + 0.5 && r.maxDeg > lim - 5 && Math.abs(r.rollDeg) < 1 && Math.abs(r.spinDeg) < 1 && r.pitchDeg < 0
           && r.rateMid > 0.4 && r.rateNear < r.rateMid * 0.5 && r.backDeg > 5),
         results.map((r) => `${r.fps}fps max ${r.maxDeg.toFixed(1)}° (p${r.pitchDeg.toFixed(1)} r${r.rollDeg.toFixed(1)} s${r.spinDeg.toFixed(1)}) rate mid ${r.rateMid.toFixed(2)} near-limit ${r.rateNear.toFixed(2)} rad/s, back ${r.backDeg.toFixed(1)}°`).join(' · '));
-    }
+    });
     // 4. Scale: vertical gives the same range (direction gain), still uniform.
-    {
+    v1Only(V1.stretch, () => {
       const scaleRun = (vertical) => {
         object.position.set(0, 0, 0); object.quaternion.identity(); object.scale.set(1, 1, 1);
         const m = createManipulator(object, camera);
@@ -2626,7 +2703,7 @@ async function main() {
       const ratio = v.k / h.k;
       checkTrue('#G4 scale: the same 1.5x hand spread zooms ~1.75x as far (log) stacked vertically as side by side; uniform',
         h.k > 0.1 && ratio >= 1.4 && ratio <= 2.1 && h.uniform && v.uniform, `ln scale: side ${h.k.toFixed(3)} · stacked ${v.k.toFixed(3)} · ratio ${ratio.toFixed(2)}`);
-    }
+    });
     // 5 + 6. aim -> grab and the pointer-blocks-grab guard.
     {
       const run = (fistOpts, frames = 20) => {
@@ -2718,9 +2795,9 @@ async function main() {
       };
       const off = drive(mk(false));
       const on = drive(mk(true));
-      checkTrue('#G9 thumb-tap: off by default = no click; on = a click via thumb-tap at the onset cursor (rewound)',
+      v1Only(V1.thumbTap, () => checkTrue('#G9 thumb-tap: off by default = no click; on = a click via thumb-tap at the onset cursor (rewound)',
         gapOf(cocked) > 0.55 && gapOf(dropped) < 0.3 && off.click === null && on.click?.via === 'thumb-tap' && Math.abs(on.click.x - on.xAtOnset) < 1e-9,
-        `gaps ${gapOf(cocked)}/${gapOf(dropped)} · off ${JSON.stringify(off.click)} · on ${on.click?.via} x ${on.click?.x?.toFixed(3)} onset ${on.xAtOnset?.toFixed(3)}`);
+        `gaps ${gapOf(cocked)}/${gapOf(dropped)} · off ${JSON.stringify(off.click)} · on ${on.click?.via} x ${on.click?.x?.toFixed(3)} onset ${on.xAtOnset?.toFixed(3)}`));
       const p = mk(false);
       let t = 0;
       for (let i = 0; i < 15; i++) p.update([ph(true, { world: cocked })], 1.78, (t += FR));
@@ -2728,7 +2805,7 @@ async function main() {
       const slowOn = [];
       for (let i = 0; i < 15; i++) p.update([ph(true, { world: cocked })], 1.78, (t += FR));
       for (let i = 0; i <= 50; i++) slowOn.push(p.update([ph(true, { world: withThumb(1.0 - i * 0.02) })], 1.78, (t += FR)));
-      checkTrue('#G9 thumb-tap: a slow thumb lowering (1.7 s; 0.55 → 0.30 gap in ~420 ms) never clicks', slowOn.every((c) => c === null) && p.thumbTap === true, String(slowOn.filter(Boolean).length));
+      v1Only(V1.thumbTap, () => checkTrue('#G9 thumb-tap: a slow thumb lowering (1.7 s; 0.55 → 0.30 gap in ~420 ms) never clicks', slowOn.every((c) => c === null) && p.thumbTap === true, String(slowOn.filter(Boolean).length)));
       // Practice A/B: thumb-tap rounds switch the pointer's trial on, and back off after.
       const fp = { thumbTap: false, log: [], get state() { return { mode: 'aim', source: 'hand', x: 0, y: 0, frozen: false }; }, setThumbTap(v) { this.thumbTap = v; this.log.push(v); } };
       const hadH = 'hologram' in globalThis; const savedH = globalThis.hologram; globalThis.hologram = {};
@@ -2748,7 +2825,7 @@ async function main() {
   });
 
   const { createHandsRuntime } = await import(`./handsRuntime.js${V}`);
-  group('One-hand selection — hands runtime end to end (hold, hold again, pinch + bubble)', () => {
+  group('One-hand selection — hands runtime end to end (hold, hold again, pinch + bubble)', () => v1Only(V1.runtimeSelect, () => {
     const { g, m, A, B, C, ndcOf } = selRig();
     const scene = new THREE.Scene();
     scene.add(g);
@@ -2819,7 +2896,7 @@ async function main() {
       rt.dispose();
       cv.remove();
     }
-  });
+  }));
 
   group('Measure panel — pointer placement at NDC (placeAtNdc)', () => {
     const panelScene = new THREE.Scene();
@@ -2924,6 +3001,274 @@ async function main() {
       checkTrue('a gap narrower than the long axis still fits when turned', tight.fits,
         tight.best ? tight.best.label : 'no orientation fit');
     });
+  }
+
+  // Hands v2 (plans/hands-v2/CONTRACT.md §1): handFeatures.js measures each hand once in 3D and
+  // votes one pose; gestures.annotateHand derives the legacy fields from it only behind the
+  // ?hands=v2 switch. Hands here are built in gun-lab's world-hand model (y up, palm toward -z,
+  // labelled Right) and projected orthographically for the image landmarks, with the thumb
+  // placed explicitly so pinch and hammer are real 3D geometry, not labels.
+  const { createHandFeatures, HF } = await import(`./handFeatures.js${V}`);
+  group('handFeatures — Hands v2 features, voting, back-compat (handFeatures.js, gestures.js v2)', () => {
+    const MCP = { index: [0.03, 0.085, 0], middle: [0.008, 0.09, 0], ring: [-0.012, 0.085, 0], pinky: [-0.03, 0.075, 0] };
+    const BONES = { index: [0.04, 0.025, 0.02], middle: [0.045, 0.028, 0.02], ring: [0.042, 0.026, 0.02], pinky: [0.032, 0.02, 0.018] };
+    const FLEX = { straight: [0, 0, 0], curled: [80, 100, 60], bent: [25, 40, 25] };
+    const rot = ([x, y, z], [rx, ry, rz]) => {
+      const r = (d) => (d * Math.PI) / 180;
+      let c = Math.cos(r(rx)), s = Math.sin(r(rx));
+      [y, z] = [y * c - z * s, y * s + z * c];
+      c = Math.cos(r(ry)); s = Math.sin(r(ry));
+      [x, z] = [x * c + z * s, -x * s + z * c];
+      c = Math.cos(r(rz)); s = Math.sin(r(rz));
+      [x, y] = [x * c - y * s, x * s + y * c];
+      return [x, y, z];
+    };
+    const add = (a, b, k = 1) => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
+    // fingers: { index: 'curled', ... }; thumb: { deg } = laid in the palm plane at `deg` from the
+    // index metacarpal (the hammer), { pinchGap } = tip that far (palm lengths) from the index
+    // tip, { tip: [x,y,z] } = tip placed there (a fist's thumb wraps the curled index: the
+    // default whenever the index is curled), or { down: true } = straight, pointing down the image.
+    const WRAP = [0.05, 0.085, -0.03];
+    const mk = ({ fingers = {}, thumb = fingers.index === 'curled' ? { tip: WRAP } : { deg: 50 }, label = 'None', score = 0.9, hand = 'Right', x = 0.5, y = 0.55, view = [0, 0, 0] } = {}) => {
+      const w = Array.from({ length: 21 }, () => [0, 0, 0]);
+      ['index', 'middle', 'ring', 'pinky'].forEach((name, f) => {
+        const flex = FLEX[fingers[name] ?? 'straight'];
+        let p = MCP[name].slice();
+        w[5 + f * 4] = p;
+        let th = 0;
+        for (let b = 0; b < 3; b++) {
+          th += (flex[b] * Math.PI) / 180;
+          p = [p[0], p[1] + BONES[name][b] * Math.cos(th), p[2] - BONES[name][b] * Math.sin(th)];
+          w[6 + f * 4 + b] = p;
+        }
+      });
+      w[1] = [0.012, 0.02, -0.003];
+      w[2] = [0.022, 0.035, -0.004];
+      const palm = Math.hypot(...w[9]);
+      if (thumb.tip) {
+        w[4] = thumb.tip.slice();
+        w[3] = add(w[2], add(w[4], w[2], -1), 0.5);
+      } else if (thumb.pinchGap != null) {
+        w[4] = add(w[8], [0, 0, -1], thumb.pinchGap * palm);
+        w[3] = add(w[2], add(w[4], w[2], -1), 0.5);
+      } else {
+        let d;
+        if (thumb.down) d = [0.25, -1, 0];
+        else {
+          const u = [0.03 / 0.0901, 0.085 / 0.0901, 0], perp = [u[1], -u[0], 0], t = (thumb.deg * Math.PI) / 180;
+          d = [u[0] * Math.cos(t) + perp[0] * Math.sin(t), u[1] * Math.cos(t) + perp[1] * Math.sin(t), 0];
+        }
+        const l = Math.hypot(...d);
+        d = d.map((v) => v / l);
+        if (thumb.down) w[1] = add(w[2], d, -0.02);
+        w[3] = add(w[2], d, 0.033);
+        w[4] = add(w[2], d, 0.06);
+      }
+      const world = w.map((p) => rot(p, view));
+      const k = 0.12 / 0.09, A = 16 / 9;
+      return {
+        handedness: hand, gesture: label, score,
+        landmarks: world.map(([px, py, pz]) => ({ x: x + (px * k) / A, y: y - py * k, z: pz * k })),
+        worldLandmarks: world.map(([px, py, pz]) => ({ x: px, y: py, z: pz }))
+      };
+    };
+    const FIST = { index: 'curled', middle: 'curled', ring: 'curled', pinky: 'curled' };
+    const GUN = { middle: 'curled', ring: 'curled', pinky: 'curled' };
+    const FR = 1000 / 30;
+    // Runs one hand spec per frame; spec(i) -> hand(s). Returns the f of the first hand per frame.
+    const play = (hf, n, spec, t0 = 1000) => {
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        const hs = [].concat(spec(i));
+        hf.update(hs, t0 + i * FR);
+        out.push(hs[0].f);
+      }
+      return out;
+    };
+
+    // 1. Fist with the thumb out that MediaPipe labels Thumb_Up is a fist (v1: never a fist,
+    // because any confident label other than Closed_Fist vetoes it).
+    {
+      const hf = createHandFeatures();
+      const rows = play(hf, 10, () => mk({ fingers: FIST, thumb: { tip: [0.065, 0.08, -0.02] }, label: 'Thumb_Up' }));
+      const v1 = gestures.isFistLike('Thumb_Up', mk({ fingers: FIST, label: 'Thumb_Up' }).landmarks, ASPECT);
+      checkTrue('fist with thumb out, labelled Thumb_Up: voted pose is fist', rows.at(-1).pose.label === 'fist',
+        `pose ${rows.at(-1).pose.label} conf ${rows.at(-1).pose.conf}; curls ${Object.values(rows.at(-1).curl).map(Math.round).join('/')}; v1 isFistLike ${v1}`);
+      const firstFist = rows.findIndex((f) => f.pose.label === 'fist');
+      checkTrue('... entered within the 120 ms vote window', firstFist >= 0 && firstFist * FR <= HF.VOTE_WINDOW_MS, `first fist on frame ${firstFist + 1}, thumbGap ${rows.at(-1).thumbGap.toFixed(2)}`);
+      // Ricky: thumbGap < 0.6 is what separates a fist from a deliberate thumbs-up (thumb well clear).
+      const up = play(createHandFeatures(), 10, () => mk({ fingers: FIST, thumb: { deg: 110 }, label: 'Thumb_Up' })).at(-1);
+      checkTrue('a full thumbs-up (thumb well clear of the index) is not a fist', up.pose.label !== 'fist',
+        `pose ${up.pose.label}, thumbGap ${up.thumbGap.toFixed(2)} (max ${HF.FIST_THUMB_GAP_MAX})`);
+    }
+
+    // 2. Pinch on a tilted palm: the 3D ratio does not care how the hand is turned.
+    {
+      const ratios = [];
+      for (const view of [[0, 0, 0], [-55, 35, 0], [20, -60, 30]]) {
+        const hf = createHandFeatures();
+        const rows = play(hf, 8, () => mk({ fingers: { index: 'bent' }, thumb: { pinchGap: 0.08 }, view }));
+        ratios.push(rows.at(-1).pinch.ratio);
+        checkTrue(`pinch on a palm turned [${view}]: pinch.on and pose pinch`, rows.at(-1).pinch.on && rows.at(-1).pose.label === 'pinch',
+          `ratio ${rows.at(-1).pinch.ratio.toFixed(3)}, on ${rows.at(-1).pinch.on}, pose ${rows.at(-1).pose.label}, strength ${rows.at(-1).pinch.strength.toFixed(2)}`);
+      }
+      check('pinch ratio spread across the three tilts (absolute)', Math.max(...ratios) - Math.min(...ratios), 0, 0);
+    }
+
+    // 3. Pinch hysteresis + 40 ms hold (30 fps frames).
+    {
+      const hf = createHandFeatures();
+      const seq = [0.5, 0.5, 0.15, 0.5, 0.5, 0.15, 0.15, 0.15, 0.25, 0.25, 0.4, 0.25, 0.4, 0.4, 0.4];
+      const rows = play(hf, seq.length, (i) => mk({ fingers: { index: 'bent' }, thumb: { pinchGap: seq[i] } }));
+      const on = rows.map((f) => (f.pinch.on ? 1 : 0)).join('');
+      // One frame under PINCH_ON never turns it on; the 3rd frame of a dip (67 ms ≥ 40) does;
+      // 0.25 sits in the band and keeps it on; a 1-frame 0.40 doesn't drop it; 67 ms over OFF does.
+      checkTrue('pinch: a 1-frame dip is ignored, ≥40 ms under ON turns it on, the band holds it, ≥40 ms over OFF releases',
+        on === '000000011111110',
+        `ratios ${seq.join(' ')} → on ${on}`);
+    }
+
+    // 4. Hammer: cocked (> COCK_DEG for ≥ 80 ms) → dropped (< DROP_DEG inside the window), once.
+    {
+      const hf = createHandFeatures();
+      const deg = [70, 70, 70, 70, 70, 70, 10, 10, 10, 10, 10];
+      const rows = play(hf, deg.length, (i) => mk({ fingers: GUN, thumb: { deg: deg[i] } }));
+      const states = rows.map((f) => f.hammer.state[0]).join('');
+      const edges = rows.map((f, i) => (f.hammer.edge ? i : -1)).filter((i) => i >= 0);
+      // The 3-frame median delays the drop by one frame: raw 10° on frame 7, median 10° on frame 8.
+      checkTrue('hammer: cocked after ≥100 ms, dropped once on entering the drop band (after the 3-frame median)',
+        /^u+c+d+$/.test(states) && states.indexOf('c') * FR >= HF.COCK_HOLD_MS - 1e-6 && edges.length === 1 && edges[0] === 7,
+        `deg ${deg.join(' ')} → states ${states}, edge frames ${edges.join(',')}, angle cocked ${rows[4].hammer.angleDeg.toFixed(1)}° / dropped ${rows[8].hammer.angleDeg.toFixed(1)}°, thumbGap ${rows[8].thumbGap.toFixed(2)}`);
+      check('hammer: fallT (rewind anchor) = the last cocked frame, ms', rows[7].hammer.fallT, 1000 + 6 * FR, 1e-6);
+      checkTrue('hammer: the gun hand is still voted gun while the thumb drops', rows.slice(4).every((f) => f.pose.label === 'gun'),
+        rows.map((f) => f.pose.label).join(' '));
+      // Lowering slowly (400 ms in the middle band, over DROP_WINDOW_MS) is not a click, and the thumb must re-cock first.
+      const slow = createHandFeatures();
+      const d2 = [70, 70, 70, 70, 70, ...Array(12).fill(36), 10, 10, 10];
+      const r2 = play(slow, d2.length, (i) => mk({ fingers: GUN, thumb: { deg: d2[i] } }));
+      checkTrue('hammer: a slow lowering never fires', r2.every((f) => !f.hammer.edge),
+        `states ${r2.map((f) => f.hammer.state[0]).join('')}`);
+    }
+
+    // 5. Voting stability: single-frame flips never change the label; a real change does.
+    {
+      const hf = createHandFeatures();
+      const rows = play(hf, 40, (i) => (i >= 6 && i % 4 === 0
+        ? mk({ fingers: {}, label: 'Open_Palm' }) // a one-frame misread, MediaPipe agreeing with it
+        : mk({ fingers: FIST, label: 'None' })));
+      const labels = rows.slice(6).map((f) => f.pose.label);
+      check('voting: one-frame open flips inside a held fist (label None): frames not fist', labels.filter((l) => l !== 'fist').length, 0);
+      const after = play(hf, 10, () => mk({ fingers: {}, label: 'Open_Palm' }), 1000 + 40 * FR);
+      const k = after.findIndex((f) => f.pose.label === 'open');
+      checkTrue('voting: a real fist → open switches within the 120 ms window, stableMs restarts',
+        k >= 0 && k * FR <= HF.VOTE_WINDOW_MS && after.at(-1).pose.stableMs < 10 * FR,
+        `open on frame ${k + 1}, stableMs ${after.at(-1).pose.stableMs.toFixed(0)}`);
+    }
+
+    // 6. Handedness: a one-frame label flip keeps the hand's history; two hands that both say
+    // Right are told apart by their previous wrists; LOST_GRACE_MS keeps a briefly lost hand.
+    {
+      const hf = createHandFeatures();
+      const rows = play(hf, 12, (i) => mk({ fingers: FIST, hand: i === 8 ? 'Left' : 'Right' }));
+      checkTrue('a one-frame Right→Left flip keeps id Right and the fist (stableMs keeps growing)',
+        rows[8].id === 'Right' && rows.slice(6).every((f) => f.pose.label === 'fist') && rows[9].pose.stableMs > rows[7].pose.stableMs,
+        `ids ${rows.map((f) => f.id[0]).join('')}, stableMs ${rows[7].pose.stableMs.toFixed(0)}→${rows[9].pose.stableMs.toFixed(0)}`);
+
+      const two = createHandFeatures();
+      play(two, 6, () => [mk({ fingers: FIST, hand: 'Left', x: 0.3 }), mk({ fingers: {}, hand: 'Right', x: 0.7 })]);
+      const both = [mk({ fingers: {}, hand: 'Right', x: 0.71 }), mk({ fingers: FIST, hand: 'Right', x: 0.31 })];
+      two.update(both, 1000 + 6 * FR);
+      checkTrue('both hands labelled Right: nearest previous wrist decides (x 0.31 → Left, keeps its fist)',
+        both[1].f.id === 'Left' && both[0].f.id === 'Right' && both[1].f.pose.label === 'fist' && both[0].f.pose.label === 'open',
+        `x0.71 → ${both[0].f.id} ${both[0].f.pose.label}; x0.31 → ${both[1].f.id} ${both[1].f.pose.label}`);
+
+      const lost = createHandFeatures();
+      play(lost, 8, () => mk({ fingers: FIST }));
+      lost.update([], 1000 + 8 * FR);
+      const back = [mk({ fingers: FIST })];
+      lost.update(back, 1000 + 8 * FR + 100); // 100 ms after the last frame with a hand
+      const gone = createHandFeatures();
+      play(gone, 8, () => mk({ fingers: FIST }));
+      const late = [mk({ fingers: FIST })];
+      gone.update(late, 1000 + 7 * FR + HF.LOST_GRACE_MS + 50);
+      checkTrue(`a hand lost < LOST_GRACE_MS (${HF.LOST_GRACE_MS}) keeps its pose; lost longer starts over`,
+        back[0].f.pose.label === 'fist' && late[0].f.pose.label !== 'fist',
+        `after 100 ms gap: ${back[0].f.pose.label}; after ${HF.LOST_GRACE_MS + 50} ms: ${late[0].f.pose.label}`);
+    }
+
+    // 7. Frame + velocity + size.
+    {
+      const hf = createHandFeatures();
+      const palmIn = play(hf, 3, () => mk({ fingers: {} })).at(-1);
+      const side = play(createHandFeatures(), 3, () => mk({ fingers: {}, view: [0, 90, 0] })).at(-1);
+      checkTrue('palm frame: open palm toward the camera faces it (facing ≈ 1); turned 90° side-on ≈ 0',
+        palmIn.frame.facing > 0.95 && Math.abs(side.frame.facing) < 0.05,
+        `facing ${palmIn.frame.facing.toFixed(3)} / ${side.frame.facing.toFixed(3)}, |q| ${Math.hypot(...palmIn.frame.q).toFixed(4)}`);
+      check('sizeM = |w0 - w9| (m)', palmIn.sizeM, 0.09, 0.01);
+      const mv = createHandFeatures();
+      const rows = play(mv, 6, (i) => mk({ fingers: FIST, x: 0.3 + 0.01 * i }));
+      // 0.01 image width per 33 ms = 0.01*16/9 aspect units / palmPx per frame.
+      const expect = (0.01 * ASPECT) / rows.at(-1).palmPx / (FR / 1000);
+      check('wrist velocity in palm lengths / s (raw, no lag: same value from frame 2)', rows[1].vel.wrist[0], expect, 0.01);
+    }
+
+    // 8. Back-compat: v2 off (this page has no ?hands=v2) ignores hand.f entirely; v2 on derives
+    // the three legacy fields from the voted pose.
+    {
+      // test.html?hands=v2 runs the suite with the page switch on; force it off here, restore below.
+      const pageV2 = gestures.handsV2Enabled();
+      gestures.setHandsV2(false);
+      checkTrue('setHandsV2(false) turns the switch off', gestures.handsV2Enabled() === false, `page value ${pageV2}`);
+      const hf = createHandFeatures();
+      const mkT = () => mk({ fingers: FIST, thumb: { tip: [0.065, 0.08, -0.02] }, label: 'Thumb_Up' });
+      const a = mkT(), b = mkT();
+      for (let i = 0; i < 6; i++) hf.update([i === 5 ? a : mkT()], 1000 + i * FR);
+      gestures.annotateHand(a, ASPECT); // a has hand.f (fist); switch off -> v1
+      gestures.annotateHand(b, ASPECT); // no hand.f -> v1
+      checkTrue('v2 off: annotateHand output is identical with and without hand.f',
+        JSON.stringify([a.pointer, a.pinch, a.fistLike]) === JSON.stringify([b.pointer, b.pinch, b.fistLike]),
+        `fistLike ${a.fistLike}/${b.fistLike}, pointer ${a.pointer.rejectedBy}/${b.pointer.rejectedBy}`);
+      gestures.setHandsV2(true);
+      try {
+        gestures.annotateHand(a, ASPECT);
+        checkTrue('v2 on: fistLike from pose fist, pointer.gun false, pinch blocked as fist',
+          a.fistLike === true && a.pointer.gun === false && a.pinch.pinching === false && a.pinch.rejectedBy === 'fist',
+          `fistLike ${a.fistLike}, pointer ${JSON.stringify(a.pointer)}, pinch ${JSON.stringify(a.pinch)}`);
+        const g = createHandFeatures();
+        const gun = play(g, 6, () => mk({ fingers: GUN })).length && mk({ fingers: GUN });
+        g.update([gun], 1000 + 6 * FR);
+        gestures.annotateHand(gun, ASPECT);
+        const p = createHandFeatures();
+        const pin = mk({ fingers: { index: 'bent' }, thumb: { pinchGap: 0.08 } });
+        play(p, 6, () => mk({ fingers: { index: 'bent' }, thumb: { pinchGap: 0.08 } }));
+        p.update([pin], 1000 + 6 * FR);
+        gestures.annotateHand(pin, ASPECT);
+        checkTrue('v2 on: gun → pointer.gun; pinch → pinch.pinching with the 3D ratio',
+          gun.pointer.gun && !gun.fistLike && pin.pinch.pinching && pin.pinch.ratio === pin.f.pinch.ratio,
+          `gun ${gun.pointer.gun}, pinching ${pin.pinch.pinching} ratio ${pin.pinch.ratio.toFixed(3)}`);
+      } finally {
+        gestures.setHandsV2(null);
+      }
+      checkTrue('setHandsV2(null) restores the page value', gestures.handsV2Enabled() === pageV2, `${gestures.handsV2Enabled()} (page ${pageV2})`);
+    }
+  });
+
+  // Hands v2 behaviour groups (one module each, export run(check) with checkTrue's signature).
+  // Each forces v2 itself, so they run and must pass with ?hands=v2 AND without it: pointer and
+  // manipulator via constructor opts ({ v2: true }), calibration via its own gestures.setHandsV2
+  // (restored after), the arbiter is v2-only code. A v2 run here leaves the page's switch as found.
+  const V2_GROUPS = [
+    ['v2 pointer', 'test-v2-pointer.js'],
+    ['v2 arbiter', 'test-v2-arbiter.js'],
+    ['v2 manipulator', 'test-v2-manip.js'],
+    ['v2 calibration', 'test-v2-calib.js']
+  ];
+  for (const [name, file] of V2_GROUPS) {
+    await asyncGroup(name, async () => {
+      const mod = await import(`./${file}${V}`);
+      await mod.run(checkTrue);
+    });
+    checkTrue('page hands-v2 switch unchanged after the group', gestures.handsV2Enabled() === HANDS_V2, `${gestures.handsV2Enabled()} (page ${HANDS_V2})`);
   }
 
   // BUGS #53: the owner's mouse spun the chair. r161 OrbitControls stays mid-drag when one
@@ -3138,7 +3483,7 @@ async function main() {
 }
 
 // test.html's test recorder awaits this: the finished suite, or null when it crashed.
-export const finished = main().then(() => ({ groups, passed: passCount, failed: failCount })).catch((err) => {
+export const finished = main().then(() => ({ groups, passed: passCount, failed: failCount, skipped: skipCount, handsV2: HANDS_V2 })).catch((err) => {
   summaryEl.textContent = 'suite crashed — see console';
   summaryEl.className = 'fail';
   console.error(err);

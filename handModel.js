@@ -39,6 +39,11 @@ import * as THREE from 'three';
 //   handModel.landmarkOf(hand, index = 8) -> THREE.Vector3 | null   world position of a
 //     drawn hand's joint (MediaPipe numbering; 8 = index tip, where the pointer beam starts),
 //     from the last update(). null while that hand isn't drawn.
+//   handModel.setTint(fn | null)   Hands v2 owner colour (CONTRACT section 2.4): fn(hand) -> a
+//     THREE.Color, a colour number / string, or null for the default look. While set, it is the
+//     hand's base colour instead of the cyan + fist amber (a pinch still tints it halfway green);
+//     it eases like the fist tint (TINT_MS), never a step. null (default) = v1 look, unchanged.
+//     Not drawn in the ghostHands fallback (mode 'ghost'): ignored there.
 //   handModel.clear()     hide everything now and forget the filters (camera stopped).
 //   handModel.dispose()   remove from the scene.
 //   handModel.mode        'loading' | 'model' | 'ghost'; handModel.ready -> Promise<mode>.
@@ -306,6 +311,17 @@ export function createHandModel(scene, connections, { assetBase = DEFAULT_ASSET_
     return mode;
   })();
 
+  // Hands v2 owner colour (setTint): null = the v1 look.
+  let tintFn = null;
+  const ownerColor = new THREE.Color();
+  function tintOf(hand) {
+    if (!tintFn) return null;
+    let c = null;
+    try { c = tintFn(hand); } catch { return null; }
+    if (c == null) return null;
+    return c.isColor ? c : ownerColor.set(c);
+  }
+
   // Which pool a hand goes to: the one whose last wrist is nearest (MediaPipe reorders hands
   // and can label both the same, see smoothLandmarks.js), else a free one.
   function assign(hands) {
@@ -420,7 +436,9 @@ export function createHandModel(scene, connections, { assetBase = DEFAULT_ASSET_
 
         pool.vis += (1 - pool.vis) * kFade;
         pool.dim += ((hand.engaged === false ? REST_OPACITY : 1) - pool.dim) * kFade;
-        const target = isFist(hand) ? FIST_COLOR
+        const owner = tintOf(hand);
+        const target = owner ? (hand.pinch?.pinching ? _tint.copy(owner).lerp(PINCH_COLOR, PINCH_TINT) : owner)
+          : isFist(hand) ? FIST_COLOR
           : hand.pinch?.pinching ? _tint.copy(COLOR).lerp(PINCH_COLOR, PINCH_TINT) : COLOR;
         pool.color.lerp(target, kTint);
       });
@@ -443,6 +461,8 @@ export function createHandModel(scene, connections, { assetBase = DEFAULT_ASSET_
       group.updateMatrixWorld(true);
     },
 
+    setTint(fn) { tintFn = typeof fn === 'function' ? fn : null; },
+
     landmarkOf(hand, index = 8) {
       if (mode === 'ghost') return ghost.landmarkOf(hand, index);
       const pool = pools.find((p) => p.hand === hand && p.side);
@@ -459,7 +479,7 @@ export function createHandModel(scene, connections, { assetBase = DEFAULT_ASSET_
 
     // For tests and the session recorder: what each drawn hand is doing.
     debug() {
-      return pools.map((p) => ({ side: p.side, visible: p.holder.visible, opacity: p.material.uniforms.hologramOpacity.value, drawing: !!p.hand }));
+      return pools.map((p) => ({ side: p.side, visible: p.holder.visible, opacity: p.material.uniforms.hologramOpacity.value, drawing: !!p.hand, color: '#' + p.color.getHexString() }));
     },
 
     dispose() {

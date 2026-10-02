@@ -196,6 +196,94 @@ export function isGun(features, { gesture = null, thresholds = GUN_DEFAULTS } = 
   return { gun: failed.length === 0, rejectedBy: failed[0] ?? null, failed, supported };
 }
 
+// ---- Hands v2 hammer click (plans/hands-v2/CONTRACT.md §3.2, Ricky's report §3) -----------
+// The thumb is a trigger again in v2 (owner 2026-10-02: click = finger-gun thumb hammer drop).
+// LOCAL FALLBACK: handFeatures.js computes the same thing as hand.f.hammer, and pointer.js reads
+// that when it is present. This copy only runs when a hand has no hand.f (v2 runtime not wired
+// yet, or a test/lab feeding plain hands). Same formula and thresholds as handFeatures.js HF;
+// swap it out once every v2 caller runs handFeatures first.
+//
+//   hammerAngleDeg(worldLandmarks) -> degrees | null
+//     angle(thumb MCP 2 -> tip 4, wrist 0 -> index MCP 5): measured against the index
+//     METACARPAL, which is rigid, not the 5->6 bone thumbAngleDeg uses (the thumb's tendon drags
+//     that bone along when it drops). null for anything gunFeatures would reject.
+//   createHammer(thresholds = HAMMER_DEFAULTS) -> { update(angleDeg, thumbGap, tMs) -> hammer, reset() }
+//     hammer = { angleDeg, state, dropT, fallT, edge }, the hand.f.hammer shape:
+//     angleDeg: 3-frame median (null when angleDeg in is null; the state resets to 'unknown').
+//     state 'cocked' after COCK_HOLD_MS in the cock band (angle > COCK_DEG or gap > COCK_GAP);
+//     'dropped' on entering the drop band (angle < DROP_DEG and gap < DROP_GAP) within
+//     DROP_WINDOW_MS of the last cocked frame; 'unknown' after a too-slow lowering (no click, the
+//     thumb must re-cock). edge = true only on the drop frame. fallT = the onset: the earlier of
+//     the last cocked frame and the first frame of a fall faster than FALL_RATE_DPS.
+export const HAMMER_DEFAULTS = Object.freeze({
+  COCK_DEG: 50,          // [Ricky §3, unconfirmed] thumb up off the index
+  COCK_GAP: 0.50,        // ... or its tip this far (palm lengths) from the index's first bone
+  DROP_DEG: 30,          // dropped needs BOTH angle below this ...
+  DROP_GAP: 0.30,        // ... and the gap below this
+  COCK_HOLD_MS: 100,     // a resting thumb that flickers into the band never arms
+  DROP_WINDOW_MS: 300,   // a slow lowering (resting the thumb) is not a click
+  FALL_RATE_DPS: -150,   // a fall this fast marks the onset even inside the cock band
+  MEDIAN_N: 3            // +1 frame latency, removes single-frame spikes
+});
+
+export function hammerAngleDeg(worldLandmarks) {
+  const lm = worldLandmarks;
+  if (!valid(lm)) return null;
+  const meta = sub(lm[GUN_LANDMARK.INDEX[0]], lm[GUN_LANDMARK.WRIST]);
+  if (!(len(meta) > 1e-3)) return null;
+  return angleDeg(sub(lm[GUN_LANDMARK.THUMB_TIP], lm[GUN_LANDMARK.THUMB_MCP]), meta);
+}
+
+export function createHammer(thresholds = HAMMER_DEFAULTS) {
+  const T = { ...HAMMER_DEFAULTS, ...thresholds };
+  let h;
+  const reset = () => {
+    h = { state: 'unknown', degs: [], prevDeg: null, prevT: null, cockSince: null, lastCockT: null, fastT: null, dropT: null, fallT: null };
+  };
+  reset();
+  const out = (deg, edge) => ({ angleDeg: deg, state: h.state, dropT: h.dropT, fallT: h.fallT, edge });
+  return {
+    reset,
+    update(rawDeg, gap, t) {
+      if (rawDeg == null || !Number.isFinite(gap)) {
+        Object.assign(h, { state: 'unknown', degs: [], prevDeg: null, prevT: null, cockSince: null, fastT: null });
+        return out(null, false);
+      }
+      h.degs.push(rawDeg);
+      while (h.degs.length > T.MEDIAN_N) h.degs.shift();
+      const sorted = [...h.degs].sort((a, b) => a - b);
+      const m = sorted.length >> 1;
+      const deg = sorted.length % 2 ? sorted[m] : (sorted[m - 1] + sorted[m]) / 2; // = handFeatures median
+      const rate = h.prevT != null && t > h.prevT ? ((deg - h.prevDeg) * 1000) / (t - h.prevT) : 0;
+      const fallStart = h.prevT; // a fast fall measured on this frame began on the previous one
+      h.prevDeg = deg;
+      h.prevT = t;
+      if (deg > T.COCK_DEG || gap > T.COCK_GAP) {
+        h.cockSince ??= t;
+        if (t - h.cockSince >= T.COCK_HOLD_MS) h.state = 'cocked';
+        if (h.state === 'cocked') h.lastCockT = t;
+        if (rate < T.FALL_RATE_DPS) h.fastT ??= fallStart;
+        else h.fastT = null;
+        return out(deg, false);
+      }
+      h.cockSince = null;
+      if (h.state !== 'cocked') return out(deg, false);
+      if (rate < T.FALL_RATE_DPS) h.fastT ??= fallStart;
+      if (t - h.lastCockT > T.DROP_WINDOW_MS) {
+        h.state = 'unknown';
+        h.fastT = null;
+      } else if (deg < T.DROP_DEG && gap < T.DROP_GAP) {
+        h.state = 'dropped';
+        h.dropT = t;
+        h.fallT = Math.min(h.lastCockT, h.fastT ?? Infinity);
+        h.fastT = null;
+        return out(deg, true);
+      }
+      return out(deg, false);
+    }
+  };
+}
+
 // DIAGNOSTIC ONLY since 2026-10-01: the thumb is not a trigger and not part of the pose.
 export function thumbState(features, prev = 'unknown') {
   const prevState = typeof prev === 'string' ? prev : prev?.state ?? 'unknown';

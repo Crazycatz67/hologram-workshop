@@ -24,6 +24,12 @@
 //     expose: an object (window.hologram) that gets handsRuntime / pointerStats / pointerProfile /
 //       calibration once the runtime exists, under the same names hologram.html uses, so
 //       sessionrec.js and tests read both pages the same way.
+//     HANDS V2 (only when the runtime has an arbiter, i.e. ?hands=v2; see wireHandsV2 at the end):
+//     activeTool(): the page's tool id (main.js activeTool) -> the arbiter scope; onDone(ev) /
+//     onUndo(ev): the open-palm Done and the thumbs-down undo; chipAfter: the element the
+//     hand-state chip goes after (#toolChip). The ring gets swipes (ring.swipe) and fist
+//     pick-ups (ring.pick); a fist grab also moves on the hand's up / down (away / nearer on
+//     the floor). hands.v2 = the wireHandsV2 host | null.
 //     loadRuntime(): Promise<createHandsRuntime>; injectable for tests. The default imports
 //       ../handsRuntime.js on the FIRST Camera press: it pulls MediaPipe from the CDN, and the
 //       Platform must open (and work offline) without it.
@@ -93,12 +99,22 @@ const HINT_TEXT = {
   lost: '✋ Keep your hand inside the camera view'
 };
 
+// Hands v2: a fist held this long on the open Library ring picks the card up (opens it). Longer
+// than the pose vote (handFeatures 120 ms) so a hand closing on its way past doesn't open one.
+const FIST_PICK_MS = 250;
+// ... and only if it stayed STILL: the ring scope allows MANIP, so a fist that moves is a spin
+// (the grab session below drives ring.spinBy). Wrist (index-MCP) travel from where the fist
+// closed, in palm lengths (hand.f.aim.m / f.sizeM); past this the fist is a spin for good (until
+// it opens). 0.3 palm ≈ 2.5 cm: well above landmark jitter (~0.05), well below a spin stroke.
+const FIST_PICK_STILL_PALMS = 0.3;
+
 const isItemKey = (k) => typeof k === 'string' && k.startsWith('item:');
 
 export function createPlatformHands({
   scene, camera, renderer, controls, objectMode, getItems,
   button = null, setStatus = () => {}, busy = () => false, expose = null,
   ring = () => null, polygon = () => null, resetView = null, helpEl = null, toolWheel = null,
+  activeTool = () => 'none', onDone = () => {}, onUndo = () => {}, chipAfter = null,
   loadRuntime = () => import('../handsRuntime.js' + V).then((m) => m.createHandsRuntime)
 }) {
   let runtime = null;
@@ -110,7 +126,9 @@ export function createPlatformHands({
     // step 3: gestures started, by what they did; refused = blocked by a pin
     grabs: 0, moves: 0, orbits: 0, scales: 0, refused: 0,
     // hands on the page: ring spins, lens selects / resizes, claps, page clicks (handUI)
-    ringSpins: 0, lensSelects: 0, lensResizes: 0, claps: 0, zooms: 0
+    ringSpins: 0, lensSelects: 0, lensResizes: 0, claps: 0, zooms: 0,
+    // Hands v2: ring swipes and fist pick-ups
+    ringSwipes: 0, ringPicks: 0
   };
   const ringOpen = () => !!ring()?.isOpen?.();
   const lens = () => { const p = polygon(); return p?.active ? p : null; };
@@ -410,8 +428,13 @@ export function createPlatformHands({
       const along = dist * (Math.exp(d.depth) - 1);
       s.dx += flatRight.x * lateral + flatFwd.x * along;
       s.dz += flatRight.z * lateral + flatFwd.z * along;
+      // v2 (CONTRACT 3.3, ROADMAP #15): the fist's up / down moves too. Height never changes
+      // (objectMode keeps Y), so hand up = away along the floor, as a mouse drag up the floor does.
+      const up = v2Host && d.y ? d.y * dist : 0;
+      s.dx += flatFwd.x * up;
+      s.dz += flatFwd.z * up;
       s.dy += d.spin;
-      if (d.x || d.depth || d.spin) objectMode.moveBy(s.dx, s.dz, s.dy);
+      if (d.x || d.depth || d.spin || up) objectMode.moveBy(s.dx, s.dz, s.dy);
     } else if (s.kind === 'ring') {
       // Hand right = the ring follows right (like a pointer drag): cards per proxy unit = the
       // view's width in px at depth 1 over the ring's px per card.
@@ -530,6 +553,9 @@ export function createPlatformHands({
         onAction
       });
       lastResets = manip?.resetCount ?? 0;
+      v2Host = wireV2(runtime);
+      // The fist pick-up times on the camera frame's clock ('frame' follows 'intent' in a frame).
+      if (v2Host) runtime.on('frame', (d) => { if (v2Host.state) ringFist(v2Host.state, d.now); });
       if (expose) {
         expose.handsRuntime = runtime;
         expose.pointerStats = runtime.stats;
@@ -539,6 +565,51 @@ export function createPlatformHands({
       return runtime;
     });
     try { return await loading; } catch (err) { loading = null; throw err; }
+  }
+
+  // ---- Hands v2 (only when the runtime has an arbiter; v1 never gets here) ----
+  // Done / undo go to the page (main.js); a swipe works the Library ring (left / right scroll
+  // with momentum, up / down versions); a fist held STILL on a card for FIST_PICK_MS "picks it
+  // up" (opens it), the hand-free twin of the hammer click; a fist that moves first spins the
+  // ring instead (the ring scope allows MANIP: the grab session drives ring.spinBy).
+  let v2Host = null;
+  const fistSince = new Map();   // hand id -> { t, armed } while that hand reads 'fist'
+  function wireV2(rt) {
+    return wireHandsV2(rt, {
+      camera, canvas: renderer.domElement, activeTool, chipAfter, win: window,
+      onDone, onUndo,
+      onSwipe: (ev) => {
+        const r = ring();
+        if (!ringOpen() || !r?.swipe) return;
+        if (r.swipe(ev.dir, { peakSpeed: ev.peakSpeed })) { stats.ringSwipes++; }
+      },
+    });
+  }
+  // Where the hand with f.id === id is, in palm lengths (only differences mean anything); null
+  // without the features (no motion test then: a still fist, as before).
+  function fistAt(id) {
+    const h = (runtime?.hands ?? []).find((x) => x?.f?.id === id);
+    const m = h?.f?.aim?.m, size = h?.f?.sizeM;
+    return m && size > 0 ? { x: m[0] / size, y: m[1] / size } : null;
+  }
+  function ringFist(st, now) {
+    const open = ringOpen();
+    for (const id of [...fistSince.keys()]) if (st.poses?.[id] !== 'fist') fistSince.delete(id);
+    for (const [id, pose] of Object.entries(st.poses ?? {})) {
+      if (pose !== 'fist') continue;
+      // armed: the fist closed while the ring was already up (a fist carried in from a grab
+      // doesn't pick whatever card is in front).
+      const at0 = fistAt(id);
+      if (!fistSince.has(id)) { fistSince.set(id, { t: now, armed: open, at0 }); continue; }
+      const f = fistSince.get(id);
+      // Moved before the pick time: a spin, not a pick (stays disarmed until the hand opens).
+      if (f.armed && f.at0 && at0 && Math.hypot(at0.x - f.at0.x, at0.y - f.at0.y) > FIST_PICK_STILL_PALMS) f.armed = false;
+      if (!open || !f.armed || now - f.t < FIST_PICK_MS) continue;
+      f.armed = false;
+      const at = v2Host?.handPx(id);
+      const picked = ring()?.pick?.(at ?? {});
+      if (picked != null) { stats.ringPicks++; setStatus('✊ Picked up · opening it'); }
+    }
   }
 
   function syncButton() {
@@ -639,10 +710,171 @@ export function createPlatformHands({
     get tracking() { return !!runtime?.tracking; },
     get hoverKey() { return hoverKey; },
     get stats() { return stats; },
+    get v2() { return v2Host; },
     dispose() {
       window.removeEventListener('keydown', onKey, true);
+      v2Host?.dispose();
       runtime?.dispose();
       mount.remove();
+    }
+  };
+}
+
+// ---- Hands v2 host wiring (shared by this adapter and hologram.js) ------------------------------
+// plans/hands-v2/CONTRACT.md section 2.4: the host draws the hand-state chip, the hand colour and
+// the Done / undo arming ring from the arbiter's 'intent' state, routes 'done' / 'undo' /
+// 'swipe' to its own actions, and keeps the arbiter's scope in step with the active tool. Both
+// pages need exactly this, so it lives once, here (hologram.js imports it; the module's only
+// static import is three).
+//
+// CONTRACT
+//   wireHandsV2(runtime, { camera, canvas, activeTool, onDone, onUndo, onSwipe?, onIntent?,
+//                          chip?, chipAfter?, win? }) -> host | null
+//     null (and nothing wired) when runtime.arbiter is null, i.e. Hands v2 is off: v1 unchanged.
+//     camera, canvas: the 3D view, to place the arming ring at the drawn hand (handModel
+//       landmarkOf(hand, 9), the middle knuckle, projected); falls back to the image wrist.
+//     activeTool(): 'none' | 'tape' | 'note' | 'polygon' | 'ring' | ... read on every camera
+//       frame; TOOL_SCOPES maps it to runtime.setScope(name) (else 'default'). The scope is only
+//       set when it differs (setScope resets the arming).
+//     onDone(ev), onUndo(ev), onSwipe(ev): the runtime's events. A 'done' that closed the open
+//       tool wheel (the runtime closes it first, why 'done') is NOT passed on: one Done, one job.
+//     onIntent(state): every camera frame, after the chip / tint / scope.
+//     chip: an existing element to colour (data-owner + an eased ring of the owner colour; its
+//       text is the host's). Without it a small chip (#handStateChip) is made and inserted
+//       after chipAfter (or appended to body), with words from OWNER_WORDS.
+//     win: window.hologram's window; every routed event is also a 'hologram:gesture'
+//       CustomEvent { type: 'done' | 'undo' | 'swipe', ...ev } on it (sessionrec hook), and
+//       win.hologram.handState = the last intent state.
+//   host.state        the last intent state | null
+//   host.handPx(id)   page px { x, y } of the hand with f.id === id (drawn hand, else image) | null
+//   host.dispose()    unsubscribe, remove what it made, tint back to v1.
+// Colours (owner 2026-10-02): IDLE grey, AIM cyan, MANIP amber, TOOL violet. The hand model's
+// tint eases (handModel.setTint); the chip and ring fade in CSS (>= 150 ms): nothing flashes.
+export const OWNER_COLORS = Object.freeze({ IDLE: '#9aa4b2', AIM: '#4fd1ff', MANIP: '#ffd166', TOOL: '#b18cff' });
+export const OWNER_WORDS = Object.freeze({ IDLE: '✋ Free', AIM: '👉 Aiming', MANIP: '✊ Moving', TOOL: '✌ Tool' });
+export const TOOL_SCOPES = Object.freeze({ tape: 'tape', polygon: 'polygon', ring: 'ring' });
+const ARM_ICON = { done: '✋', undo: '↶' };
+const ARM_SHOW = 0.08;   // below this the ring stays hidden (a palm passing through isn't a Done)
+
+export function wireHandsV2(runtime, {
+  camera, canvas, activeTool = () => 'none', onDone = () => {}, onUndo = () => {}, onSwipe = () => {},
+  onIntent = null, chip = null, chipAfter = null, win = window
+} = {}) {
+  if (!runtime?.arbiter) return null;
+  const offs = [];
+  let state = null;
+  let wheelClosedByDone = false;
+
+  // The chip: the host's own element, or a small one of ours.
+  const ownChip = !chip;
+  if (ownChip) {
+    chip = document.createElement('span');
+    chip.id = 'handStateChip';
+    chip.setAttribute('role', 'status');
+    chip.setAttribute('aria-label', 'What your hands are doing');
+    chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font:12px system-ui,sans-serif;color:#e6edf3;background:rgba(20,24,32,.72);white-space:nowrap;pointer-events:none';
+    chip.hidden = true;
+    if (chipAfter?.parentNode) chipAfter.after(chip); else document.body.append(chip);
+  }
+  const chipShadow = chip.style.boxShadow;
+  const chipTransition = chip.style.transition;
+  chip.style.transition = [chipTransition, 'box-shadow 200ms ease'].filter(Boolean).join(', ');
+
+  // The arming ring: an SVG circle whose stroke fills with arming.progress.
+  const R = 22, C = 2 * Math.PI * R;
+  const ring = document.createElement('div');
+  ring.id = 'handArmRing';
+  ring.style.cssText = 'position:fixed;left:0;top:0;width:56px;height:56px;margin:-28px 0 0 -28px;pointer-events:none;z-index:60;opacity:0;transition:opacity 180ms ease';
+  ring.innerHTML = `<svg width="56" height="56" viewBox="0 0 56 56" aria-hidden="true">
+    <circle cx="28" cy="28" r="${R}" fill="rgba(20,24,32,.45)" stroke="rgba(255,255,255,.25)" stroke-width="4"/>
+    <circle class="arc" cx="28" cy="28" r="${R}" fill="none" stroke="${OWNER_COLORS.TOOL}" stroke-width="4" stroke-linecap="round"
+      stroke-dasharray="${C}" stroke-dashoffset="${C}" transform="rotate(-90 28 28)"/>
+    <text x="28" y="34" text-anchor="middle" font-size="18">✋</text></svg>`;
+  document.body.append(ring);
+  const arc = ring.querySelector('.arc');
+  const icon = ring.querySelector('text');
+
+  const v = new THREE.Vector3();
+  function handPx(id) {
+    const hand = (runtime.hands ?? []).find((h) => h?.f?.id === id);
+    if (!hand) return null;
+    const p = runtime.handModel?.landmarkOf?.(hand, 9);
+    if (p && camera && canvas) {
+      v.copy(p).project(camera);
+      const r = canvas.getBoundingClientRect();
+      return { x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height };
+    }
+    const w = hand.landmarks?.[9] ?? hand.landmarks?.[0];
+    return w ? { x: (1 - w.x) * innerWidth, y: w.y * innerHeight } : null;   // mirrored, like the cursor
+  }
+
+  const tint = (hand) => {
+    const s = state;
+    if (!s) return null;
+    if (hand?.engaged === false || s.owner === 'IDLE') return OWNER_COLORS.IDLE;
+    if (s.owner === 'MANIP' || s.ownerHand == null) return OWNER_COLORS[s.owner] ?? null;
+    return hand?.f?.id === s.ownerHand ? OWNER_COLORS[s.owner] : OWNER_COLORS.IDLE;
+  };
+
+  function drawArming(s) {
+    const a = s?.arming;
+    if (!a || !(a.progress >= ARM_SHOW)) { ring.style.opacity = '0'; return; }
+    const want = a.gesture === 'undo' ? 'thumbDown' : 'open';
+    const id = Object.keys(s.poses ?? {}).find((k) => s.poses[k] === want) ?? s.ownerHand;
+    const at = (id != null && handPx(id)) || runtime.cursorPx;
+    if (!at) { ring.style.opacity = '0'; return; }
+    ring.style.transform = `translate(${Math.round(at.x)}px, ${Math.round(at.y)}px)`;
+    arc.setAttribute('stroke-dashoffset', String(C * (1 - Math.min(1, a.progress))));
+    arc.setAttribute('stroke', a.gesture === 'undo' ? OWNER_COLORS.MANIP : OWNER_COLORS.TOOL);
+    if (icon.textContent !== (ARM_ICON[a.gesture] ?? '✋')) icon.textContent = ARM_ICON[a.gesture] ?? '✋';
+    ring.style.opacity = '1';
+  }
+
+  function publish(type, ev) {
+    win?.dispatchEvent?.(new CustomEvent('hologram:gesture', { detail: { ...ev, type } }));
+  }
+
+  offs.push(runtime.on('intent', (s) => {
+    state = s;
+    if (win) { win.hologram = win.hologram ?? {}; win.hologram.handState = s; }
+    const want = TOOL_SCOPES[activeTool()] ?? 'default';
+    if (s.scope !== want) runtime.setScope(want);
+    const col = OWNER_COLORS[s.owner] ?? OWNER_COLORS.IDLE;
+    chip.dataset.owner = s.owner;
+    chip.style.boxShadow = `0 0 0 2px ${col}`;
+    if (ownChip) {
+      chip.hidden = false;
+      const words = OWNER_WORDS[s.owner] ?? s.owner;
+      if (chip.textContent !== words) chip.textContent = words;
+    }
+    runtime.handModel?.setTint?.(tint);
+    drawArming(s);
+    onIntent?.(s);
+  }));
+  offs.push(runtime.on('wheel', (d) => { if (d?.type === 'close' && d.why === 'done') wheelClosedByDone = true; }));
+  offs.push(runtime.on('done', (ev) => {
+    publish('done', ev);
+    if (wheelClosedByDone) { wheelClosedByDone = false; return; }
+    onDone(ev);
+  }));
+  offs.push(runtime.on('undo', (ev) => { publish('undo', ev); onUndo(ev); }));
+  offs.push(runtime.on('swipe', (ev) => { publish('swipe', ev); onSwipe(ev); }));
+  offs.push(runtime.on('stop', () => {
+    state = null;
+    ring.style.opacity = '0';
+    if (ownChip) chip.hidden = true;
+    chip.style.boxShadow = chipShadow;
+    delete chip.dataset.owner;
+  }));
+
+  return {
+    get state() { return state; },
+    handPx,
+    dispose() {
+      for (const off of offs) off?.();
+      runtime.handModel?.setTint?.(null);
+      ring.remove();
+      if (ownChip) chip.remove(); else { chip.style.boxShadow = chipShadow; chip.style.transition = chipTransition; }
     }
   };
 }

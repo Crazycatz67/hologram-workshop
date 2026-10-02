@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createStabilizer } from './stabilizer.js';
-import { handSpan, handTwist, isFistLike, isOpenForExplode, palmLength } from './gestures.js';
+import { handSpan, handTwist, isFistLike, isOpenForExplode, palmLength, handsV2Enabled } from './gestures.js';
 
 export const MODE = { IDLE: 'idle', GRAB: 'grab', TRANSFORM: 'transform', EXPLODE: 'explode' };
 
@@ -444,7 +444,8 @@ function fistOf(h, aspect) {
   return isFistLike(h.gesture, h.landmarks, aspect, { pointer: h.pointer });
 }
 
-export function createManipulator(object, camera) {
+export function createManipulator(object, camera, { v2 = handsV2Enabled() } = {}) {
+  const useV2 = !!v2;
   // Live-tunable, because every threshold in this file is an untuned guess made without a
   // webcam (see ROADMAP.md Phase 1) and the only way to fix "out of proportion" is to
   // adjust it against real hands and watch what happens.
@@ -500,6 +501,8 @@ export function createManipulator(object, camera) {
         palmSig: null,        // two-hand scale's held palm-length normaliser
         ch: { x: newChannel(), y: newChannel(), spin: newChannel(), pitch: newChannel(), roll: newChannel(), depth: newChannel(), scale: newChannel() }
       };
+      // v2: height-only stretch (vertical two-hand spread), the tilt in progress, a flick coasting.
+      if (useV2) { s.ch.stretchY = newChannel(); s.tilt = null; s.flick = null; }
       targetStates.set(target, s);
     }
     return s;
@@ -586,6 +589,26 @@ export function createManipulator(object, camera) {
   // One-step undo of the last reset (clap, R key or Reset button): the pose from just before.
   let undoSnapshot = null;
   let resetCount = 0;
+  let v2Now = 0; // the camera frame's time, for v2 histories
+
+  // v2 state (unused with v2 off). explodeSession: { snapshot, maxAmount } for the explode state
+  // in progress (undo entry + "is this a clap during explode"). originalParts: part transforms
+  // snapshotted at the first explode since the last reset (clap during explode restores them).
+  let explodeSession = null;
+  let originalParts = null;
+  // snapUpright() ease in progress: { from, to, t0, ms } (stepped in advance(), display rate).
+  let upright = null;
+  // Clap v2: two-hand span history (arm), dropped-frame count, last facing reading, merge approach.
+  let clap2 = null;
+  const newClap2 = () => ({ hist: [], dropped: 0, last: null, facingT: null, approachT: null, glitchSince: null, cooldownUntil: -Infinity });
+  clap2 = newClap2();
+  // Per-person clap thresholds (calibration v2 profile, wired by the host via setThresholds).
+  // CLAP_V_MIN = average approach speed floor (palms/s) everywhere. Default V2.CLAP_V_MIN_DEFAULT
+  // (no profile); a calibration profile replaces it with the person's slowest clap x 0.6.
+  const clapT = { CLAP_ARM_SPAN: V2.CLAP_ARM_SPAN, CLAP_CONTACT_SPAN: V2.CLAP_FIRE_SPAN, CLAP_V_MIN: V2.CLAP_V_MIN_DEFAULT };
+  // v2 grab: the voted pose decides (CONTRACT §3.3 "Grab: pose.label === 'fist'"); hands without
+  // hand.f (tests, labs) keep the v1 reading.
+  const fistOfM = useV2 ? (h, aspect) => (h.f?.pose ? h.f.pose.label === 'fist' : fistOf(h, aspect)) : fistOf;
 
   const GRAB_CHANNELS = ['x', 'y', 'spin', 'pitch', 'roll', 'depth'];
 
@@ -604,6 +627,8 @@ export function createManipulator(object, camera) {
       const c = s.ch[k];
       c.coast = settings.momentum ? c.vel : 0;
     }
+    // v2: letting go of the model mid-tilt. A fast turn keeps spinning (flick), else it settles.
+    if (useV2 && s.tilt?.q0) { trimReleaseGlitch(s.tilt); if (!flickFromTilt(s)) pauseTilt(s.tilt); }
   }
 
   function clearGrab() {
@@ -621,6 +646,7 @@ export function createManipulator(object, camera) {
   // — releasing the gesture holds whatever shape it left, the same as letting go of grab
   // leaves the object wherever it was moved to, rather than snapping back.
   function clearExplode() {
+    if (useV2 && explodeSession) endExplodeSession();
     explodeSig = null;
     explodePulled = false;
     explodeStart = null;
@@ -629,10 +655,12 @@ export function createManipulator(object, camera) {
   // Drops every gesture's tracking and follow state -- object AND every part -- so nothing
   // keeps coasting or resumes mid-gesture after a reset or an undo.
   function clearMotionState() {
+    upright = null;
     grab.reset();
     transform.reset();
     explode.reset();
     targetStates.clear();
+    explodeSession = null;
     clearExplode();
     explodeCh = newChannel();
     explodeV = { x: 0, y: 0 };
@@ -667,6 +695,7 @@ export function createManipulator(object, camera) {
     explodeScale0 = { x: home.scale.x, y: home.scale.y };
     explodeLiteralV = 0;
     activePart = null;
+    originalParts = null;
     if (literalMode) {
       for (const part of explodeParts) {
         part.position.copy(part.userData.explodeHome);
@@ -674,6 +703,35 @@ export function createManipulator(object, camera) {
         part.scale.copy(part.userData.explodeHomeScale);
       }
     }
+  }
+
+  // Upright = the home orientation with the user's turn about the world vertical kept (the
+  // swing-twist split of the rotation since home: only the twist about +Y survives), so Done
+  // stands the model back up without undoing which way it faces. Position and scale untouched.
+  const UPRIGHT_MS = 450;
+  function uprightTarget() {
+    const rel = object.quaternion.clone().multiply(home.quaternion.clone().invert());
+    const n = Math.hypot(rel.y, rel.w);
+    const twist = n > 1e-9 ? new THREE.Quaternion(0, rel.y / n, 0, rel.w / n) : new THREE.Quaternion();
+    return twist.multiply(home.quaternion);
+  }
+  // Starts an eased (smoothstep, UPRIGHT_MS) turn back to upright; undoable (one step, like a
+  // reset). Stops any coast; a new grab / transform / explode cancels the ease where it is.
+  // Returns false (and changes nothing) when the model is already upright.
+  function snapUpright({ ms = UPRIGHT_MS } = {}) {
+    const to = uprightTarget();
+    if (2 * Math.acos(Math.min(1, Math.abs(object.quaternion.dot(to)))) < 1e-6) return false;
+    undoSnapshot = takeSnapshot();
+    clearMotionState();
+    upright = { from: object.quaternion.clone(), to, t0: null, ms: Math.max(0, ms) };
+    return true;
+  }
+  function stepUpright(t) {
+    if (mode !== MODE.IDLE) { upright = null; return; }
+    if (upright.t0 === null) upright.t0 = t;
+    const k = upright.ms > 0 ? THREE.MathUtils.clamp((t - upright.t0) / upright.ms, 0, 1) : 1;
+    if (k >= 1) { object.quaternion.copy(upright.to); upright = null; return; }
+    object.quaternion.slerpQuaternions(upright.from, upright.to, k * k * (3 - 2 * k));
   }
 
   // Puts back the pose from just before the last reset. One step: a second undo does nothing
@@ -764,6 +822,7 @@ export function createManipulator(object, camera) {
   // from update() (camera rate) and from tick() (display rate); a timestamp at or before the
   // last one is ignored, so mixing the two clocks can never run time backwards.
   function advance(timestampMs) {
+    if (upright) stepUpright(timestampMs);
     if (lastAdvanceTime === null) { lastAdvanceTime = timestampMs; return; }
     let dt = (timestampMs - lastAdvanceTime) / 1000;
     // A clock that jumped far backwards was restarted (a caller reusing timestamps, a new
@@ -806,11 +865,15 @@ export function createManipulator(object, camera) {
     // Rotation. World axes for the object (pitch should mean "tip toward/away from the
     // camera" however much it is already spun); local axes for a part (see rotateTarget).
     const dSpin = step(s.ch.spin, 'spin');
-    if (dSpin) rotateTarget(target, AXIS_Y, dSpin);
+    if (dSpin) {
+      rotateTarget(target, AXIS_Y, dSpin);
+      if (useV2 && s.tilt) spinTiltRefs(target, s.tilt, dSpin);
+    }
     const dPitch = step(s.ch.pitch, 'pitch');
     if (dPitch) rotateTarget(target, AXIS_X, dPitch);
     const dRoll = step(s.ch.roll, 'roll');
     if (dRoll) rotateTarget(target, AXIS_Z, dRoll);
+    if (useV2) advanceTiltV2(target, s, dt, decay);
 
     // Push/pull: always the whole object, along the real camera-to-object line (so it still
     // behaves after the view has been orbited), in ln(distance) units.
@@ -835,14 +898,30 @@ export function createManipulator(object, camera) {
       target.scale.z = THREE.MathUtils.clamp(target.scale.z * f, MIN_SCALE, MAX_SCALE);
       settleClamp(s.ch.scale, Math.log(target.scale.x / before) - dScale);
     }
+    // v2 vertical spread: height only.
+    if (useV2) {
+      const dStretch = step(s.ch.stretchY, 'scale');
+      if (dStretch) {
+        const before = target.scale.y;
+        target.scale.y = THREE.MathUtils.clamp(before * Math.exp(dStretch), MIN_SCALE, MAX_SCALE);
+        settleClamp(s.ch.stretchY, Math.log(target.scale.y / before) - dStretch);
+      }
+    }
 
     // Explode.
-    const dExplode = step(explodeCh, 'explode');
+    const dExplode = useV2 && literalMode ? stepExplodeV2(step) : step(explodeCh, 'explode');
     if (dExplode) {
       if (literalMode) {
         explodeLiteralV += dExplode;
         const next = THREE.MathUtils.clamp(explodeLiteralV, 0, 1);
-        if (next !== explodeAmount) {
+        if (next !== explodeAmount && useV2) {
+          // v2: move each part by the CHANGE only, so a part grabbed and moved while exploded keeps
+          // its edit through a slow close (owner 2026-10-02: assemble keeps edits).
+          const dA = (next - explodeAmount) * MAX_EXPLODE_OFFSET;
+          explodeAmount = next;
+          for (const part of explodeParts) part.position.addScaledVector(part.userData.explodeDir, dA);
+          if (explodeSession) explodeSession.maxAmount = Math.max(explodeSession.maxAmount, explodeAmount);
+        } else if (next !== explodeAmount) {
           explodeAmount = next;
           for (const part of explodeParts) {
             part.position.copy(part.userData.explodeHome).addScaledVector(part.userData.explodeDir, explodeAmount * MAX_EXPLODE_OFFSET);
@@ -858,6 +937,17 @@ export function createManipulator(object, camera) {
         if (next !== prev) object.scale[axis] *= Math.exp(next - prev);
       }
     }
+  }
+
+  // v2 literal explode: the follow step, but a tiny slow tail finishes at once (V2.EXPLODE_SNAP).
+  function stepExplodeV2(step) {
+    const c = explodeCh, e = c.cmd - c.out;
+    if (e !== 0 && !c.coast && Math.abs(e) < V2.EXPLODE_SNAP && Math.abs(c.vel) < V2.EXPLODE_SNAP_VEL) {
+      c.out = c.cmd;
+      c.vel = 0;
+      return e;
+    }
+    return step(c, 'explode');
   }
 
   // A limit was hit: move the command and output to where the model really is and stop,
@@ -882,6 +972,11 @@ export function createManipulator(object, camera) {
     },
 
     reset: performReset,
+
+    // Hands v2 Done with no tool on: ease the model back upright (keeps position, scale and its
+    // turn about the vertical); undo puts the tilt back. -> true when it started an ease.
+    snapUpright,
+    get uprighting() { return upright !== null; },
 
     // One-step undo of the last reset (a misfired clap, the R key, the Reset button). Kept
     // on the API so a future gesture (e.g. a held thumbs-down) can call it too.
@@ -933,6 +1028,31 @@ export function createManipulator(object, camera) {
 
     get parts() {
       return literalMode ? explodeParts.slice() : [];
+    },
+
+    // v2 height readout: the model's world-space height (bounding box) and its height-only
+    // stretch relative to home proportions (1 = untouched; vertical two-hand spread changes it).
+    get height() {
+      object.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(object);
+      const stretch = (object.scale.y / object.scale.x) / (home.scale.y / home.scale.x);
+      return { world: box.isEmpty() ? 0 : box.max.y - box.min.y, stretch };
+    },
+
+    // v2 per-person clap thresholds (calibration v2 profile.thresholds). Only finite numbers in
+    // the known keys are taken: { CLAP_ARM_SPAN, CLAP_CONTACT_SPAN, CLAP_V_MIN }. Returns the values
+    // in force. Harmless with v2 off (v1 clap ignores them).
+    setThresholds(patch = {}) {
+      for (const k of Object.keys(clapT)) {
+        const v = patch?.[k];
+        if (Number.isFinite(v) && v >= 0) clapT[k] = v;
+      }
+      return { ...clapT };
+    },
+
+    // Whether this manipulator runs the v2 two-hand behaviours (fixed at creation).
+    get v2() {
+      return useV2;
     },
 
     // Ranked parts around a screen point, for bubble targeting and hold-again cycling.
@@ -1071,6 +1191,7 @@ export function createManipulator(object, camera) {
       if (!(dt > 0)) dt = 1 / 60;
       dt = Math.min(dt, 0.25);
       lastUpdateTime = timestampMs;
+      v2Now = timestampMs;
 
       const twoHanded = hands.length === 2 && hands.every((h) => h.pinch?.pinching);
       // isFistLike trusts MediaPipe's own classifier when it has a confident opinion
@@ -1086,14 +1207,14 @@ export function createManipulator(object, camera) {
       }
       for (const k of [...pinchLatch]) if (!hands.some((h) => (h.handedness ?? '?') === k)) pinchLatch.delete(k);
       const latched = (h) => pinchLatch.has(h.handedness ?? '?');
-      const fisted = hands.some((h) => fistOf(h, aspect) && !latched(h));
+      const fisted = hands.some((h) => fistOfM(h, aspect) && !latched(h));
       const pointing = hands.some((h) => h.pointer?.gun === true || latched(h));
       // Explode's trigger occupies a hand-shape space disjoint from both pinch (transform)
       // and fist (grab) on purpose — two open hands, neither pinching nor fisted. Nor
       // pointing: once a pointer stopped reading as a fist, "pointer + relaxed other hand"
       // would otherwise have become explode, and aiming moves the hands apart.
       const openHanded =
-        hands.length === 2 && hands.every((h) => !fistOf(h, aspect) && !h.pinch?.pinching && isOpenForExplode(h));
+        hands.length === 2 && hands.every((h) => !fistOfM(h, aspect) && !h.pinch?.pinching && isOpenForExplode(h));
 
       // Each mode is gated on its channel being armed, so practice mode can silence a
       // gesture completely rather than merely ignoring its effect.
@@ -1134,12 +1255,14 @@ export function createManipulator(object, camera) {
       // checkClap still runs on every two-hand frame so its speed tracking stays continuous;
       // a blocked clap keeps its arm (E3).
       let clapped = false;
-      if (hands.length !== 2) {
+      if (useV2) {
+        clapped = on('clap') && checkClapV2(hands, aspect, timestampMs);
+      } else if (hands.length !== 2) {
         // Approach-then-merge (E1): the hands were closing fast and near, and one vanished at
         // contact; the hand left must be open (a fist or pointer is a different gesture).
         const h = hands[0];
         clapped = hands.length === 1 && on('clap') && clapApproach !== null &&
-          timestampMs - clapApproach.t <= CLAP_MERGE_MS && !fistOf(h, aspect) && !h.pinch?.pinching;
+          timestampMs - clapApproach.t <= CLAP_MERGE_MS && !fistOfM(h, aspect) && !h.pinch?.pinching;
         // Clap speed is only measured across consecutive two-hand frames. Keeping the last
         // sample across a dropout made hands that left the frame apart and came back close
         // together read as a fast close, and reset the model out of nothing.
@@ -1155,7 +1278,16 @@ export function createManipulator(object, camera) {
         if (clapped && atRest && allowed(CLAP) && !pointing) {
           clapArmed = false;
           clapApproach = null;
-          performReset();
+          if (useV2) {
+            clap2.hist = [];
+            clap2.approachT = null;
+            clap2.cooldownUntil = timestampMs + V2.CLAP_COOLDOWN_MS;
+            // Clap during explode = the ORIGINAL model's parts (view kept); otherwise reset view.
+            if (literalMode && explodedForClap()) restoreOriginalParts();
+            else performReset();
+          } else {
+            performReset();
+          }
           lastAdvanceTime = timestampMs;
           // A clap ends like any gesture: the hands it leaves together and open are the
           // explode pose, so separating them afterwards must not explode the fresh reset.
@@ -1210,6 +1342,8 @@ export function createManipulator(object, camera) {
 
       if (mode !== MODE.IDLE) gap = null;
       else if (prevMode !== MODE.IDLE) startGap(prevMode, timestampMs);
+      // v2: a flick coasts until any other gesture takes the model (a new grab stops it in commandGrab).
+      if (useV2 && (mode === MODE.TRANSFORM || mode === MODE.EXPLODE)) for (const st of targetStates.values()) st.flick = null;
 
       advance(timestampMs);
       return mode;
@@ -1243,7 +1377,7 @@ export function createManipulator(object, camera) {
     const s = stateFor(target);
     const os = target === object ? s : stateFor(object); // depth always on the object
 
-    const fists = hands.filter((h) => fistOf(h, aspect));
+    const fists = hands.filter((h) => fistOfM(h, aspect));
     const hand = nearestTo(fists.length ? fists : hands, s.lastWrist);
     const wrist = wristOf(hand);
     const palm = palmLength(hand.landmarks, aspect);
@@ -1269,6 +1403,7 @@ export function createManipulator(object, camera) {
       s.sig = { x: newSignal(wrist.x), y: newSignal(wrist.y), twist: newSignal(s.twistAccum) };
       if (logPalm !== null) os.sig.palm = newSignal(logPalm);
       for (const k of GRAB_CHANNELS) { s.ch[k].coast = 0; os.ch[k].coast = 0; }
+      if (useV2) s.flick = null;
       s.lastWrist = { x: wrist.x, y: wrist.y };
       s.tiltBase = { pitch: s.ch.pitch.cmd, roll: s.ch.roll.cmd };
     }
@@ -1289,7 +1424,9 @@ export function createManipulator(object, camera) {
     const tw = takeUpSlack(s.sig.twist, s.twistAccum, TWIST_DEADZONE, MAX_TWIST_PER_SECOND, dt);
     if (on('spin')) s.ch.spin.cmd += tw * sens;
 
-    if (pitchHand) {
+    if (useV2) {
+      tiltV2(target, s, pitchHand, aspect, dt);
+    } else if (pitchHand) {
       const pw = wristOf(pitchHand);
       if (!s.sig.px) {
         // The second hand just appeared: take its reference, no motion.
@@ -1341,6 +1478,7 @@ export function createManipulator(object, camera) {
   // Two pinching hands: the change in their span, as a ratio, scales the target by that
   // ratio (hands twice as far apart = twice the size).
   function commandTransform(target, hands, aspect, dt) {
+    if (useV2) return commandTransformV2(target, hands, aspect, dt);
     const s = stateFor(target);
     // Normalised by the HELD palm length (see PALM_REF_DEADZONE), captured when the pinch
     // engages and updated only past its own deadzone, so palm noise stays out of the span.
@@ -1375,6 +1513,7 @@ export function createManipulator(object, camera) {
   // like pinch-scale. Commanded from the change in span with a deadzone, so a still pair of
   // hands can no longer ratchet the stretch upward against its floor (BUGS #11).
   function commandExplode(hands, aspect, dt) {
+    if (useV2 && literalMode) return commandExplodeV2(hands, aspect, dt);
     const span = handSpan(hands[0], hands[1], aspect);
     if (!(span > 0)) return;
     const wristA = wristOf(hands[0]);
@@ -1412,8 +1551,447 @@ export function createManipulator(object, camera) {
     const d = takeUpSlack(explodeSig, span, EXPLODE_DEADZONE, MAX_EXPLODE_SPAN_RATE_PER_SECOND, dt);
     explodeCh.cmd += d * EXPLODE_SENSITIVITY * settings.sensitivity;
   }
+
+  // ---- v2 two-hand behaviours (see the V2 block at the end of this file) ----
+
+  // Tilt: the second (open) hand's palm-frame rotation since it engaged, boosted, applied
+  // ABSOLUTELY to the model's rotation at engage (never accumulated, so a still hand = a still
+  // model and nothing drifts). Closing that hand = ratchet: re-baseline from where the model is.
+  function tiltV2(target, s, pitchHand, aspect, dt) {
+    if (!on('tilt')) return;
+    const t = s.tilt;
+    const open = !!pitchHand && !fistOfM(pitchHand, aspect);
+    const raw = open ? handFrameQ(pitchHand) : null;
+    s.lastPitchWrist = pitchHand ? { x: wristOf(pitchHand).x, y: wristOf(pitchHand).y } : null;
+    if (!pitchHand || (open && !raw)) {
+      // Second hand gone (or no 3D): let go of the tilt; a fast turn flicks.
+      if (t?.q0) { trimReleaseGlitch(t); if (!flickFromTilt(s)) pauseTilt(t); }
+      return;
+    }
+    if (!open) { if (t?.q0) pauseTilt(t); return; } // ratchet: hand closed
+    if (!t || !t.q0) {
+      // Engage (or re-engage after a ratchet): baseline = what the model is commanded to be now.
+      const base = t ? t.qT.clone() : target.quaternion.clone();
+      s.flick = null;
+      s.tilt = {
+        q0: raw.clone(), base, qT: base.clone(), lastRaw: raw.clone(), dMp: new THREE.Quaternion(),
+        omega: 0, hist: [{ t: v2Now, q: base.clone() }], paused: false,
+        limit: Math.max(V2.TILT_PITCH_LIMIT_DEG * D2R, Math.abs(pitchOf(base)))
+      };
+      return;
+    }
+    // Tracking jump (a label swap, a mis-fit frame): keep the current Δ, re-anchor q0 under it.
+    const jump = quatAngle(raw, t.lastRaw);
+    t.lastRaw.copy(raw);
+    if (jump > V2.TILT_JUMP_MIN_RAD && jump > V2.TILT_JUMP_RAD_S * dt) {
+      t.q0 = t.dMp.clone().invert().multiply(raw);
+      return;
+    }
+    t.dMp = raw.clone().multiply(t.q0.clone().invert());
+    const { axis, angle } = axisAngle(mpToView(t.dMp));
+    const boosted = new THREE.Quaternion().setFromAxisAngle(axis, tiltBoost(angle) * settings.sensitivity);
+    let qT;
+    if (target === object) {
+      qT = boosted.multiply(t.base);
+      limitPitch(qT, t.limit);
+    } else {
+      // A part's rotation is local to the (possibly rotated) model: express the view-space turn there.
+      const po = object.quaternion;
+      qT = po.clone().invert().multiply(boosted).multiply(po).multiply(t.base);
+    }
+    // Smoothing speed = the lower of the last two frame speeds: one glitched frame can't open the
+    // filter (break-it B1b: a 25 deg one-frame glitch twitched the model 29 deg).
+    const wNow = dt > 0 ? quatAngle(qT, t.qT) / dt : 0;
+    t.omega = Math.min(wNow, t.wPrev ?? 0);
+    t.wPrev = wNow;
+    t.qT.copy(qT);
+    t.hist.push({ t: v2Now, q: qT.clone() });
+    while (t.hist.length > 2 && v2Now - t.hist[0].t > 3 * V2.FLICK_WINDOW_MS) t.hist.shift();
+  }
+
+  function pauseTilt(t) {
+    t.base = t.qT.clone();
+    t.q0 = null;
+    t.paused = true;
+  }
+
+  // A hand leaving the frame often distorts its last fit: drop a last step that is both large and
+  // far bigger than the one before it, so the model doesn't keep that turn (break-it B2).
+  function trimReleaseGlitch(t) {
+    const h = t.hist;
+    if (h.length < 3) return;
+    const a1 = quatAngle(h[h.length - 1].q, h[h.length - 2].q);
+    const a0 = quatAngle(h[h.length - 2].q, h[h.length - 3].q);
+    if (a1 > V2.RELEASE_TRIM_DEG * D2R && a1 > 3 * a0) {
+      h.pop();
+      t.qT.copy(h[h.length - 1].q);
+    }
+  }
+
+  // Release speed over the last FLICK_WINDOW_MS of the commanded rotation; fast enough = coast.
+  // Sustained: the window without its last frame must be fast too, so one late frame can't flick.
+  function flickFromTilt(s) {
+    const t = s.tilt;
+    if (!settings.momentum || !t || t.hist.length < 3) return false;
+    const speed = (end) => {
+      const last = t.hist[end];
+      let ref = t.hist[0];
+      for (let i = 0; i <= end; i++) if (last.t - t.hist[i].t >= V2.FLICK_WINDOW_MS) ref = t.hist[i];
+      const secs = (last.t - ref.t) / 1000;
+      if (!(secs >= 0.03)) return null;
+      const { axis, angle } = axisAngle(last.q.clone().multiply(ref.q.clone().invert()));
+      return { axis, w: angle / secs };
+    };
+    const full = speed(t.hist.length - 1);
+    const early = speed(t.hist.length - 2);
+    if (!full || !early || !(full.w >= V2.FLICK_MIN_RAD_S) || !(early.w >= V2.FLICK_MIN_RAD_S)) return false;
+    const { axis, w } = full;
+    s.flick = { axis, w, limit: t.limit };
+    s.tilt = null;
+    return true;
+  }
+
+  // A fist twist (spin channel) during a tilt turns the tilt's references with the model.
+  function spinTiltRefs(target, t, angle) {
+    const r = new THREE.Quaternion().setFromAxisAngle(AXIS_Y, angle);
+    if (target === object) { t.base.premultiply(r); t.qT.premultiply(r); } else { t.base.multiply(r); t.qT.multiply(r); }
+  }
+
+  // Display-rate follow: adaptive slerp toward the commanded rotation (Ricky §6: fc = 1 + 2·ω Hz),
+  // then any flick coasting with the same half-life as every other channel.
+  function advanceTiltV2(target, s, dt, decay) {
+    const t = s.tilt;
+    if (t) {
+      const fc = V2.TILT_FC0_HZ + V2.TILT_FC_PER_RAD * (t.omega || 0);
+      const a = 1 - Math.exp(-2 * Math.PI * fc * dt);
+      const left = quatAngle(target.quaternion, t.qT);
+      if (left < 1e-6) target.quaternion.copy(t.qT);
+      else target.quaternion.slerp(t.qT, a);
+      if (t.paused && left < 1e-4) { target.quaternion.copy(t.qT); s.tilt = null; }
+    }
+    const f = s.flick;
+    if (f) {
+      target.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(f.axis, f.w * dt));
+      if (target === object) limitPitch(target.quaternion, f.limit);
+      f.w *= decay;
+      if (f.w < V2.FLICK_STOP_RAD_S) s.flick = null;
+    }
+  }
+
+  // Two pinching hands: side by side = uniform size (as v1, without the vertical gain); stacked
+  // (|angle| > 55 deg, decided when the pinch engages and sticky for the gesture) = height only.
+  function commandTransformV2(target, hands, aspect, dt) {
+    const s = stateFor(target);
+    const palm = (palmLength(hands[0].landmarks, aspect) + palmLength(hands[1].landmarks, aspect)) / 2;
+    if (!(palm > 0)) return;
+    const logPalm = Math.log(palm);
+    if (!s.spanSig) {
+      s.palmSig = newSignal(logPalm);
+      s.spanSig = newSignal(handSpan(hands[0], hands[1], aspect, { palm }));
+      s.ch.scale.coast = 0;
+      s.ch.stretchY.coast = 0;
+      const a = wristOf(hands[0]);
+      const b = wristOf(hands[1]);
+      s.scaleVertical = Math.atan2(Math.abs(a.y - b.y), Math.abs(a.x - b.x) * aspect) > V2.SCALE_VERTICAL_DEG * D2R;
+      return;
+    }
+    takeUpSlack(s.palmSig, logPalm, PALM_REF_DEADZONE, MAX_DEPTH_RATIO_PER_SECOND, dt);
+    const span = handSpan(hands[0], hands[1], aspect, { palm: Math.exp(s.palmSig.anchor) });
+    if (!(span > 0)) return;
+    const jumped = Math.abs(Math.log(span / s.spanSig.last)) > MAX_SPAN_RATIO_PER_SECOND * dt;
+    const d = takeUpSlack(s.spanSig, span, SCALE_DEADZONE, jumped ? 0 : Infinity, dt);
+    const from = s.spanSig.anchor - d;
+    if (d && from > 0) {
+      const k = Math.log(s.spanSig.anchor / from) * settings.sensitivity;
+      if (s.scaleVertical) s.ch.stretchY.cmd += k;
+      else s.ch.scale.cmd += k;
+    }
+  }
+
+  // Literal explode/assemble: amount = f(span / span0) both ways for the whole EXPLODE state.
+  // span0 is back-solved on entry so re-engaging an exploded model never jumps; closing past it
+  // while assembled re-anchors it (the next spread counts from the closest point).
+  function commandExplodeV2(hands, aspect, dt) {
+    const span = handSpan(hands[0], hands[1], aspect);
+    if (!(span > 0)) return;
+    const lnDead = Math.log(V2.EXPLODE_DEAD_RATIO);
+    const lnFull = Math.log(V2.EXPLODE_FULL_RATIO);
+    if (!explodeSig) {
+      const a = explodeAmount;
+      explodeSig = { span0: a > 0 ? span * Math.exp(-(lnDead + a * (lnFull - lnDead))) : span, last: span };
+      explodeCh = { cmd: a, out: a, vel: 0, coast: 0 };
+      explodeLiteralV = a;
+      if (!explodeSession) explodeSession = { snapshot: takeSnapshot(), maxAmount: a };
+      if (!originalParts && a === 0) originalParts = explodeParts.map((p) => [p.position.clone(), p.quaternion.clone(), p.scale.clone()]);
+      return;
+    }
+    const jr = Math.log(span / explodeSig.last);
+    explodeSig.last = span;
+    if (Math.abs(jr) > MAX_SPAN_RATIO_PER_SECOND * dt) { explodeSig.span0 *= Math.exp(jr); return; }
+    const r = Math.log(span / explodeSig.span0);
+    if (r < 0 && explodeCh.cmd <= 0) explodeSig.span0 = span;
+    explodeCh.cmd = THREE.MathUtils.clamp((r - lnDead) / (lnFull - lnDead), 0, 1);
+  }
+
+  // "During explode" for the clap: parts visibly apart now or earlier in this explode state (a
+  // fast clap's own close assembles some of the way first). EPS: the follow spring only reaches
+  // 0 asymptotically, and a leftover 1e-5 must not turn a later clap into "restore original".
+  function explodedForClap() {
+    const EPS = 0.01;
+    return explodeAmount > EPS || (explodeSession?.maxAmount ?? 0) > EPS;
+  }
+
+  // The explode state ended: if it changed the explode, undo puts back the pose from before it.
+  function endExplodeSession() {
+    const sess = explodeSession;
+    explodeSession = null;
+    if (Math.abs(explodeAmount - sess.snapshot.explodeAmount) > 1e-6) undoSnapshot = sess.snapshot;
+  }
+
+  // Clap during explode: every part back to its ORIGINAL transform (snapshot at the first explode),
+  // the model's own position/rotation/scale kept. Undoable (back to the exploded, edited state).
+  function restoreOriginalParts() {
+    undoSnapshot = takeSnapshot();
+    resetCount++;
+    clearMotionState();
+    explodeAmount = 0;
+    explodeLiteralV = 0;
+    activePart = null;
+    explodeParts.forEach((part, i) => {
+      const o = originalParts?.[i];
+      part.position.copy(o ? o[0] : part.userData.explodeHome);
+      part.quaternion.copy(o ? o[1] : part.userData.explodeHomeQuaternion);
+      part.scale.copy(o ? o[2] : part.userData.explodeHomeScale);
+    });
+    originalParts = null;
+  }
+
+  // Clap v2 (Ricky §5): armed by span >= 2.0 palms in the last 1.2 s; fires at span <= 1.2 or on
+  // the merge rule; palms must face each other; no speed floor (except CLAP_EXPLODED_MIN_SPEED
+  // while parts are exploded); survives <= 2 dropped frames; a brief pinch/fist misread doesn't
+  // disarm. Spans from RAW wrists. The caller spends the arm and starts the cooldown on firing.
+  function checkClapV2(hands, aspect, t) {
+    const c = clap2;
+    if (hands.length === 2) {
+      if (hands.some((h) => h.pinch?.pinching || fistOfM(h, aspect))) {
+        c.approachT = null;
+        if (c.glitchSince === null) c.glitchSince = t;
+        if (t - c.glitchSince >= V2.CLAP_GLITCH_MS) { c.hist = []; c.last = null; }
+        return false;
+      }
+      c.glitchSince = null;
+      const span = rawSpan(hands[0], hands[1], aspect);
+      if (!(span > 0)) return false;
+      c.dropped = 0;
+      c.hist.push({ t, span });
+      while (c.hist.length && t - c.hist[0].t > V2.CLAP_ARM_MS) c.hist.shift();
+      if (palmsFacing(hands[0], hands[1])) c.facingT = t;
+      const facing = c.facingT !== null && t - c.facingT <= V2.CLAP_FACING_MS;
+      let armAt = null;
+      for (let i = c.hist.length - 1; i >= 0; i--) if (c.hist[i].span >= clapT.CLAP_ARM_SPAN) { armAt = c.hist[i]; break; }
+      const closing = c.last !== null && span < c.last.span;
+      let fastEnough = true;
+      const floor = Math.max(clapT.CLAP_V_MIN, literalMode && explodedForClap() ? V2.CLAP_EXPLODED_MIN_SPEED : 0);
+      if (floor > 0 && armAt) {
+        const secs = (t - armAt.t) / 1000;
+        fastEnough = secs > 0 && (armAt.span - span) / secs >= floor;
+      }
+      c.last = { t, span };
+      const ready = armAt !== null && facing && fastEnough && t >= c.cooldownUntil;
+      c.approachT = ready && closing && span < V2.CLAP_MERGE_SPAN ? t : null;
+      return ready && span <= clapT.CLAP_CONTACT_SPAN;
+    }
+    let fired = false;
+    if (hands.length === 1 && c.approachT !== null && t - c.approachT <= V2.CLAP_MERGE_MS && t >= c.cooldownUntil) {
+      const h = hands[0];
+      fired = !fistOfM(h, aspect) && !h.pinch?.pinching;
+    }
+    c.dropped++;
+    if (c.dropped > V2.CLAP_MAX_DROPPED) { c.hist = []; c.last = null; c.approachT = null; }
+    return fired;
+  }
 }
 
 const AXIS_X = new THREE.Vector3(1, 0, 0);
 const AXIS_Y = new THREE.Vector3(0, 1, 0);
 const AXIS_Z = new THREE.Vector3(0, 0, 1);
+
+// ---------------------------------------------------------------------------------------------
+// HANDS V2 two-hand behaviours (plans/hands-v2/CONTRACT.md §3.3-3.4; Ricky's report §5-6; owner
+// decisions 2026-10-02). Active only when createManipulator(..., { v2: true }) or, by default,
+// gestures.handsV2Enabled() (?hands=v2 / localStorage 'hands.v2'='1'). With v2 off none of this
+// runs and the v1 code above behaves bit for bit as before.
+//
+// Every number is a starting value (synthetic hands only, no owner clips yet): tune on clips.
+export const V2 = Object.freeze({
+  // Tilt (second hand's palm frame, position control).
+  TILT_GAIN: 1.5,               // owner 2026-10-02: axis-angle x 1.5 ...
+  TILT_GAIN_FROM_DEG: 8,        // ... but no boost below ~8 deg of hand turn
+  TILT_DEADZONE_DEG: 4,         // soft: subtracted from the angle, the axis is kept (Ricky §6)
+  TILT_PITCH_LIMIT_DEG: 80,     // soft limit on tipping toward/away from the camera
+  TILT_PITCH_KNEE_DEG: 60,      // the soft limit starts easing here
+  TILT_FC0_HZ: 1.0,             // adaptive slerp: fc = FC0 + FC_PER_RAD * angular speed (rad/s)
+  TILT_FC_PER_RAD: 2.0,
+  TILT_JUMP_RAD_S: 15,          // a palm frame turning faster than this between frames is a tracking jump
+                                //   (deliberate wrist turns peak ~5-10 rad/s; Debbie break-it B2: 30 let a
+                                //   45 deg one-frame glitch through)
+  TILT_JUMP_MIN_RAD: 0.6,       // ... and only past this angle (35 deg) in one frame
+  FLICK_WINDOW_MS: 100,         // release speed measured over the last 100 ms
+  FLICK_MIN_RAD_S: 2.5,         // ~140 deg/s of model turn: below it, releasing just stops
+  FLICK_STOP_RAD_S: 0.12,       // coast ends below this
+  RELEASE_TRIM_DEG: 8,          // on release, a last step bigger than this AND 3x the one before is a
+                                //   glitch (a hand leaving the frame distorts its last fit): dropped
+  // Scale.
+  SCALE_VERTICAL_DEG: 55,       // hand-to-hand line steeper than this = height-only stretch
+  // Explode / assemble: amount = f(span / span0).
+  EXPLODE_DEAD_RATIO: 1.12,     // spans within 12% of span0 do nothing
+  EXPLODE_FULL_RATIO: 2.5,      // span0 x 2.5 = fully exploded
+  // Clap speed floor with no calibration profile (palms/s, last arming frame -> contact). Ricky §5
+  // had none; "this big" talking hands (palms facing, 2.2 -> 1.1 palms in 1 s) read ~1.1 and
+  // reset the view (Debbie break-it B9). The slowest clap check (2.5 -> 1.0 in 0.9 s) reads ~1.67.
+  CLAP_V_MIN_DEFAULT: 1.5,
+  // The absolute v2 command sits exactly AT its 0..1 limit, so the follow spring only reaches it
+  // asymptotically and its last few µm kept moving every part for ~10 frames after the hands
+  // left (test.js 'part B (not selected) does not move'; v1's accumulating command overshoots
+  // the clamp instead). A tail this small (amount units; x MAX_EXPLODE_OFFSET 0.6 m = 60 µm)
+  // and this slow finishes in one step: invisible, and a settled model is bit-still.
+  EXPLODE_SNAP: 1e-4,
+  EXPLODE_SNAP_VEL: 0.01,       // amount / s
+  // Clap (Ricky §5, no speed floor).
+  CLAP_ARM_SPAN: 2.0,           // palms, at some two-hand frame in the last CLAP_ARM_MS
+  CLAP_ARM_MS: 1200,
+  CLAP_FIRE_SPAN: 1.2,
+  CLAP_MERGE_SPAN: 2.5,         // the existing merge rule: closing + this near, then one hand lost ...
+  CLAP_MERGE_MS: 150,           // ... within this
+  CLAP_FACING_DOT: -0.5,        // palm normals opposed ...
+  CLAP_FACING_NX: 0.6,          // ... and both mostly sideways
+  CLAP_FACING_MS: 250,          // a facing reading this recent counts (normals smear at contact)
+  CLAP_MAX_DROPPED: 2,          // frames without two hands the arm survives
+  CLAP_COOLDOWN_MS: 600,
+  CLAP_GLITCH_MS: 100,          // a pinch/fist reading must hold this long to disarm
+  // Deviation (Debbie 2026-10-02, owner/overseer to confirm): while parts are exploded, a clap
+  // needs this average approach speed (palms/s), so a SLOW close with palms facing each other
+  // assembles (keeps edits) instead of firing "restore original". 0 = no floor anywhere.
+  CLAP_EXPLODED_MIN_SPEED: 3.0
+});
+
+const D2R = Math.PI / 180;
+
+function ptOf(p) {
+  if (!p) return null;
+  return Array.isArray(p) ? p : [p.x, p.y, p.z];
+}
+const v3sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const v3cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const v3unit = (a) => { const n = Math.hypot(a[0], a[1], a[2]); return n > 1e-12 ? [a[0] / n, a[1] / n, a[2] / n] : null; };
+
+// Palm frame from WORLD landmarks 0,5,9,13,17 (Ricky §6, same formula as handFeatures.js):
+// ŷ = norm(mean(5,9,13,17) − 0), n̂ = norm((5 − 17) × ŷ), x̂ = ŷ × n̂. -> { q, n } or null.
+// Local fallback for hands that have world landmarks but no hand.f (handFeatures not run).
+export function palmFrameFromWorld(world) {
+  if (!Array.isArray(world) || world.length !== 21) return null;
+  const w = [0, 5, 9, 13, 17].map((i) => ptOf(world[i]));
+  if (!w.every((p) => p && p.every(Number.isFinite))) return null;
+  const mean = [0, 1, 2].map((k) => (w[1][k] + w[2][k] + w[3][k] + w[4][k]) / 4);
+  const Y = v3unit(v3sub(mean, w[0]));
+  if (!Y) return null;
+  const N = v3unit(v3cross(v3sub(w[1], w[4]), Y));
+  if (!N) return null;
+  const X = v3cross(Y, N);
+  const m = new THREE.Matrix4().makeBasis(new THREE.Vector3(...X), new THREE.Vector3(...Y), new THREE.Vector3(...N));
+  return { q: new THREE.Quaternion().setFromRotationMatrix(m), n: N };
+}
+
+// handFeatures.js signs its normal out of the palm by handedness; the local fallback does the same.
+const PALM_SIGN_V2 = { Left: 1, Right: -1 };
+
+// The hand's palm-frame quaternion (MediaPipe world axes), or null when it has no usable 3D.
+// hand.f (handFeatures.js) wins; a hand.f without world data reports identity q with null curls,
+// which is NOT an orientation, so it falls through to the local helper / null.
+function handFrameQ(hand) {
+  const f = hand?.f;
+  if (f?.frame?.q && f.curl && f.curl.index != null) return new THREE.Quaternion(...f.frame.q);
+  return palmFrameFromWorld(hand?.worldLandmarks)?.q ?? null;
+}
+
+// Palm normal pointing out of the palm (MediaPipe world axes), or null.
+function handPalmNormal(hand) {
+  const f = hand?.f;
+  if (f?.frame?.normal && f.curl && f.curl.index != null) return f.frame.normal;
+  const pf = palmFrameFromWorld(hand?.worldLandmarks);
+  if (!pf) return null;
+  const s = PALM_SIGN_V2[hand.handedness] ?? -1;
+  return [pf.n[0] * s, pf.n[1] * s, pf.n[2] * s];
+}
+
+// MediaPipe world (x image-right, y down, z away from the camera) -> the view the user sees
+// (mirrored display: x = the user's right, y up, z toward the user). The map is diag(-1,-1,+1),
+// a proper rotation (180 deg about z), so a rotation about axis a becomes the same angle about
+// diag(-1,-1,1)·a: q (x,y,z,w) -> (-x,-y,z,w). "Tip the fingers toward the screen" therefore tips
+// the model's top INTO the screen. NOTE: Ricky §6 assumed three.js z = -MediaPipe z (−I, components
+// unchanged), which mirrors pitch and yaw (mirror semantics). Live check decides; one line to flip.
+export function mpToView(q) {
+  return new THREE.Quaternion(-q.x, -q.y, q.z, q.w);
+}
+
+// Hand turn angle (rad) -> model turn angle (rad): soft dead-zone, then x1.5 past ~8 deg.
+export function tiltBoost(theta) {
+  const dz = V2.TILT_DEADZONE_DEG * D2R;
+  const from = V2.TILT_GAIN_FROM_DEG * D2R;
+  return Math.max(0, theta - dz) + (V2.TILT_GAIN - 1) * Math.max(0, theta - from);
+}
+
+// Axis-angle of a quaternion, shortest way round. -> { axis: Vector3, angle >= 0 }
+function axisAngle(q) {
+  let { x, y, z, w } = q;
+  if (w < 0) { x = -x; y = -y; z = -z; w = -w; }
+  const s = Math.hypot(x, y, z);
+  const angle = 2 * Math.atan2(s, w);
+  return { axis: s > 1e-12 ? new THREE.Vector3(x / s, y / s, z / s) : new THREE.Vector3(1, 0, 0), angle };
+}
+
+function quatAngle(a, b) {
+  const d = Math.min(1, Math.abs(a.dot(b)));
+  return 2 * Math.acos(d);
+}
+
+// How far the model's up axis tips toward (+) / away from (−) the viewer, radians.
+function pitchOf(q) {
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+  return Math.asin(THREE.MathUtils.clamp(up.z, -1, 1));
+}
+
+// Soft pitch limit, in place: past the knee the tip eases toward `limit` and never passes it.
+// Spin about the vertical and roll in the screen plane leave the up axis' z alone, so they stay free.
+function limitPitch(q, limit) {
+  const knee = Math.min(V2.TILT_PITCH_KNEE_DEG * D2R, limit * 0.75);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+  const phi = Math.asin(THREE.MathUtils.clamp(up.z, -1, 1));
+  const a = Math.abs(phi);
+  if (a <= knee) return q;
+  const w = limit - knee;
+  const want = knee + w * Math.tanh((a - knee) / w);
+  const axis = new THREE.Vector3().crossVectors(up, AXIS_Z);
+  if (axis.lengthSq() < 1e-12) axis.copy(AXIS_X); else axis.normalize();
+  q.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, -Math.sign(phi) * (a - want)));
+  return q;
+}
+
+// Palms facing each other (Ricky §5): both normals mostly sideways and opposed. Two hands with
+// the same handedness label (a mislabel) can't be told palm from back, so only "sideways" counts.
+function palmsFacing(a, b) {
+  const na = handPalmNormal(a);
+  const nb = handPalmNormal(b);
+  if (!na || !nb) return false;
+  if (Math.abs(na[0]) <= V2.CLAP_FACING_NX || Math.abs(nb[0]) <= V2.CLAP_FACING_NX) return false;
+  if (a.handedness && a.handedness === b.handedness) return true;
+  return na[0] * nb[0] + na[1] * nb[1] + na[2] * nb[2] < V2.CLAP_FACING_DOT;
+}
+
+// Wrist-to-wrist span in palms from RAW landmarks when present (clap timing must not be smoothed).
+function rawSpan(a, b, aspect) {
+  const la = a.rawLandmarks ?? a.landmarks;
+  const lb = b.rawLandmarks ?? b.landmarks;
+  if (!la?.[0] || !lb?.[0] || !la[9] || !lb[9]) return 0;
+  return handSpan({ landmarks: la }, { landmarks: lb }, aspect);
+}
