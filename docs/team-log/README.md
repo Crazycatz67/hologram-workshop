@@ -3,6 +3,7 @@
 Newest first. Rounds live in `YYYY-MM-DD.md`; longer write-ups in `reports/`.
 
 ## Rounds
+- 2026-10-02 — Round 1, Hands v2 round 1 (plan, owner decisions, parts and wiring; Timmy gate pending) — [2026-10-02.md](2026-10-02.md)
 - 2026-10-01 — Round 5, Owner live feedback → selection, UI, polygon, Platform hands, Track B real data; session close — [2026-10-01.md](2026-10-01.md)
 - 2026-10-01 — Round 4, Owner's first live test; photo → 3D + pointer fixes — [2026-10-01.md](2026-10-01.md)
 - 2026-10-01 — Round 3, Test recorder, shadow site, library ring + store, depth pre-pass — [2026-10-01.md](2026-10-01.md)
@@ -10,6 +11,7 @@ Newest first. Rounds live in `YYYY-MM-DD.md`; longer write-ups in `reports/`.
 - 2026-09-30 — Round 1, B1 beyond the chair (Track B) + side requests — [2026-09-30.md](2026-09-30.md)
 
 ## Reports
+- 2026-10-02 — Ricky: input parameters for Hands v2 — [reports/2026-10-02-ricky-input-params.md](reports/2026-10-02-ricky-input-params.md)
 - 2026-09-30 — Library ring selector (research) — [reports/2026-09-30-library-ring-selector.md](reports/2026-09-30-library-ring-selector.md)
 - 2026-09-30 — Gesture scheme (Engage → Aim → Act) and the finger gun — [reports/2026-09-30-gesture-scheme-and-finger-gun.md](reports/2026-09-30-gesture-scheme-and-finger-gun.md)
 - 2026-09-30 — Polygon mode: a "polygon lens" for real triangles (research) — [reports/2026-09-30-polygon-mode.md](reports/2026-09-30-polygon-mode.md)

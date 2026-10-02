@@ -36,7 +36,11 @@ you need.
   REAL camera; incident 2026-10-01).
 - Never commit, push or send. The overseer commits after Timmy's GREEN.
 
-## Current state (2026-10-01)
+## Current state (2026-10-02)
+- **New focus: Hands v2** (make gestures seamless). Plan: `plans/hands-v2/ROADMAP.md`. Round 1 = Phase 0 + Phase 1 design.
+- **Round 1 owners:** Cody = clip-lab/replay (Phase 0); Ricky = params report; overseer = `handFeatures.js` / `inputArbiter.js` contract.
+- **Hands v2 owner decisions (2026-10-02):** click = finger-gun thumb hammer drop, with pre-onset rewind; Done = one open palm held still ~0.6 s + a Done button; vertical spread = stretch height only; explode slow close keeps edits, clap during explode = original model.
+- Earlier state (2026-10-01) below.
 - Last commits: see `git log`.
 - **New modules:** `handsRuntime.js` (shared hand control: camera, tracker, pointer, calibration; runs
   in the host loop), `platform/hands.js` (Platform adapter: Camera button, hover/select via objectMode),

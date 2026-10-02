@@ -362,3 +362,26 @@ Send back: pass/fail per step number (1-13), plus a note on tilt flip and whethe
 
 Flags: (1) hands-test B4 is FLAKY not real: on a cold browser profile the three-mesh-bvh CDN module isn't loaded within the test's 1 s wait (built=0); app falls back to a plain raycast. Test should poll longer (platform/hands-test.js:157). (2) W key opens the tool wheel on hologram.html, but it closes itself after ~0.7 s ('rest', toolWheel.js WHEEL.restMs, point() with no hands); a click within 0.7 s works (Tape picked). Mouse/keyboard users get no time. Platform W needs the camera runtime (null otherwise). (3) Rebuild the chair: in 3 of 9 scripted mouse runs the part "runner - left" ended unmovable (drags did nothing, dist stuck); never reproduced with extra logging on, so driver timing is possible; not confirmed as a game bug.
 Not verified: real hands, wheel by hand, feel of the 75 degree limit, photosafety by eye.
+
+## Pass for Hands v2 round 1, 2026-10-02 (Timmy), working tree (no git), own :8099 + own headless Chrome via CDP (1400 px, fake camera; the extension tab was hidden and too slow for rAF suites). Verdict: GREEN for commit (all requested suites 0 failed in both modes) with 3 flags.
+| Suite | plain | ?hands=v2 |
+| --- | --- | --- |
+| test.html | 539 / 0 | 477 / 0 + 56 skipped (v1-only) |
+| toolwheel-test | 31 / 0 | 31 / 0 + 1 skipped (F3 v1-only; F3v2 runs) |
+| library-test | 72 / 0 | 72 / 0 |
+| ring-test | 74 / 0 | 74 / 0 |
+| p5-test | 24 / 0 | 24 / 0 |
+| polygon-test | 43 / 0 | 43 / 0 |
+| platform/hands-test | 55 / 0 | 55 / 0 |
+| guideHand-test | 54 / 54 | 54 / 54 |
+| holdgate-lab | 19 / 19 | 19 / 19 |
+| gun-lab self-test | 45 / 0 | 45 / 0 |
+| replay-lab | PASS, 320 runs, semi-real + synthetic PASS, no owner clips | page has no v2 switch: identical numbers (not a v2 measurement) |
+| smoothing-lab | done; cursor lag move 0.3/s 33 -> 15 ms (30 fps), slow 0.1/s 33 -> 30 | same |
+| gesture-lab | all 7 fire | tilt and clap do NOT fire on the v1 canonical synthetic motions (needs v2-shaped motion; flag) |
+| hand-model-test | 24 / 0 | 24 / 0 |
+| handui-test | 28 / 0 | **13 / 15 failed** (B1, B4, C1, C4, D1, D2 ...: pointer v1 semantics, cursor stays 0,0; flag) |
+| clip-lab | loads, 0 errors | loads, 0 errors |
+Page loads (index, hologram, platform/index, guide, demos/play) at 1400 and 375 px, plain and v2: 0 console errors, no horizontal scroll (one hologram.html 1400 NotReadableError on the fake camera, not reproduced on 2 re-runs). library-test logs 2 expected 404/blob lines (deliberate).
+Platform chip: landing shows "🎠 Library ring", Done hidden; polygon shows "🔷 Polygon" (its own bar carries Done, #doneBtn hidden by design); exitTool() works. Flag: after clicking Sample the ring STAYS open over the loaded Chair (chip still Library ring, no Done; only Esc/exitTool closes it); openProject has no lib.ring.close().
+Not run: live camera, replay v2 numbers, clip recorder, owner clips, safety-test, perf, demos games.

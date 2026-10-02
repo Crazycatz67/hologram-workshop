@@ -737,3 +737,30 @@ new tracker on every start and `stop()` never closed it.
 - **Fix:** gestures.js `NOT_OPEN_GESTURES`/`isOpenForExplode` (Victory, Pointing_Up, Thumb_Down never open). manipulator.js commandExplode: nothing moves until a deliberate spread from the stable start: ≥2.5 palms at ≥6 palms/s (timed from leaving the start deadzone), or ≥5 palms at any speed (`EXPLODE_START_SPREAD`, `EXPLODE_MIN_SPREAD_SPEED`, `EXPLODE_FAR_SPREAD`). Closing or holding still never counts; after the spread, closing un-explodes as before.
 - **Regression check:** test.js group "Explode bleed — only a deliberate spread explodes" (4 checks fail on the old code; plus slow-wide-spread and still-hold-then-spread positives). replay-lab gate PASS both sets.
 - **Still to confirm:** live: a normal explode still fires first try; small spreads (<~2.5 palms, gesture-lab "smallest amplitude" 10% → 50%) no longer explode; vigorous hand-waving (±7% frame at ~1 Hz) can still trigger it. Thresholds are synthetic/Kaggle-shape provisional.
+
+## 58. [A-v1] Hands v2 tilt: one bad palm fit turns, twitches or flicks the model
+
+**Status: FIXED (verified offline)** (2026-10-02). Found by Debbie's break-it pass on the new v2 tilt (unreleased, `?hands=v2` only).
+- **Symptom:** a single distorted frame as the second hand leaves the view flicked the model to 162° (25° glitch) or left it turned 33° (45° glitch); a 25° one-frame glitch with the hand still up twitched the model 29.5°.
+- **Reproduction:** test-v2-manip.js "glitch on the leaving frame" / "one-frame glitch, hand stays" (synthetic, 30 fps).
+- **Root cause:** manipulator.js v2 tilt: the jump guard (`V2.TILT_JUMP_RAD_S` 30) let 45°/frame through; the flick speed came from a window dominated by the last frame; the adaptive slerp's speed came from that same frame.
+- **Fix:** jump guard 15 rad/s; on release, a last step >8° and >3× the step before it is dropped (`trimReleaseGlitch`); a flick must be fast with and without the last frame; smoothing speed = the lower of the last two frame speeds.
+- **Regression check:** test-v2-manip.js (4 checks; pre-fix 162°/33°/29.5°, now 0°/0°/5.6° peak).
+- **Still to confirm:** live: real hands leaving the frame mid-tilt; a 5.6° twitch on a 25° glitch remains.
+
+## 59. [A-v1] Hands v2: exploded parts creep for ~10 frames after the hands leave
+
+**Status: FIXED (verified offline)** (2026-10-02). Found by Cody-T wiring test.js under `?hands=v2`.
+- **Symptom:** test.js "part B (not selected) does not move" (literal + OBJ-style) failed under v2 only: unselected parts moved 4.1 µm over ~10 frames after an explode; explodeAmount stuck at 1 − 1.7e-12.
+- **Reproduction:** test.html?hands=v2 (463/2 before); probe: full explode then 30 empty frames, part B trace 1.7 → 4.3 µm (v1: 0).
+- **Root cause:** manipulator.js `commandExplodeV2` sets an absolute command clamped to exactly 1, so the follow spring only approaches it asymptotically and its tail keeps moving parts after release; v1's accumulating command overshoots the clamp and freezes.
+- **Fix:** manipulator.js `stepExplodeV2`: a tail below `V2.EXPLODE_SNAP` (1e-4 amount ≈ 60 µm) moving slower than 0.01/s finishes in one step (v2 literal explode only).
+- **Regression check:** test-v2-manip.js "hands down after a full explode -> parts bit-still, amount exactly 1" (fails with the snap disabled).
+
+## 60. [A] toolwheel-test 26/5: fixed cursor spots don't fit a short window since the 150 px wheel
+
+**Status: FIXED (verified offline)** (2026-10-02). Reported by Cody-W/Cody-U (31/0 vs 26/5).
+- **Symptom:** B3/C1/D1/F2/F3 fail in a 756×469 headless window (B3 read the wheel at 400,279 not 400,300); 31/0 at 1280×800, 25/6 at 375×667.
+- **Root cause:** test, not toolWheel.js: radius 120 → 150 makes the on-screen clamp `y ≤ innerHeight − R − 40` = 279 at 469 px, so the hard-coded spots (400,300 / 500,400 / 700,450) were moved and every aim relative to them missed.
+- **Fix:** toolwheel-test.js aims relative to the viewport centre (CX, CY). 31/0 at 469, 667 and 800 px tall.
+- **Still open:** under `?hands=v2` F3 (other-hand pinch runs the lit slot) fails: v2 click is the hammer; needs a v1-only skip or a v2 wheel-click check (pointer owner).
